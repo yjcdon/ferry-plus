@@ -1,9 +1,8 @@
-# Private, never committed: AI assistant instructions and state, design docs and plans.
+# Private, never committed: AI assistant instructions, state and local plans.
 /CLAUDE.md
 CLAUDE.local.md
 /AGENTS.md
 .claude/
-/docs/
 /plans/
 
 # Machine-local build settings: the signing team (see Config/Shared.xcconfig).
@@ -15,6 +14,3 @@ CLAUDE.local.md
 DerivedData/
 xcuserdata/
 .DS_Store
-
-# Wrangler local state for the website.
-.wrangler/
