@@ -15,7 +15,7 @@ struct JobListView: View {
 
     var body: some View {
         if jobs.isEmpty {
-            if model.coordinator.jobs.isEmpty, model.account == nil {
+            if model.coordinator.jobs.isEmpty, model.account == nil, model.quark.account == nil {
                 ContentUnavailableView {
                     Label("没有任务", systemImage: "tray.and.arrow.down")
                 } actions: {
@@ -127,6 +127,8 @@ struct JobActionsMenu: View {
 /// 主窗口中选中的任务。菜单栏的“任务”菜单通过它操作选中的任务。
 struct JobSelection {
     let jobs: [Job]
+    let visibleJobs: [Job]
+    let providerFilter: Provider?
     /// 请求移除任务。主窗口决定是否先确认。
     let onRemove: ([Job], JobRemoval) -> Void
 }
@@ -256,8 +258,9 @@ struct JobStatusLine: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: job.isNetdisk ? "cloud" : "link")
-                .accessibilityLabel(job.isNetdisk ? "来自我的网盘" : "来自分享链接")
+            Image(systemName: job.provider == .baidu ? "b.circle" : "q.circle")
+                .help(job.provider.title + (job.isNetdisk ? " · 账号内文件" : " · 分享链接"))
+                .accessibilityLabel(job.provider.title + (job.isNetdisk ? "，账号内文件" : "，分享链接"))
             Text(isRemoving
                  ? "正在移除…"
                  : job.statusText(isRunning: activity.isRunning, cleansUp: model.settings.cleanupAfterDownload))
@@ -284,7 +287,7 @@ struct JobNotes: View {
                 .textSelection(.enabled)
         }
         if model.coordinator.belongsToOtherAccount(job) {
-            Text("这个任务属于另一个百度账号。登录那个账号后可以继续。")
+            Text("这个任务属于另一个\(job.provider.title)账号。登录那个账号后可以继续。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

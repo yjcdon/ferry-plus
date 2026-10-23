@@ -54,10 +54,9 @@ enum JobCategory: String, CaseIterable, Identifiable {
 /// 侧边栏：任务分类和每个分类的任务数。底部是账号。
 struct SidebarView: View {
     @Binding var selection: JobCategory?
-    @Environment(AppModel.self) private var model
-
+    @Binding var providerFilter: Provider?
+    let jobs: [Job]
     var body: some View {
-        let jobs = model.coordinator.jobs
         List(selection: $selection) {
             ForEach(JobCategory.allCases) { category in
                 Label(category.title, systemImage: category.systemImage)
@@ -65,42 +64,59 @@ struct SidebarView: View {
                     .tag(category)
             }
         }
+        .edgeBar(.top) {
+            Picker("网盘", selection: $providerFilter) {
+                Text("全部网盘").tag(Optional<Provider>.none)
+                ForEach(Provider.allCases) { provider in
+                    Text(provider.title).tag(Optional(provider))
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
         .edgeBar(.bottom) {
-            AccountView()
+            AccountView(provider: providerFilter)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
         }
     }
 }
 
-/// 两家账号入口共用应用会话；下载任务仍沿用当前百度链路。
+/// 账号入口随列表来源展示，切换来源不会切换登录会话。
 private struct AccountView: View {
+    let provider: Provider?
     @Environment(AppModel.self) private var model
     @State private var isConfirmingLogOut = false
 
     var body: some View {
         Menu {
-            Section("百度网盘") {
-                if let account = model.account {
-                    Text(account.username.isEmpty ? "百度账号" : account.username)
-                    Text(model.isLoginExpired ? "登录已失效" : "已登录")
-                    Button("重新登录百度…") { model.presentLogin() }
-                    Button("退出百度登录") { isConfirmingLogOut = model.requestLogOut() }
-                } else {
-                    Text("未登录")
-                    Button("登录百度网盘…") { model.presentLogin() }
+            if provider == nil || provider == .baidu {
+                Section("百度网盘") {
+                    if let account = model.account {
+                        Text(account.username.isEmpty ? "百度账号" : account.username)
+                        Text(model.isLoginExpired ? "登录已失效" : "已登录")
+                        Button("重新登录百度…") { model.presentLogin() }
+                        Button("退出百度登录") { isConfirmingLogOut = model.requestLogOut() }
+                    } else {
+                        Text("未登录")
+                        Button("登录百度网盘…") { model.presentLogin() }
+                    }
                 }
             }
-            Section("夸克网盘") {
-                QuarkAccountControls()
+            if provider == nil || provider == .quark {
+                Section("夸克网盘") {
+                    QuarkAccountControls()
+                }
             }
             Divider()
             SettingsLink { Text("设置…") }
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: "person.crop.circle").font(.title2)
+                Image(systemName: provider == .baidu ? "b.circle" : provider == .quark ? "q.circle" : "person.crop.circle").font(.title2)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("账号与登录")
+                    Text(accountTitle).lineLimit(1)
                     Text(accountStatus).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
@@ -110,13 +126,26 @@ private struct AccountView: View {
         .menuStyle(.button)
         .buttonStyle(.accessoryBar)
         .menuIndicator(.hidden)
-        .help("百度与夸克账号")
+        .help(provider?.title ?? "百度与夸克账号")
         .logOutConfirmation(isPresented: $isConfirmingLogOut)
     }
 
     private var accountStatus: String {
-        let baidu = model.account == nil ? "百度未登录" : "百度已登录"
-        let quark = model.quark.account == nil ? "夸克未登录" : "夸克" + model.quark.state.title
-        return baidu + " · " + quark
+        let baidu = model.account == nil ? "未登录" : model.isLoginExpired ? "登录已失效" : "已登录"
+        let quark = model.quark.state.title
+        if provider == .baidu { return "百度网盘 · " + baidu }
+        if provider == .quark { return "夸克网盘 · " + quark }
+        return "百度" + baidu + " · 夸克" + quark
+    }
+
+    private var accountTitle: String {
+        switch provider {
+        case .baidu:
+            model.account.map { $0.username.isEmpty ? "百度账号" : $0.username } ?? "登录百度网盘…"
+        case .quark:
+            model.quark.summary?.name ?? "登录夸克网盘…"
+        case nil:
+            "账号与登录"
+        }
     }
 }

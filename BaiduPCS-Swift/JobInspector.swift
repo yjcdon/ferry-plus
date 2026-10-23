@@ -98,6 +98,10 @@ private struct JobDetail: View {
             Section("统计") {
                 JobStats(job: job, activity: activity)
             }
+            Section("来源账号") {
+                LabeledContent("网盘", value: job.provider.title)
+                LabeledContent("账号", value: job.accountName ?? job.accountKey.map { "\(job.provider.title) · \($0.accountID)" } ?? "未记录账号")
+            }
             Section("位置") {
                 if let sourceLink = job.sourceLink {
                     LabeledContent("来源") {

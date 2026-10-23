@@ -53,19 +53,18 @@ private struct FerryCommands: Commands {
             .keyboardShortcut("n")
             Button("从我的网盘下载…") {
                 openWindow(id: ContentView.windowID)
-                model.presentNetdiskDownload()
+                model.presentNetdiskDownload(provider: selection?.providerFilter)
             }
-            .disabled(!model.canDownloadFromNetdisk)
         }
         CommandMenu("任务") {
             // 主窗口不是当前窗口时没有选中的任务，这些操作都不可用。
             JobActionsMenu(jobs: selection?.jobs ?? [], showsUnavailable: true) { selection?.onRemove($0, $1) }
                 .environment(model)
             Divider()
-            let jobs = model.coordinator.jobs
-            Button("全部暂停") { model.pauseAll(jobs) }
+            let jobs = selection?.visibleJobs ?? []
+            Button("暂停当前列表") { model.pauseAll(jobs) }
                 .disabled(model.pausableJobs(in: jobs).isEmpty)
-            Button("全部继续") { model.resumeAll(jobs) }
+            Button("继续当前列表") { model.resumeAll(jobs) }
                 .disabled(model.resumableJobs(in: jobs).isEmpty)
         }
         CommandMenu("账号") {

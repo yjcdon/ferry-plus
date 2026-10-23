@@ -6,6 +6,8 @@ import SwiftUI
 struct MainView: View {
     @Environment(AppModel.self) private var model
     @State private var category: JobCategory? = .all
+    @State private var providerFilter: Provider?
+    @State private var addedJobNotice: Job?
     @State private var selection: Set<Job.ID> = []
     @SceneStorage("isInspectorPresented") private var isInspectorPresented = false
     @State private var searchText = ""
@@ -14,20 +16,29 @@ struct MainView: View {
 
     var body: some View {
         let current = category ?? .all
-        let categoryJobs = model.coordinator.jobs.filter(current.contains)
+        let providerJobs = model.coordinator.jobs.filter { providerFilter == nil || $0.provider == providerFilter }
+        let categoryJobs = providerJobs.filter(current.contains)
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let jobs = query.isEmpty ? categoryJobs : categoryJobs.filter { $0.matches(query) }
         // 只算列表中显示的任务。切换分类或搜索后，看不到的任务不再算作选中。
         let selectedJobs = jobs.filter { selection.contains($0.id) }
         NavigationSplitView {
-            SidebarView(selection: $category)
+            SidebarView(selection: $category, providerFilter: $providerFilter, jobs: providerJobs)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
         } detail: {
             JobListView(jobs: jobs, category: current, searchText: query, selection: $selection, onRemove: requestRemoval)
-                .edgeBar(.top) { Banners() }
+                .edgeBar(.top) {
+                    Banners()
+                    if let job = addedJobNotice {
+                        Banner(message: "已添加\(job.provider.title)任务“\(job.title)”") {
+                            Button("查看任务") { revealAddedJob(job) }
+                            Button("关闭") { addedJobNotice = nil }
+                        }
+                    }
+                }
                 .edgeBar(.bottom) { StatusBar() }
-                .navigationTitle(current.title)
-                .navigationSubtitle("\(categoryJobs.count) 个任务")
+                .navigationTitle(providerFilter.map { "\($0.title) · \(current.title)" } ?? current.title)
+                .navigationSubtitle("\(jobs.count) 个任务")
                 .searchable(text: $searchText, placement: .toolbar, prompt: "搜索任务")
                 .inspector(isPresented: $isInspectorPresented) {
                     JobInspector(jobs: selectedJobs, onRemove: requestRemoval)
@@ -42,18 +53,17 @@ struct MainView: View {
                                 Label("添加分享链接…", systemImage: "link")
                             }
                             Button {
-                                model.presentNetdiskDownload()
+                                model.presentNetdiskDownload(provider: providerFilter)
                             } label: {
                                 Label("从我的网盘下载…", systemImage: "cloud")
                             }
-                            .disabled(!model.canDownloadFromNetdisk)
                         } label: {
                             Label("添加任务", systemImage: "plus")
                         }
                         .help("添加任务")
                     }
                     ToolbarItem(placement: .primaryAction) {
-                        PauseResumeAllButton()
+                        PauseResumeAllButton(jobs: jobs)
                     }
                     ToolbarItem(placement: .primaryAction) {
                         Button {
@@ -69,17 +79,22 @@ struct MainView: View {
         #if DEBUG
         .task { await showDemoSelection() }
         #endif
-        .focusedSceneValue(\.jobSelection, JobSelection(jobs: selectedJobs, onRemove: requestRemoval))
+        .focusedSceneValue(\.jobSelection, JobSelection(jobs: selectedJobs, visibleJobs: jobs, providerFilter: providerFilter, onRemove: requestRemoval))
+        .onChange(of: jobs.map(\.id)) { _, ids in selection.formIntersection(ids) }
+        .onChange(of: model.lastAddedJobID) { _, id in
+            guard let id, let job = model.coordinator.jobs.first(where: { $0.id == id }) else { return }
+            if jobs.contains(where: { $0.id == id }) { selection = [id] } else { addedJobNotice = job }
+        }
         .confirmationDialog(
             pendingRemoval?.title ?? "",
             isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
             presenting: pendingRemoval
         ) { pending in
             Button(pending.removal == .trashingFiles ? "移到废纸篓" : "移除", role: .destructive) {
-                remove(pending.jobs, pending.removal)
+                remove(pending.jobs, pending.removal, cleanup: pending.cleanup)
             }
         } message: { pending in
-            Text(pending.message(cleansUp: model.settings.cleanupAfterDownload))
+            Text(pending.message)
         }
         .alert(
             "有些文件没有移到废纸篓",
@@ -98,16 +113,32 @@ struct MainView: View {
         let jobs = jobs.filter { !model.coordinator.removingJobs.contains($0.id) }
         guard model.coordinator.isStarted, !jobs.isEmpty else { return }
         if removal == .trashingFiles || jobs.contains(where: \.isUnfinished) {
-            pendingRemoval = PendingRemoval(jobs: jobs, removal: removal)
+            pendingRemoval = PendingRemoval(jobs: jobs, removal: removal, cleanup: cleanupPlan(for: jobs))
         } else {
-            remove(jobs, removal)
+            remove(jobs, removal, cleanup: cleanupPlan(for: jobs))
         }
     }
 
-    private func remove(_ jobs: [Job], _ removal: JobRemoval) {
+    /// 发起移除时固定远端清理选择，设置变化不会扩大本次清理。
+    private func cleanupPlan(for jobs: [Job]) -> [Job.ID: Bool] {
+        Dictionary(uniqueKeysWithValues: jobs.map {
+            ($0.id, $0.hasJobDirectory && !$0.isCleanedUp && model.settings.cleanupAfterDownload(for: $0.provider))
+        })
+    }
+
+    /// 切到新增任务的来源并清除会隐藏它的筛选。
+    private func revealAddedJob(_ job: Job) {
+        providerFilter = job.provider
+        category = .all
+        searchText = ""
+        selection = [job.id]
+        addedJobNotice = nil
+    }
+
+    private func remove(_ jobs: [Job], _ removal: JobRemoval, cleanup: [Job.ID: Bool]) {
         for job in jobs {
             selection.remove(job.id)
-            model.remove(job, trashingFiles: removal == .trashingFiles)
+            model.remove(job, trashingFiles: removal == .trashingFiles, cleanupConfirmed: cleanup[job.id])
         }
     }
 
@@ -116,7 +147,11 @@ struct MainView: View {
     private func showDemoSelection() async {
         guard DemoData.isEnabled else { return }
         while !model.coordinator.isStarted {
-            try? await Task.sleep(for: .milliseconds(50))
+            do {
+                try await Task.sleep(for: .milliseconds(50))
+            } catch {
+                return
+            }
         }
         if let value = DemoData.category.flatMap(JobCategory.init(rawValue:)) {
             category = value
@@ -133,14 +168,15 @@ struct MainView: View {
 private struct PendingRemoval {
     let jobs: [Job]
     let removal: JobRemoval
+    let cleanup: [Job.ID: Bool]
 
     var title: String {
         let subject = jobs.count == 1 ? "移除“\(jobs[0].title)”" : "移除 \(jobs.count) 个任务"
         return removal == .trashingFiles ? subject + "并删除文件？" : subject + "？"
     }
 
-    /// `cleansUp`：设置中的清理开关。
-    func message(cleansUp: Bool) -> String {
+    /// 按发起时固定的清理计划说明两家的移除范围。
+    var message: String {
         var message: String
         switch removal {
         case .keepingFiles:
@@ -151,35 +187,36 @@ private struct PendingRemoval {
                 message += "未完成的下载会取消，并删除已下载的部分。"
             }
         }
-        // 网盘任务没有转存文件，所以只数有任务子目录的任务。
-        let withJobDirectory = jobs.count(where: \.hasJobDirectory)
-        if cleansUp, withJobDirectory > 0 {
-            message += withJobDirectory == 1 ? "网盘中这个任务的转存文件也会删除。" : "网盘中这些任务的转存文件也会删除。"
+        for provider in Provider.allCases {
+            let targets = jobs.filter { $0.provider == provider }
+            guard !targets.isEmpty else { continue }
+            let directories = targets.count { $0.hasJobDirectory && !$0.isCleanedUp && cleanup[$0.id] == true }
+            message += "\n\(provider.title)：\(targets.count) 个任务；清理 \(directories) 个任务转存目录。"
         }
         return message
     }
 }
 
-/// 有下载中且未暂停的任务时为“全部暂停”；否则有已暂停的任务时为“全部继续”；两者都没有时为不可用的“全部暂停”。
+/// 当前列表有可暂停任务时优先暂停，否则继续已暂停任务；无目标时禁用。
 private struct PauseResumeAllButton: View {
+    let jobs: [Job]
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        let jobs = model.coordinator.jobs
         if model.pausableJobs(in: jobs).isEmpty, !model.resumableJobs(in: jobs).isEmpty {
             Button {
                 model.resumeAll(jobs)
             } label: {
-                Label("全部继续", systemImage: "play.fill")
+                Label("继续当前列表", systemImage: "play.fill")
             }
-            .help("全部继续")
+            .help("继续当前列表的 \(model.resumableJobs(in: jobs).count) 个任务")
         } else {
             Button {
                 model.pauseAll(jobs)
             } label: {
-                Label("全部暂停", systemImage: "pause.fill")
+                Label("暂停当前列表", systemImage: "pause.fill")
             }
-            .help("全部暂停")
+            .help("暂停当前列表的 \(model.pausableJobs(in: jobs).count) 个任务")
             .disabled(model.pausableJobs(in: jobs).isEmpty)
         }
     }
@@ -196,7 +233,7 @@ private struct StatusBar: View {
         let speed = activities.reduce(0) { $0 + $1.progress.bytesPerSecond }
         if activities.contains(where: \.isRunning), speed > 0 {
             HStack {
-                Label("\(Int64(speed).byteCount)/s", systemImage: "arrow.down")
+                Label("全部网盘 · \(Int64(speed).byteCount)/s", systemImage: "arrow.down")
                     .help("全部任务的总下载速度")
                     .accessibilityLabel("总下载速度 \(Int64(speed).byteCount)/s")
                 Spacer()
