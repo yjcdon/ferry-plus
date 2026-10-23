@@ -41,6 +41,8 @@ open ".build/Ferry Plus.app"
 
 脚本输出可直接运行的 `.app`。SDK 可通过 `FERRY_MACOS_SDK` 指定，具体构建和登录验证记录见 [登录说明](docs/login.md)。
 
+本机构建与 Release 工作流均生成非沙盒 App，使用相同的应用标识及用户数据目录，保持登录、设置和任务存储位置一致。
+
 现有 Swift 包测试同样可使用 Command Line Tools 执行：
 
 ```sh
