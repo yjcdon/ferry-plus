@@ -37,9 +37,14 @@ struct NetdiskDownloadView: View {
         }
         .frame(minWidth: 600, idealWidth: 640, minHeight: 460, idealHeight: 540)
         .task(id: generation) { await load() }
-        .onChange(of: model.account?.uk) { if provider == .baidu { generation += 1 } }
-        .onChange(of: model.quark.summary?.key) { if provider == .quark { generation += 1 } }
+        .onChange(of: sessionIdentity) { generation += 1 }
         .onChange(of: provider) { tree = nil; generation += 1 }
+    }
+
+    /// 同账号重新登录和代理更新也会撤销旧适配器，文件树必须使用新的会话。
+    private var sessionIdentity: ObjectIdentifier? {
+        guard let provider, let disk = model.coordinator.netdisks[provider] else { return nil }
+        return ObjectIdentifier(disk)
     }
 
     private var header: some View {
@@ -82,6 +87,7 @@ struct NetdiskDownloadView: View {
 
     private var footer: some View {
         VStack(alignment: .leading) {
+            if let tree { FileSelectionSummary(entries: tree.selectedEntries) }
             if let folderError {
                 Label(folderError, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)

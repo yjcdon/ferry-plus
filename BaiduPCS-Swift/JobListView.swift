@@ -6,6 +6,7 @@ import SwiftUI
 struct JobListView: View {
     let jobs: [Job]
     let category: JobCategory
+    let providerFilter: Provider?
     /// 搜索的文字。不搜索时为空。
     let searchText: String
     @Binding var selection: Set<Job.ID>
@@ -19,7 +20,12 @@ struct JobListView: View {
                 ContentUnavailableView {
                     Label("没有任务", systemImage: "tray.and.arrow.down")
                 } actions: {
-                    Button("登录…") { model.presentLogin() }
+                    if let providerFilter {
+                        Button("登录\(providerFilter.title)…") { model.presentLogin(for: providerFilter) }
+                    } else {
+                        Button("登录百度网盘…") { model.presentLogin(for: .baidu) }
+                        Button("登录夸克网盘…") { model.presentLogin(for: .quark) }
+                    }
                 }
             } else if model.coordinator.jobs.isEmpty {
                 ContentUnavailableView("没有任务", systemImage: "tray.and.arrow.down")
@@ -263,7 +269,7 @@ struct JobStatusLine: View {
                 .accessibilityLabel(job.provider.title + (job.isNetdisk ? "，账号内文件" : "，分享链接"))
             Text(isRemoving
                  ? "正在移除…"
-                 : job.statusText(isRunning: activity.isRunning, cleansUp: model.settings.cleanupAfterDownload))
+                 : job.statusText(isRunning: activity.isRunning, cleansUp: model.settings.cleanupAfterDownload(for: job.provider)))
             if !job.files.isEmpty {
                 Text(job.phase == .downloading && !job.isPaused ? activity.progress.summary : activity.progress.sizeSummary)
             }
@@ -286,10 +292,12 @@ struct JobNotes: View {
                 .foregroundStyle(.red)
                 .textSelection(.enabled)
         }
-        if model.coordinator.belongsToOtherAccount(job) {
-            Text("这个任务属于另一个\(job.provider.title)账号。登录那个账号后可以继续。")
+        if let owner = job.accountKey, model.accountKey(for: job.provider) != owner {
+            Text("这个任务属于\(job.provider.title)账号“\(job.accountName ?? owner.accountID)”（\(owner.accountID)）。登录原账号后可以继续。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+            Button("登录任务所属的\(job.provider.title)账号…") { model.presentLogin(for: job.provider) }
+                .font(.caption)
         }
         if let warning = job.warning {
             Text(warning)

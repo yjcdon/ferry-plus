@@ -101,6 +101,7 @@ private struct JobDetail: View {
             Section("来源账号") {
                 LabeledContent("网盘", value: job.provider.title)
                 LabeledContent("账号", value: job.accountName ?? job.accountKey.map { "\(job.provider.title) · \($0.accountID)" } ?? "未记录账号")
+                LabeledContent("创建时间", value: job.createdAt.formatted(date: .abbreviated, time: .standard))
             }
             Section("位置") {
                 if let sourceLink = job.sourceLink {
@@ -173,7 +174,7 @@ private struct JobStatusText: View {
     var body: some View {
         Text(isRemoving
              ? "正在移除…"
-             : job.statusText(isRunning: activity.isRunning, cleansUp: model.settings.cleanupAfterDownload))
+             : job.statusText(isRunning: activity.isRunning, cleansUp: model.settings.cleanupAfterDownload(for: job.provider)))
     }
 }
 

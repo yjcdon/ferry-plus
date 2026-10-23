@@ -72,6 +72,13 @@ struct AddLinkView: View {
                     .disabled(!canOpen)
             }
             .disabled(isOpening)
+            if let link = DiskShareLink.parse(linkText) {
+                let account = model.accountKey(for: link.provider)
+                Label("\(link.provider.title) · \(account == nil ? "未登录" : model.coordinator.accountNames[link.provider] ?? "已登录账号")",
+                      systemImage: link.provider == .baidu ? "b.circle" : "q.circle")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
             if let pasteHint {
                 Label(pasteHint, systemImage: "checkmark.circle")
                     .font(.callout)
@@ -117,6 +124,9 @@ struct AddLinkView: View {
 
     private var footer: some View {
         VStack(alignment: .leading) {
+            if let share {
+                FileSelectionSummary(entries: share.tree.selectedEntries)
+            }
             if let folderError {
                 Label(folderError, systemImage: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)

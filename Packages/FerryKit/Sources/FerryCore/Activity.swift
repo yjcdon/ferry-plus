@@ -7,6 +7,8 @@ public final class JobActivity {
     public internal(set) var progress = JobProgress(receivedBytes: 0, totalBytes: 0, bytesPerSecond: 0)
     /// 有正在下载（不是排队）的文件。
     public internal(set) var isRunning = false
+    /// 使用任务增量统计，界面汇总时不必在每次进度事件遍历全部文件。
+    public internal(set) var completedFileCount = 0
 
     init() {}
 }

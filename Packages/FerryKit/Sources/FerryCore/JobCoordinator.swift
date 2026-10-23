@@ -9,6 +9,12 @@ public struct JobProgress: Sendable, Hashable {
     public var totalBytes: Int64
     public var bytesPerSecond: Double
 
+    public init(receivedBytes: Int64, totalBytes: Int64, bytesPerSecond: Double) {
+        self.receivedBytes = receivedBytes
+        self.totalBytes = totalBytes
+        self.bytesPerSecond = bytesPerSecond
+    }
+
     public var fractionCompleted: Double {
         totalBytes > 0 ? min(1, Double(receivedBytes) / Double(totalBytes)) : 0
     }
@@ -1012,6 +1018,8 @@ public final class JobCoordinator {
         }
         if activity.progress != progress { activity.progress = progress }
         if activity.isRunning != isRunning { activity.isRunning = isRunning }
+        let completed = job.files.count - tally.pendingCount
+        if activity.completedFileCount != completed { activity.completedFileCount = completed }
     }
 
     static func message(for error: any Error) -> String {
@@ -1133,7 +1141,10 @@ extension DownloadFailure {
     public var message: String {
         switch self {
         case .network(let code): "网络错误：" + URLError(code).localizedDescription
-        case .httpStatus(let status, _): "服务器返回 HTTP \(status)。"
+        case .httpStatus(429, _), .httpStatus(509, _): "网盘请求受到限流，请降低并发数，稍后继续下载。"
+        case .httpStatus(401, _), .httpStatus(403, _): "下载权限不足或链接已失效，请重试刷新链接；仍失败时重新登录对应网盘。"
+        case .httpStatus(404, _): "文件或下载链接不存在，请重试；仍失败时到对应网盘确认文件是否可用。"
+        case .httpStatus(let status, _): "服务器返回 HTTP \(status)，请稍后重试。"
         case .invalidResponse(let reason): "下载的数据不正确（\(reason)）。"
         case .resolveFailed(let reason): "没有取得下载链接：\(reason)"
         case .fileSystem(let reason): "写入文件失败：\(reason)"

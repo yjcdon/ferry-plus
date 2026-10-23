@@ -1,5 +1,19 @@
 import SwiftUI
 
+/// 只汇总已知文件大小；目录大小在下载准备时递归读取，不将未知大小显示为零。
+struct FileSelectionSummary<Entry: FileTreeEntry>: View {
+    let entries: [Entry]
+
+    var body: some View {
+        let directories = entries.count(where: \.isDirectory)
+        let knownSize = entries.filter { !$0.isDirectory }.reduce(Int64(0)) { $0 + $1.size }
+        Text("已选 \(entries.count) 项 · 已知文件大小 \(knownSize.byteCount)" +
+             (directories > 0 ? " · \(directories) 个目录大小待计算" : ""))
+            .font(.callout)
+            .foregroundStyle(.secondary)
+    }
+}
+
 /// 文件树中的一行。目录展开时加载子项。
 ///
 /// 调用方可以在名字后面加标签（`badge`），并决定行尾的列（`columns`，默认只有文件大小）。

@@ -26,7 +26,7 @@ struct MainView: View {
             SidebarView(selection: $category, providerFilter: $providerFilter, jobs: providerJobs)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
         } detail: {
-            JobListView(jobs: jobs, category: current, searchText: query, selection: $selection, onRemove: requestRemoval)
+            JobListView(jobs: jobs, category: current, providerFilter: providerFilter, searchText: query, selection: $selection, onRemove: requestRemoval)
                 .edgeBar(.top) {
                     Banners()
                     if let job = addedJobNotice {
@@ -222,21 +222,56 @@ private struct PauseResumeAllButton: View {
     }
 }
 
-/// 任务列表底部的状态栏：全部任务的总下载速度。没有在下载时不显示。
+/// 汇总两家全部任务；筛选和搜索不改变全局进度、文件数及速度。
 private struct StatusBar: View {
     @Environment(AppModel.self) private var model
+    @State private var showsStatistics = false
 
     var body: some View {
-        let activities = model.coordinator.jobs
-            .filter { $0.phase == .downloading }
-            .map { model.coordinator.activity(of: $0.id) }
-        let speed = activities.reduce(0) { $0 + $1.progress.bytesPerSecond }
-        if activities.contains(where: \.isRunning), speed > 0 {
+        let jobs = model.coordinator.jobs
+        let activities = jobs.map { model.coordinator.activity(of: $0.id) }
+        let progress = JobProgress(
+            receivedBytes: activities.reduce(0) { $0 + $1.progress.receivedBytes },
+            totalBytes: activities.reduce(0) { $0 + $1.progress.totalBytes },
+            bytesPerSecond: activities.reduce(0) { $0 + $1.progress.bytesPerSecond })
+        let totalFiles = jobs.reduce(0) { $0 + $1.files.count }
+        let completedFiles = activities.reduce(0) { $0 + $1.completedFileCount }
+        let preparing = jobs.count { $0.phase == .transferring }
+        let summary = preparing == 0 ? progress.summary : [progress.sizeSummary, progress.speedText].compactMap { $0 }.joined(separator: " · ")
+        if !jobs.isEmpty {
             HStack {
-                Label("全部网盘 · \(Int64(speed).byteCount)/s", systemImage: "arrow.down")
-                    .help("全部任务的总下载速度")
-                    .accessibilityLabel("总下载速度 \(Int64(speed).byteCount)/s")
-                Spacer()
+                Label("全部网盘", systemImage: "arrow.down")
+                    .fixedSize()
+                Text(summary)
+                    .truncationMode(.tail)
+                    .help(summary)
+                Spacer(minLength: 0)
+                Text("\(completedFiles)/\(totalFiles) 文件")
+                    .fixedSize()
+                Button {
+                    showsStatistics.toggle()
+                } label: {
+                    Image(systemName: "info.circle")
+                }
+                .buttonStyle(.plain)
+                .help("全部网盘下载统计")
+                .accessibilityLabel("全部网盘下载统计")
+                .popover(isPresented: $showsStatistics) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("全部网盘").font(.headline)
+                        ProgressView(value: progress.fractionCompleted)
+                        LabeledContent("已下载 / 已确定总大小", value: progress.sizeSummary)
+                        LabeledContent("总速度", value: progress.speedText ?? "—")
+                        LabeledContent("预计剩余时间", value: preparing == 0 ? progress.remainingTimeText ?? "—" : "等待文件准备完成")
+                        LabeledContent("已完成文件", value: "\(completedFiles) / \(totalFiles)")
+                        if preparing > 0 {
+                            Text("\(preparing) 个任务正在准备，总大小和文件数尚未确定。")
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .padding()
+                    .frame(minWidth: 300)
+                }
             }
             .font(.callout)
             .foregroundStyle(.secondary)

@@ -68,5 +68,6 @@ import Testing
         try await waitUntil("complete progress") { activity.progress.fractionCompleted == 1 }
         let finished = try #require(coordinator.job(job.id))
         #expect(activity.progress == coordinator.progress(of: finished))
+        #expect(activity.completedFileCount == finished.files.count)
     }
 }
