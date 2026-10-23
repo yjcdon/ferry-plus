@@ -66,6 +66,7 @@ final class AppModel {
     /// 最近一次换引擎会话的 Task。下一次先等它完成，因为各个 Task 到达引擎的顺序不一定和创建顺序相同。
     @ObservationIgnored private var sessionReplacement: Task<Void, Never>?
     @ObservationIgnored private var hasStarted = false
+    @ObservationIgnored private var isShuttingDown = false
     @ObservationIgnored private var hasRequestedNotifications = false
     /// 最近一次读取剪贴板的结果。剪贴板没变时不再读取，所以每次复制最多触发一次系统的剪贴板隐私提示，
     /// 也最多自动打开一次添加链接。
@@ -163,6 +164,7 @@ final class AppModel {
     }
 
     func shutdown() async {
+        isShuttingDown = true
         await coordinator.shutdown()
         downloadActivity.close()
         await sessionReplacement?.value
@@ -418,9 +420,9 @@ final class AppModel {
     /// 应用变为活跃时调用。剪贴板中有新复制的分享链接时，打开添加链接，由 sheet 填入。
     /// 未登录、已有 sheet、剪贴板已经读过（包括手动打开添加链接时），或链接已经是一个任务的来源时不打开。
     func detectCopiedLink() async {
-        guard settings.detectsCopiedLinks, coordinator.isStarted, sheet == nil,
+        guard !isShuttingDown, settings.detectsCopiedLinks, coordinator.isStarted, sheet == nil,
               pasteboardCheck?.changeCount != NSPasteboard.general.changeCount else { return }
-        guard let link = await shareLinkOnPasteboard(), sheet == nil,
+        guard let link = await shareLinkOnPasteboard(), !Task.isCancelled, !isShuttingDown, sheet == nil,
               !coordinator.jobs.contains(where: { $0.link?.surl == link.surl }) else { return }
         openMainWindow?()
         sheet = .addLink

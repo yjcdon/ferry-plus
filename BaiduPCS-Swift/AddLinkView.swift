@@ -133,8 +133,10 @@ struct AddLinkView: View {
         }
     }
 
+    /// 剪贴板检测结束后复核视图任务，关闭窗口不再启动分享请求。
     private func fillFromPasteboard() async {
-        guard linkText.isEmpty, let link = await model.shareLinkOnPasteboard(), linkText.isEmpty else { return }
+        guard linkText.isEmpty, let link = await model.shareLinkOnPasteboard(),
+              !Task.isCancelled, linkText.isEmpty else { return }
         fillAndOpen(link)
         pasted = (linkText, password)
     }
