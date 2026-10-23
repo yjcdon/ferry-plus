@@ -104,7 +104,7 @@ private let megabyte = 1 << 20
         try await waitUntil("1 active request") { fixture.server.activeRequests == 1 }
 
         await engine.updateConfiguration(.test(connections: 3))
-        // 放行第一个分片。它完成后，下载要领取更多分片，用满 3 个连接。
+        // 重配置先保存并取消旧请求，再由新预算领取分片，用满 3 个连接。
         fixture.server.setStallRule { $0.range?.first == 0 ? nil : 64 * kilobyte }
         try await waitUntil("3 active requests") { fixture.server.activeRequests == 3 }
         try await Task.sleep(for: .milliseconds(50))
@@ -113,6 +113,78 @@ private let megabyte = 1 << 20
         fixture.server.setStall(after: nil)
         _ = try await engine.waitForCompletion(of: "a.bin")
         #expect(fixture.contents("a.bin") == data)
+    }
+
+    /// 两种预算都合法，但旧文件数和新连接数不能在收尾期间相乘。
+    @Test(arguments: [true, false])
+    func reconfigurationDrainsWorkersBeforeApplyingNewBudget(raisingConnections: Bool) async throws {
+        let fixture = Fixture()
+        let names = (0..<10).map { "file\($0).bin" }
+        let data = names.map { fixture.addFile($0, size: 3 * megabyte) }
+        fixture.server.setStall(after: 64 * kilobyte)
+        let source = GatedSource(fixture.source, gating: Set(names))
+        defer {
+            source.open()
+            fixture.server.setStall(after: nil)
+        }
+        let initial = DownloadConfiguration.test(files: raisingConnections ? 10 : 2,
+                                                 connections: raisingConnections ? 1 : 10)
+        let updated = DownloadConfiguration.test(files: raisingConnections ? 2 : 10,
+                                                 connections: raisingConnections ? 10 : 1)
+        let engine = DownloadEngine(stateDirectory: fixture.stateDirectory, source: source,
+                                    configuration: initial, session: fixture.session)
+        for name in names {
+            var request = fixture.request(name)
+            // 模拟旧任务曾保存较高的每文件连接数；实际并发仍应受当前全局配置约束。
+            request.connections = 10
+            try await engine.enqueue(request)
+        }
+        let firstWorkers = Array(names.prefix(initial.maxConcurrentFiles))
+        try await waitUntil("initial workers to wait for their links") {
+            firstWorkers.allSatisfy(source.hasEntered)
+        }
+        let update = Task { await engine.updateConfiguration(updated) }
+        try await waitUntil("old workers to be cancelled before applying the budget") {
+            firstWorkers.allSatisfy(source.wasCancelled)
+        }
+        #expect(fixture.server.log.isEmpty)
+        // 相同预算下的后续普通设置使用最新值，但不能解开正在收尾的屏障。
+        var latest = updated
+        latest.maxRetries = 1
+        await engine.updateConfiguration(latest)
+        #expect(fixture.server.log.isEmpty)
+        source.open()
+        await update.value
+        let expectedConnections = updated.maxConcurrentFiles * updated.segmentsPerFile
+        try await waitUntil("new budget to fill its slots") { fixture.server.activeRequests == expectedConnections }
+        #expect(await engine.snapshots().filter { $0.state == .running }.count == updated.maxConcurrentFiles)
+        #expect(fixture.server.maxActive == expectedConnections)
+        fixture.server.setStall(after: nil)
+        for (name, expected) in zip(names, data) {
+            _ = try await engine.waitForCompletion(of: name)
+            #expect(fixture.contents(name) == expected)
+        }
+        await engine.shutdown()
+    }
+
+    /// 调整预算不得把用户已经暂停的下载重新排队。
+    @Test func reconfigurationPreservesExplicitPause() async throws {
+        let fixture = Fixture()
+        fixture.addFile("a.bin", size: megabyte)
+        fixture.server.setStall(after: 64 * kilobyte)
+        defer { fixture.server.setStall(after: nil) }
+        let engine = fixture.makeEngine(.test(files: 1, connections: 1))
+        try await engine.enqueue(fixture.request("a.bin"))
+        try await waitUntil("file to receive bytes") {
+            (await engine.snapshot(id: "a.bin")?.receivedBytes ?? 0) > 0
+        }
+        await engine.pause(id: "a.bin")
+        let saved = try #require(try fixture.savedRecords().first)
+        await engine.updateConfiguration(.test(files: 2, connections: 10))
+        #expect(await engine.snapshot(id: "a.bin")?.state == .paused)
+        #expect(try fixture.savedRecords().first?.receivedBytes == saved.receivedBytes)
+        #expect(try fixture.savedRecords().first?.isPaused == true)
+        await engine.shutdown()
     }
 
     @Test func retriesTransientErrors() async throws {
@@ -606,6 +678,42 @@ private let megabyte = 1 << 20
         #expect(Set(locations.map(\.lastPathComponent)) == ["same.bin", "same (1).bin"])
         #expect(try Data(contentsOf: locations[0]) == first)
         #expect(try Data(contentsOf: locations[1]) == second)
+    }
+
+    /// 已存在的字节不能因 Range 能力改变或恢复不可续传下载而静默截断。
+    @Test(arguments: [true, false])
+    func unsupportedResumePreservesCheckpointAndRequestsNewDownload(previouslySupportedRanges: Bool) async throws {
+        let fixture = Fixture()
+        let data = fixture.addFile("a.bin", size: megabyte)
+        fixture.server.setSupportsRanges(false)
+        let request = fixture.request("a.bin")
+        let prefix = Data(data.prefix(128 * kilobyte))
+        try FileManager.default.createDirectory(at: fixture.downloadsDirectory, withIntermediateDirectories: true)
+        try prefix.write(to: request.temporaryURL)
+        var record = DownloadRecord(request: request)
+        record.acceptsRanges = previouslySupportedRanges
+        record.segments = [Segment(start: 0, end: Int64(data.count), received: Int64(prefix.count))]
+        try StateStore(directory: fixture.stateDirectory).save(record)
+        let engine = fixture.makeEngine()
+
+        try await engine.restore()
+        try await waitUntil("unsupported resume to fail") {
+            if case .failed = await engine.snapshot(id: request.id)?.state { true } else { false }
+        }
+        let snapshot = try #require(await engine.snapshot(id: request.id))
+        guard case .failed(.invalidResponse(let message)) = snapshot.state else {
+            Issue.record("unexpected state \(snapshot.state)")
+            return
+        }
+        #expect(message.contains("不支持断点续传"))
+        #expect(message.contains("重新添加"))
+        #expect(snapshot.receivedBytes == Int64(prefix.count))
+        #expect(try Data(contentsOf: request.temporaryURL) == prefix)
+        #expect(try fixture.savedRecords().first?.receivedBytes == Int64(prefix.count))
+        #expect(!FileManager.default.fileExists(atPath: request.destination.path))
+        #expect(fixture.server.log.allSatisfy { $0.range != nil })
+        if !previouslySupportedRanges { #expect(fixture.server.log.isEmpty) }
+        await engine.shutdown()
     }
 
     @Test(arguments: [true, false])

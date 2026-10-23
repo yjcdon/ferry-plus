@@ -36,6 +36,8 @@ public actor DownloadEngine {
     private let broadcaster = EventBroadcaster()
     private var ticker: Task<Void, Never>?
     private var isShutDown = false
+    private var pendingConfiguration: DownloadConfiguration?
+    private var configurationRevision = 0
 
     /// 引擎用 `sessionConfiguration` 创建会话，并负责 invalidate 它。
     public init(
@@ -227,9 +229,27 @@ public actor DownloadEngine {
         schedule()
     }
 
-    /// 立即生效。调小并发数时不打断进行中的请求，只是不再开始新的。分片大小只影响还没规划分片的下载。
-    public func updateConfiguration(_ configuration: DownloadConfiguration) {
-        settings.value = configuration
+    /// 文件数或连接数改变时先取消并保存现有分片，再按最新预算排队，避免新旧连接预算叠加。
+    /// 其他参数直接生效；分片大小只影响尚未规划分片的下载。
+    public func updateConfiguration(_ configuration: DownloadConfiguration) async {
+        let previous = pendingConfiguration ?? settings.value
+        let changesBudget = previous.maxConcurrentFiles != configuration.maxConcurrentFiles
+            || previous.segmentsPerFile != configuration.segmentsPerFile
+        guard changesBudget else {
+            if pendingConfiguration != nil { pendingConfiguration = configuration }
+            else { settings.value = configuration }
+            return
+        }
+        pendingConfiguration = configuration
+        configurationRevision += 1
+        let revision = configurationRevision
+        let draining = Array(workers.values)
+        for worker in draining { worker.cancel() }
+        for worker in draining { await worker.value }
+        // 快速修改时最后一次调用负责应用完整的最新配置；旧调用不能解开调度屏障。
+        guard revision == configurationRevision, let latest = pendingConfiguration else { return }
+        settings.value = latest
+        pendingConfiguration = nil
         schedule()
     }
 
@@ -252,7 +272,7 @@ public actor DownloadEngine {
     }
 
     private func schedule() {
-        guard !isShutDown else { return }
+        guard !isShutDown, pendingConfiguration == nil else { return }
         // 移出列表的取消任务仍可能收尾，结束前继续占用全局并发名额。
         var active = workers.count
         for id in order where active < configuration.maxConcurrentFiles {
@@ -305,7 +325,7 @@ public actor DownloadEngine {
         case .cancelled:
             try? store.save(entry.record.value)
             if entry.state == .running {
-                if restarts, !isShutDown {
+                if restarts, !isShutDown, pendingConfiguration == nil {
                     // 换会话时不经过 queued：界面一直显示下载中，并发名额也不会让给排在后面的下载。
                     entries[id] = entry
                     start(id)

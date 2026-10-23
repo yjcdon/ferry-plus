@@ -71,6 +71,9 @@ struct FileTransfer: Sendable {
     // MARK: - 步骤
 
     private func prepareTemporaryFile() throws {
+        if record.value.acceptsRanges == false, record.value.receivedBytes > 0 {
+            throw FetchError.invalidResponse("远端不支持断点续传，已有下载字节已保留。请重新添加任务以重新下载")
+        }
         let fileManager = FileManager.default
         do {
             try fileManager.createDirectory(at: temporaryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -104,7 +107,10 @@ struct FileTransfer: Sendable {
                 try await downloadSegments()
                 return
             } catch FetchError.rangeIgnored {
-                // 服务器不支持 Range：退化为单连接，从头下载。
+                guard record.value.receivedBytes == 0 else {
+                    throw FetchError.invalidResponse("远端不支持断点续传，已有下载字节已保留。请重新添加任务以重新下载")
+                }
+                // 尚未收到任何字节时，允许单连接从头下载。
                 record.update { record in
                     record.acceptsRanges = false
                     record.segments = [Segment(start: 0, end: record.totalBytes)]
