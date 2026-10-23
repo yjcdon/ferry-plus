@@ -54,22 +54,38 @@ public enum QuarkError: LocalizedError, Sendable, Equatable {
     case invalidResponse
     case httpStatus(Int)
     case serviceCode(String)
+    case serviceFailure(code: String, message: String)
     case loginExpired
     case accountChanged
     case missingIdentity
     case missingCredential
     case unsafeRedirect
+    case invalidShareLink
+    case invalidSelection
+    case taskTimedOut(String)
+    case taskFailed(String)
+    case shareRequiresCode
+    case invalidPasscode
+    case shareUnavailable
 
     public var errorDescription: String? {
         switch self {
         case .invalidResponse: "夸克接口返回了无法识别的数据，请稍后重试。"
         case .httpStatus(let code): "夸克请求失败（HTTP \(code)）。"
         case .serviceCode(let code): "夸克请求未成功（业务码 \(code)），请稍后重试。"
+        case .serviceFailure(let code, let message): "夸克请求未成功：\(message)（\(code)）。"
         case .loginExpired: "夸克登录已失效，请在官方页面重新登录。"
         case .accountChanged: "返回的夸克账号与已保存账号不同，请重新登录。"
         case .missingIdentity: "未取得夸克账号的稳定标识，登录信息尚未保存。"
         case .missingCredential: "未取得完整的夸克会话凭据，请先完成官方网页登录。"
         case .unsafeRedirect: "夸克请求跳转到了不支持的地址，已停止登录。"
+        case .invalidShareLink: "请输入有效的夸克网盘分享链接。"
+        case .invalidSelection: "夸克文件选择或目录身份无效，请重新打开文件列表。"
+        case .taskTimedOut(let id): "夸克转存仍在处理中（任务 \(id)），稍后可继续核对。"
+        case .taskFailed(let id): "夸克转存任务失败（任务 \(id)）。"
+        case .shareRequiresCode: "这个夸克分享需要提取码，请填写后重试。"
+        case .invalidPasscode: "夸克分享提取码不正确，请检查后重试。"
+        case .shareUnavailable: "夸克分享已失效、被取消或无法访问。"
         }
     }
 }
