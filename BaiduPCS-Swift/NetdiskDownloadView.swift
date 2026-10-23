@@ -9,9 +9,12 @@ import SwiftUI
 struct NetdiskDownloadView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var tree: FileTree<NetdiskEntry>?
+    @State private var tree: FileTree<RemoteEntry>?
     /// 文件树所属账号的 uk。新任务记录这个账号。
-    @State private var treeAccountUK: Int64?
+    @State private var treeAccount: AccountKey?
+    @State private var provider: Provider?
+
+    init(provider: Provider? = nil) { _provider = State(initialValue: provider) }
     /// 每次重新加载加一。它变化时 `.task` 取消上一次读取，重新读取。
     @State private var generation = 0
     /// 没有文件树的原因，例如未登录。
@@ -34,7 +37,9 @@ struct NetdiskDownloadView: View {
         }
         .frame(minWidth: 600, idealWidth: 640, minHeight: 460, idealHeight: 540)
         .task(id: generation) { await load() }
-        .onChange(of: model.account?.uk) { generation += 1 }
+        .onChange(of: model.account?.uk) { if provider == .baidu { generation += 1 } }
+        .onChange(of: model.quark.summary?.key) { if provider == .quark { generation += 1 } }
+        .onChange(of: provider) { tree = nil; generation += 1 }
     }
 
     private var header: some View {
@@ -42,6 +47,10 @@ struct NetdiskDownloadView: View {
             Text("从我的网盘下载")
                 .font(.headline)
             Spacer()
+            Picker("网盘", selection: $provider) {
+                Text("选择网盘").tag(Provider?.none)
+                ForEach(Provider.allCases) { Text($0.title).tag(Optional($0)) }
+            }.fixedSize()
             Button {
                 generation += 1
             } label: {
@@ -55,12 +64,16 @@ struct NetdiskDownloadView: View {
     @ViewBuilder
     private var content: some View {
         if let tree {
-            NetdiskBrowser(tree: tree, transferFolder: model.settings.transferFolder)
+            NetdiskBrowser(tree: tree, transferFolder: model.settings.transferFolder(for: provider ?? .baidu))
         } else if let errorMessage {
             ContentUnavailableView {
                 Label("无法读取网盘", systemImage: "exclamationmark.triangle")
             } description: {
                 Text(errorMessage)
+            } actions: {
+                if let provider, model.accountKey(for: provider) == nil {
+                    Button("登录\(provider.title)…") { model.presentLogin(for: provider) }
+                }
             }
         } else {
             ProgressView("正在读取网盘…")
@@ -85,44 +98,47 @@ struct NetdiskDownloadView: View {
         }
     }
 
+    /// 窗口固定来源和账号；换号后丢弃旧选择，不能提交给新账号。
     private func load() async {
-        guard let accountUK = model.account?.uk, let list = listDirectory() else {
-            tree = nil
-            treeAccountUK = nil
-            errorMessage = "未登录百度网盘。"
+        tree = nil
+        treeAccount = nil
+        guard let provider else {
+            errorMessage = "请选择百度网盘或夸克网盘。"
             return
         }
-        errorMessage = nil
-        let tree = FileTree<NetdiskEntry>(initialSelection: .none, list: list) { model.noteError($0) }
-        self.tree = tree
-        treeAccountUK = accountUK
-        await tree.load(tree.root)
-    }
-
-    /// 列出目录的一层。根目录（`nil`）是 `/`。未登录时为 nil。
-    private func listDirectory() -> ((NetdiskEntry?) async throws -> [NetdiskEntry])? {
-        #if DEBUG
-        if DemoData.isEnabled {
-            return { DemoData.netdiskListing($0?.path ?? "/") }
+        do {
+            let disk = try model.netdisk(for: provider)
+            let key = disk.account
+            errorMessage = nil
+            let tree = FileTree<RemoteEntry>(initialSelection: .none) { directory in
+                guard model.accountKey(for: provider) == key else { throw CancellationError() }
+                let entries = try await disk.listDirectory(directory?.reference)
+                try Task.checkCancellation()
+                guard model.accountKey(for: provider) == key else { throw CancellationError() }
+                return entries
+            } onError: { model.noteError($0, from: disk) }
+            self.tree = tree
+            treeAccount = key
+            await tree.load(tree.root)
+        } catch {
+            guard !Task.isCancelled else { return }
+            errorMessage = error.localizedDescription
         }
-        #endif
-        guard let client = model.client else { return nil }
-        return { try await client.listDirectory($0?.path ?? "/") }
     }
 
-    /// 文件树不属于当前账号时什么也不做。账号变化后文件树马上重新加载，所以只有在两者之间按下才会这样。
     private func download() {
         guard let tree, !tree.selection.isEmpty, !isSubmitting,
-              let accountUK = treeAccountUK, accountUK == model.account?.uk else { return }
+              let key = treeAccount, key == model.accountKey(for: key.provider) else { return }
         isSubmitting = true
-        model.addNetdiskJob(entries: tree.selectedEntries, accountUK: accountUK, downloadFolder: selectedFolder)
+        model.addNetdiskJob(entries: tree.selectedEntries, account: key, downloadFolder: selectedFolder)
         dismiss()
     }
+
 }
 
 /// 网盘的文件树：名称、修改日期和大小三列。
 private struct NetdiskBrowser: View {
-    let tree: FileTree<NetdiskEntry>
+    let tree: FileTree<RemoteEntry>
     /// 设置中的转存目录。树中的这个目录显示“转存目录”标签。
     let transferFolder: String
     @ScaledMetric private var dateWidth = 110
@@ -169,7 +185,7 @@ private struct NetdiskBrowser: View {
     }
 
     @ViewBuilder
-    private func badge(_ entry: NetdiskEntry) -> some View {
+    private func badge(_ entry: RemoteEntry) -> some View {
         if entry.isDirectory, RemotePath.normalized(entry.path) == RemotePath.normalized(transferFolder) {
             Text("转存目录")
                 .font(.caption)
@@ -181,7 +197,7 @@ private struct NetdiskBrowser: View {
         }
     }
 
-    private func columns(_ entry: NetdiskEntry) -> some View {
+    private func columns(_ entry: RemoteEntry) -> some View {
         HStack {
             Text(entry.modifiedAt?.formatted(date: .abbreviated, time: .omitted) ?? "")
                 .foregroundStyle(.secondary)

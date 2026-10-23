@@ -5,14 +5,24 @@ extension BaiduClient {
 
     /// 建目录。目录已存在时视为成功。
     public func createDirectory(_ path: String) async throws {
+        do { _ = try await makeDirectory(path) }
+        catch BaiduError.alreadyExists { return }
+    }
+
+    /// 创建任务专用目录；已存在时拒绝复用，并返回服务端文件身份供清理核对。
+    public func createOwnedDirectory(_ path: String) async throws -> NetdiskEntry {
+        let json = try await makeDirectory(path)
+        guard let fsID = json["fs_id"].int64, fsID > 0,
+              let actual = json["path"].string, actual == path else { throw BaiduError.invalidResponse }
+        return NetdiskEntry(fsID: fsID, name: (path as NSString).lastPathComponent,
+                            path: path, isDirectory: true, size: 0)
+    }
+
+    private func makeDirectory(_ path: String) async throws -> JSON {
         let url = URLEncoding.url("\(Host.pcs)/rest/2.0/pcs/file", [
             ("app_id", Host.pcsAppID), ("method", "mkdir"), ("path", path),
         ])
-        do {
-            _ = try await pcsJSON(BaiduRequest(method: "POST", url: url, endpoint: .pcsFile, cookies: cookies()))
-        } catch BaiduError.alreadyExists {
-            return
-        }
+        return try await pcsJSON(BaiduRequest(method: "POST", url: url, endpoint: .pcsFile, cookies: cookies()))
     }
 
     private static let listPageSize = 1000

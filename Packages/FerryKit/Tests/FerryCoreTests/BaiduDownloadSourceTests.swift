@@ -35,16 +35,16 @@ final class LocateStub: URLProtocol, @unchecked Sendable {
 
 /// `LocateStub` 的响应是全局的，所以这些测试依次执行。
 @Suite(.serialized) struct BaiduDownloadSourceTests {
-    private func makeSource() throws -> BaiduDownloadSource {
+    private func makeSource() throws -> RoutedDownloadSource {
         let credential = try Credential.parse("BDUSS=bduss; STOKEN=stoken")
-        let source = BaiduDownloadSource()
-        source.setClient(BaiduClient(credential: credential, session: LocateStub.makeSession()))
+        let source = RoutedDownloadSource()
+        source.setBaidu(BaiduClient(credential: credential, session: LocateStub.makeSession()), account: AccountKey(provider: .baidu, accountID: "1"))
         return source
     }
 
     private func request(_ id: String) -> DownloadRequest {
         DownloadRequest(id: id, destination: URL(filePath: "/tmp/a.bin"),
-                        context: BaiduDownloadSource.context(forRemotePath: "/Ferry/ABCD/a.bin"))
+                        context: try! DownloadContext(account: AccountKey(provider: .baidu, accountID: "1"), reference: .baidu(path: "/Ferry/ABCD/a.bin", fsID: 1), size: 1).encoded())
     }
 
     @Test func triesNextHostEachTime() async throws {
@@ -72,16 +72,34 @@ final class LocateStub: URLProtocol, @unchecked Sendable {
             #expect((error as? LocalizedError)?.errorDescription == BaiduError.fileNotFound.errorDescription)
         }
 
-        let loggedOut = BaiduDownloadSource()
+        let loggedOut = RoutedDownloadSource()
         await #expect(throws: PermanentLinkError.self) { try await loggedOut.resolve(request("a")) }
     }
 
     @Test func classifiesErrors() {
-        #expect(BaiduDownloadSource.isPermanent(.loginExpired))
-        #expect(BaiduDownloadSource.isPermanent(.securityVerification))
-        #expect(BaiduDownloadSource.isPermanent(.invalidNameOrAccessDenied))
-        #expect(!BaiduDownloadSource.isPermanent(.network("timeout")))
-        #expect(!BaiduDownloadSource.isPermanent(.tryLater))
-        #expect(!BaiduDownloadSource.isPermanent(.server(code: 1, message: nil)))
+        #expect(BaiduDownloadPolicy.isPermanent(.loginExpired))
+        #expect(BaiduDownloadPolicy.isPermanent(.securityVerification))
+        #expect(BaiduDownloadPolicy.isPermanent(.invalidNameOrAccessDenied))
+        #expect(!BaiduDownloadPolicy.isPermanent(.network("timeout")))
+        #expect(!BaiduDownloadPolicy.isPermanent(.tryLater))
+        #expect(!BaiduDownloadPolicy.isPermanent(.server(code: 1, message: nil)))
+    }
+
+    @Test func revokedClientCannotStartAnotherRequest() async throws {
+        let credential = try Credential.parse("BDUSS=bduss; STOKEN=stoken")
+        let client = BaiduClient(credential: credential, session: LocateStub.makeSession())
+        client.revoke()
+        await #expect(throws: CancellationError.self) { try await client.validate() }
+    }
+
+    @Test func routedSourceRejectsAnotherProviderAndAccount() async throws {
+        let source = try makeSource()
+        var other = request("different-account")
+        other.context = try DownloadContext(account: AccountKey(provider: .baidu, accountID: "2"),
+                                            reference: .baidu(path: "/a", fsID: 1), size: 1).encoded()
+        await #expect(throws: PermanentLinkError.self) { try await source.resolve(other) }
+        other.context = try DownloadContext(account: AccountKey(provider: .quark, accountID: "1"),
+                                            reference: .quark(fid: "f1"), size: 1).encoded()
+        await #expect(throws: PermanentLinkError.self) { try await source.resolve(other) }
     }
 }

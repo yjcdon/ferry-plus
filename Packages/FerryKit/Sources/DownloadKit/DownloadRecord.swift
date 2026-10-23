@@ -35,6 +35,8 @@ struct DownloadRecord: Codable, Sendable {
     var isPaused: Bool
     /// 下载完成后的最终路径。应用调用 `cancel(id:)` 确认之前，状态文件保留，记录这个路径。
     var completedURL: URL?
+    var entityTag: String?
+    var lastModified: String?
 
     init(request: DownloadRequest) {
         self.request = request
@@ -92,6 +94,15 @@ final class LiveRecord: Sendable {
 struct StateStore: Sendable {
     let directory: URL
 
+    /// 应用升级上下文之前保留原始分片记录，备份不参与正常状态枚举。
+    func backupBeforeContextMigration(id: String) throws {
+        let source = fileURL(for: id)
+        let backup = source.appendingPathExtension("before-context")
+        if !FileManager.default.fileExists(atPath: backup.path) {
+            try FileManager.default.copyItem(at: source, to: backup)
+        }
+    }
+
     func save(_ record: DownloadRecord) throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let data = try JSONEncoder().encode(record)
@@ -102,14 +113,14 @@ struct StateStore: Sendable {
         try? FileManager.default.removeItem(at: fileURL(for: id))
     }
 
-    /// 读不出的文件跳过。
+    /// 损坏记录必须报告，不能当成未下载而覆盖已有分片。
     func loadAll() throws -> [DownloadRecord] {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let decoder = JSONDecoder()
         return try FileManager.default
             .contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }
-            .compactMap { try? decoder.decode(DownloadRecord.self, from: Data(contentsOf: $0)) }
+            .map { try decoder.decode(DownloadRecord.self, from: Data(contentsOf: $0)) }
     }
 
     func fileURL(for id: String) -> URL {

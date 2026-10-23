@@ -1,7 +1,7 @@
 import DownloadKit
 import os
 
-/// 获取下载链接前，先让 `JobCoordinator` 检查文件下载所属的任务：任务属于另一个百度账号时不获取链接，
+/// 获取下载链接前，先让 `JobCoordinator` 检查文件下载所属的网盘与账号，归属不匹配时不获取链接，
 /// 文件下载直接失败（不重试）。下载引擎只在链接失效时才再获取，所以换账号前已开始的下载在链接失效前继续。
 ///
 /// 下载引擎要先于 `JobCoordinator` 创建，所以创建 `JobCoordinator` 后再调用 `connect(_:)`。

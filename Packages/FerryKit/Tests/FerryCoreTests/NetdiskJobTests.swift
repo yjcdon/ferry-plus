@@ -15,9 +15,9 @@ import Testing
     ]
     private let cleanup = FerrySettings(cleanupAfterDownload: true, maxConcurrentFiles: 4)
 
-    private func entry(_ path: String, directory: Bool, in disk: [String: Data]? = nil) -> NetdiskEntry {
+    private func entry(_ path: String, directory: Bool, in disk: [String: Data]? = nil) -> RemoteEntry {
         let size = (disk ?? self.disk)[path].map { Int64($0.count) } ?? 0
-        return NetdiskEntry(fsID: Int64(path.hashValue), name: String(path.split(separator: "/").last!), path: path,
+        return RemoteEntry(fsID: Int64(path.hashValue), name: String(path.split(separator: "/").last!), path: path,
                             isDirectory: directory, size: size)
     }
 
@@ -28,8 +28,8 @@ import Testing
         var completed: [Job.ID] = []
         coordinator.onJobCompleted = { completed.append($0.id) }
 
-        let job = coordinator.addNetdiskJob(entries: [entry("/资料/2024/报告", directory: true), entry("/资料/x.bin", directory: false)], accountUK: Fixture.accountUK)
-        #expect(job.accountUK == Fixture.accountUK)
+        let job = coordinator.addNetdiskJob(entries: [entry("/资料/2024/报告", directory: true), entry("/资料/x.bin", directory: false)], account: Fixture.account)
+        #expect(job.accountKey == Fixture.account)
         #expect(job.downloadFolder == coordinator.downloadFolder)
         try await coordinator.waitForPhase(.completed, of: job.id)
 
@@ -42,8 +42,8 @@ import Testing
         #expect(finished.warning == nil)
         #expect(!finished.isCleanedUp)
         #expect(completed == [job.id])
-        // 只列出勾选的目录；勾选的文件不用列出。没有转存，也没有删除。
-        #expect(fixture.netdisk.operations == [.list("/资料/2024/报告")])
+        // 逐层列出勾选的目录和子目录；勾选的文件不用列出。没有转存，也没有删除。
+        #expect(fixture.netdisk.operations == [.list("/资料/2024/报告"), .list("/资料/2024/报告/附录")])
         #expect(fixture.netdisk.remotePaths() == disk.keys.sorted())
         #expect(try fixture.store.load() == coordinator.jobs)
     }
@@ -60,7 +60,7 @@ import Testing
         let job = coordinator.addNetdiskJob(entries: [
             entry("/a/报告.pdf", directory: false, in: disk), entry("/b/报告.pdf", directory: false, in: disk),
             entry("/a/docs", directory: true, in: disk), entry("/b/docs", directory: true, in: disk),
-        ], accountUK: Fixture.accountUK)
+        ], account: Fixture.account)
         try await coordinator.waitForPhase(.completed, of: job.id)
         let files = try #require(coordinator.job(job.id)?.files)
         // 和分享任务相同的去重规则：同名文件改名，同名目录合并。
@@ -77,7 +77,7 @@ import Testing
         let coordinator = fixture.makeCoordinator(settings: cleanup)
         await coordinator.start()
 
-        let job = coordinator.addNetdiskJob(entries: [entry("/空目录", directory: true)], accountUK: Fixture.accountUK)
+        let job = coordinator.addNetdiskJob(entries: [entry("/空目录", directory: true)], account: Fixture.account)
         try await coordinator.waitForPhase(.completed, of: job.id)
         let finished = try #require(coordinator.job(job.id))
         #expect(finished.files.isEmpty)
@@ -92,13 +92,13 @@ import Testing
         await coordinator.start()
         fixture.netdisk.failNextList()
 
-        let job = coordinator.addNetdiskJob(entries: [entry("/资料/2024/报告", directory: true)], accountUK: Fixture.accountUK)
+        let job = coordinator.addNetdiskJob(entries: [entry("/资料/2024/报告", directory: true)], account: Fixture.account)
         try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
         #expect(coordinator.job(job.id)?.error?.isEmpty == false)
 
         await coordinator.retry(job.id)
         try await coordinator.waitForPhase(.completed, of: job.id)
-        #expect(fixture.netdisk.operations == [.list("/资料/2024/报告"), .list("/资料/2024/报告")])
+        #expect(fixture.netdisk.operations == [.list("/资料/2024/报告"), .list("/资料/2024/报告"), .list("/资料/2024/报告/附录")])
         #expect(coordinator.job(job.id)?.files.count == 2)
         #expect(fixture.netdisk.remotePaths() == disk.keys.sorted())
     }
@@ -109,7 +109,7 @@ import Testing
         await coordinator.start()
         fixture.server.setFailing(["/x.bin"])
 
-        let job = coordinator.addNetdiskJob(entries: [entry("/资料/x.bin", directory: false), entry("/资料/2024/其他.txt", directory: false)], accountUK: Fixture.accountUK)
+        let job = coordinator.addNetdiskJob(entries: [entry("/资料/x.bin", directory: false), entry("/资料/2024/其他.txt", directory: false)], account: Fixture.account)
         try await coordinator.waitForPhase(.failed(.download), of: job.id)
         fixture.server.setFailing([])
         await coordinator.retry(job.id)
@@ -127,7 +127,7 @@ import Testing
 
         // 下载中移除。
         fixture.server.setStalled(true)
-        let running = coordinator.addNetdiskJob(entries: [entry("/资料/x.bin", directory: false)], accountUK: Fixture.accountUK)
+        let running = coordinator.addNetdiskJob(entries: [entry("/资料/x.bin", directory: false)], account: Fixture.account)
         try await waitUntil("running") {
             coordinator.job(running.id)?.files.contains { coordinator.downloads[$0.id]?.state == .running } ?? false
         }
@@ -136,12 +136,12 @@ import Testing
 
         // 准备失败后移除。
         fixture.netdisk.failNextList()
-        let failed = coordinator.addNetdiskJob(entries: [entry("/资料/2024/报告", directory: true)], accountUK: Fixture.accountUK)
+        let failed = coordinator.addNetdiskJob(entries: [entry("/资料/2024/报告", directory: true)], account: Fixture.account)
         try await coordinator.waitForPhase(.failed(.transfer), of: failed.id)
         await coordinator.remove(failed.id)
 
         // 完成后移除，并把下载的文件移到废纸篓。
-        let completed = coordinator.addNetdiskJob(entries: [entry("/资料/2024", directory: true)], accountUK: Fixture.accountUK)
+        let completed = coordinator.addNetdiskJob(entries: [entry("/资料/2024", directory: true)], account: Fixture.account)
         try await coordinator.waitForPhase(.completed, of: completed.id)
         let untrashed = await coordinator.remove(completed.id, trashingFiles: true)
 
@@ -156,10 +156,10 @@ import Testing
         let coordinator = fixture.makeCoordinator(settings: cleanup)
         await coordinator.start()
         fixture.netdisk.failNextList()
-        let job = coordinator.addNetdiskJob(entries: [entry("/资料/2024/报告", directory: true)], accountUK: Fixture.accountUK)
+        let job = coordinator.addNetdiskJob(entries: [entry("/资料/2024/报告", directory: true)], account: Fixture.account)
         try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
 
-        coordinator.accountUK = Fixture.accountUK + 1
+        coordinator.netdisks[.baidu] = fixture.netdisk.withAccount(2)
         #expect(coordinator.belongsToOtherAccount(try #require(coordinator.job(job.id))))
         await coordinator.retry(job.id)
         try await waitUntil("retry fails") {
@@ -176,14 +176,14 @@ import Testing
         let coordinator = fixture.makeCoordinator(settings: cleanup)
         await coordinator.start()
 
-        let job = coordinator.addNetdiskJob(entries: [entry("/资料/2024/报告", directory: true)], accountUK: Fixture.accountUK + 1)
-        #expect(job.accountUK == Fixture.accountUK + 1)
+        let job = coordinator.addNetdiskJob(entries: [entry("/资料/2024/报告", directory: true)], account: Fixture.otherAccount)
+        #expect(job.accountKey == Fixture.otherAccount)
         try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
         #expect(coordinator.job(job.id)?.error == CoordinatorError.otherAccount.errorDescription)
         #expect(fixture.netdisk.operations.isEmpty)
     }
 
-    /// 没有记录账号的网盘任务不记为当前账号：不知道勾选的条目在哪个账号的网盘中。分享任务仍然记为当前账号（见 `AccountTests`）。
+    /// 没有记录账号的网盘任务不记为当前账号：不知道勾选的条目在哪个账号的网盘中。分享任务同样需要明确账号（见 `AccountTests`）。
     @Test func jobWithoutAccountIsNotListed() async throws {
         let fixture = Fixture(disk: disk)
         let saved = Job(netdiskEntries: [entry("/资料/2024/报告", directory: true)])
@@ -194,7 +194,7 @@ import Testing
         await coordinator.retry(saved.id)
         try await coordinator.waitForPhase(.failed(.transfer), of: saved.id)
         #expect(coordinator.job(saved.id)?.error == CoordinatorError.unknownAccount.errorDescription)
-        #expect(coordinator.job(saved.id)?.accountUK == nil)
+        #expect(coordinator.job(saved.id)?.accountKey == nil)
         #expect(fixture.netdisk.operations.isEmpty)
     }
 
@@ -205,8 +205,8 @@ import Testing
         await coordinator.start()
 
         for path in ["/", "", "//"] {
-            let root = NetdiskEntry(fsID: 1, name: "全部文件", path: path, isDirectory: true, size: 0)
-            let job = coordinator.addNetdiskJob(entries: [root], accountUK: Fixture.accountUK)
+            let root = RemoteEntry(fsID: 1, name: "全部文件", path: path, isDirectory: true, size: 0)
+            let job = coordinator.addNetdiskJob(entries: [root], account: Fixture.account)
             try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
             #expect(coordinator.job(job.id)?.error == TransferCheckError.unsafePath("全部文件").errorDescription, "\(path)")
         }
@@ -221,16 +221,16 @@ import Testing
         let coordinator = fixture.makeCoordinator(settings: cleanup)
         await coordinator.start()
         // 桩服务器对任何账号都提供这个路径的文件，就像另一个账号的网盘中也有它。
-        coordinator.willEnqueue = { _ in coordinator.accountUK = Fixture.accountUK + 1 }
-        let job = coordinator.addNetdiskJob(entries: [entry("/视频/家庭录像/a.mov", directory: false, in: disk)], accountUK: Fixture.accountUK)
+        coordinator.willEnqueue = { _ in coordinator.netdisks[.baidu] = fixture.netdisk.withAccount(2) }
+        let job = coordinator.addNetdiskJob(entries: [entry("/视频/家庭录像/a.mov", directory: false, in: disk)], account: Fixture.account)
         try await coordinator.waitForPhase(.failed(.download), of: job.id)
 
-        #expect(coordinator.job(job.id)?.error == DownloadFailure.resolveFailed(CoordinatorError.otherAccount.errorDescription!).message)
+        #expect(coordinator.job(job.id)?.error == CoordinatorError.otherAccount.errorDescription)
         #expect(fixture.server.resolves(for: "/视频/家庭录像/a.mov") == 0)
         #expect(fixture.server.requests(for: "/视频/家庭录像/a.mov") == 0)
 
         coordinator.willEnqueue = nil
-        coordinator.accountUK = Fixture.accountUK
+        coordinator.netdisks[.baidu] = fixture.netdisk
         await coordinator.retry(job.id)
         try await coordinator.waitForPhase(.completed, of: job.id)
         #expect(fixture.contents("a.mov") == disk["/视频/家庭录像/a.mov"])
@@ -243,7 +243,7 @@ import Testing
         await coordinator.start()
         fixture.netdisk.setNextListing([RemoteFile(path: "/资料/2024/报告2/a.pdf", size: 10, fsID: 1)])
 
-        let job = coordinator.addNetdiskJob(entries: [entry("/资料/2024/报告", directory: true)], accountUK: Fixture.accountUK)
+        let job = coordinator.addNetdiskJob(entries: [entry("/资料/2024/报告", directory: true)], account: Fixture.account)
         try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
         #expect(coordinator.job(job.id)?.error?.contains("/资料/2024/报告2/a.pdf") == true)
         #expect(coordinator.job(job.id)?.files.isEmpty == true)
@@ -256,7 +256,7 @@ import Testing
         await coordinator.start()
         fixture.netdisk.setNextListing([RemoteFile(path: "/资料/2024/报告/x/../../../escape.bin", size: 10, fsID: 1)])
 
-        let job = coordinator.addNetdiskJob(entries: [entry("/资料/2024/报告", directory: true)], accountUK: Fixture.accountUK)
+        let job = coordinator.addNetdiskJob(entries: [entry("/资料/2024/报告", directory: true)], account: Fixture.account)
         try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
         #expect(coordinator.job(job.id)?.error?.contains("escape.bin") == true)
     }
@@ -264,7 +264,7 @@ import Testing
     @Test func restoresInterruptedPreparationAsFailedAndRetries() async throws {
         let fixture = Fixture(disk: disk)
         var interrupted = Job(netdiskEntries: [entry("/资料/2024/报告", directory: true)])
-        interrupted.accountUK = Fixture.accountUK
+        interrupted.accountKey = Fixture.account
         try fixture.store.save([interrupted])
 
         let coordinator = fixture.makeCoordinator(settings: cleanup)
@@ -276,6 +276,6 @@ import Testing
 
         await coordinator.retry(interrupted.id)
         try await coordinator.waitForPhase(.completed, of: interrupted.id)
-        #expect(fixture.netdisk.operations == [.list("/资料/2024/报告")])
+        #expect(fixture.netdisk.operations == [.list("/资料/2024/报告"), .list("/资料/2024/报告/附录")])
     }
 }

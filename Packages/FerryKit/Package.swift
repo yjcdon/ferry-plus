@@ -17,7 +17,7 @@ let package = Package(
         .target(name: "BaiduKit"),
         .target(name: "QuarkKit"),
         .target(name: "DownloadKit"),
-        .target(name: "FerryCore", dependencies: ["BaiduKit", "DownloadKit"]),
+        .target(name: "FerryCore", dependencies: ["BaiduKit", "QuarkKit", "DownloadKit"]),
         .testTarget(name: "BaiduKitTests", dependencies: ["BaiduKit"]),
         .testTarget(name: "DownloadKitTests", dependencies: ["DownloadKit"]),
         .testTarget(name: "FerryCoreTests", dependencies: ["FerryCore"]),

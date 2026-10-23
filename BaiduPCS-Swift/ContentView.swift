@@ -20,12 +20,13 @@ struct ContentView: View {
             .sheet(item: $model.sheet) { sheet in
                 switch sheet {
                 case .addLink: AddLinkView()
-                case .netdiskDownload: NetdiskDownloadView()
+                case .netdiskDownload: NetdiskDownloadView(provider: model.netdiskProvider)
                 }
             }
             .onAppear {
                 model.openMainWindow = { [openWindow] in openWindow(id: Self.windowID) }
                 model.openLoginWindow = { [openWindow] in openWindow(id: LoginView.windowID) }
+                model.openQuarkLoginWindow = { [openWindow] in openWindow(id: QuarkLoginView.windowID) }
                 if ProcessInfo.processInfo.arguments.contains("--quark-login"), !hasShownQuarkLogin {
                     hasShownQuarkLogin = true
                     openWindow(id: QuarkLoginView.windowID)
@@ -73,13 +74,24 @@ struct Banners: View {
                     Button("关闭") { model.coordinator.dismissLoadWarning() }
                 }
             }
-            if model.account == nil, !model.coordinator.jobs.isEmpty {
+            if model.account == nil, model.coordinator.jobs.contains(where: { $0.provider == .baidu && $0.isUnfinished }) {
                 Banner(message: "未登录百度网盘。添加任务、重试或获取新的下载链接前，请登录。") {
                     Button("登录…") { model.presentLogin() }
                 }
             } else if model.isLoginExpired {
                 Banner(message: "百度网盘登录已失效。正在进行的下载会继续；添加任务或获取新的下载链接前，请重新登录。") {
                     Button("重新登录…") { model.presentLogin() }
+                }
+            }
+            if let problem = model.quark.problem {
+                Banner(message: "夸克网盘：" + problem) {
+                    Button("重新校验") { Task { await model.quark.revalidate() } }
+                    Button("登录…") { model.presentLogin(for: .quark) }
+                }
+            }
+            if !model.coordinator.removalProblems.isEmpty {
+                Banner(message: model.coordinator.removalProblems.joined(separator: "\n")) {
+                    Button("关闭") { model.coordinator.dismissRemovalProblems() }
                 }
             }
         }

@@ -4,10 +4,22 @@ import Testing
 @testable import FerryCore
 
 @Suite struct JobModelTests {
-    private let link = ShareLink.parse("https://pan.baidu.com/s/1qYZEsSc")!
+    private let link = DiskShareLink.parse("https://pan.baidu.com/s/1qYZEsSc")!
 
-    private func entry(_ name: String, directory: Bool = false) -> ShareEntry {
-        ShareEntry(fsID: Int64(name.hashValue), name: name, path: "/s/" + name, isDirectory: directory, size: directory ? 0 : 10)
+    private func entry(_ name: String, directory: Bool = false) -> RemoteEntry {
+        RemoteEntry(fsID: Int64(name.hashValue), name: name, path: "/s/" + name, isDirectory: directory, size: directory ? 0 : 10)
+    }
+
+    @Test func rejectsUnknownVersionAndInconsistentProvider() throws {
+        let job = Job(link: link, password: nil, entries: [entry("a.zip")], transferFolder: "/Ferry")
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(job)) as? [String: Any])
+        json["version"] = 42
+        let future = try JSONSerialization.data(withJSONObject: json)
+        #expect(throws: DecodingError.self) { try JSONDecoder().decode(Job.self, from: future) }
+        json["version"] = 1
+        json["provider"] = "quark"
+        let inconsistent = try JSONSerialization.data(withJSONObject: json)
+        #expect(throws: DecodingError.self) { try JSONDecoder().decode(Job.self, from: inconsistent) }
     }
 
     @Test func titleAndRemoteDirectory() {
@@ -99,7 +111,7 @@ import Testing
         let job = try #require(jobs.first)
         #expect(job.remoteDirectory == "/Ferry/ABCDEF12")
         #expect(job.phase == .failed(.transfer))
-        #expect(job.source == .share(ShareLink(surl: "qYZEsSc")!, password: nil, entries: []))
+        #expect(job.source == .share(DiskShareLink(provider: .baidu, code: "qYZEsSc"), password: nil, entries: []))
         #expect(!job.isPaused)
         #expect(job.files.map(\.relativePath) == ["a.zip"])
         #expect(job.files.first?.size == 0)
@@ -118,34 +130,34 @@ import Testing
         """
         let job = try #require(try JSONDecoder().decode([Job].self, from: Data(json.utf8)).first)
         let entries = [
-            ShareEntry(fsID: 1, name: "docs", path: "/s/docs", isDirectory: true, size: 0),
-            ShareEntry(fsID: 2, name: "a.zip", path: "/s/a.zip", isDirectory: false, size: 10),
+            RemoteEntry(fsID: 1, name: "docs", path: "/s/docs", isDirectory: true, size: 0),
+            RemoteEntry(fsID: 2, name: "a.zip", path: "/s/a.zip", isDirectory: false, size: 10),
         ]
-        #expect(job.source == .share(ShareLink(surl: "qYZEsSc", password: "ab12")!, password: "cd34", entries: entries))
-        #expect(job.link?.surl == "qYZEsSc")
+        #expect(job.source == .share(DiskShareLink(provider: .baidu, code: "qYZEsSc", password: "ab12"), password: "cd34", entries: entries))
+        #expect(job.link?.code == "qYZEsSc")
         #expect(job.password == "cd34")
         #expect(job.remoteDirectory == "/Ferry/ABCDEF12")
         #expect(job.hasJobDirectory)
         #expect(job.title == "docs 等 2 项")
         #expect(job.phase == .downloading)
         #expect(job.isPaused)
-        #expect(job.accountUK == 7)
+        #expect(job.accountKey == AccountKey(provider: .baidu, accountID: "7"))
 
-        // 再写入时，分享的字段仍在顶层，旧版本也能读取。
+        // 再写入时保留顶层分享字段，使用新版通用来源和账号格式。
         let encoded = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(job)) as? [String: Any])
         #expect(encoded["source"] as? String == "share")
         #expect(encoded["remoteDirectory"] as? String == "/Ferry/ABCDEF12")
         #expect(encoded["password"] as? String == "cd34")
-        #expect((encoded["link"] as? [String: Any])?["surl"] as? String == "qYZEsSc")
+        #expect((encoded["link"] as? [String: Any])?["code"] as? String == "qYZEsSc")
         #expect((encoded["entries"] as? [Any])?.count == 2)
         #expect(try JSONDecoder().decode(Job.self, from: JSONEncoder().encode(job)) == job)
     }
 
     @Test func netdiskJobsHaveNoJobDirectoryAndRoundTrip() throws {
         let entries = [
-            NetdiskEntry(fsID: 1, name: "报告", path: "/资料/2024/报告", isDirectory: true, size: 0,
+            RemoteEntry(fsID: 1, name: "报告", path: "/资料/2024/报告", isDirectory: true, size: 0,
                          modifiedAt: Date(timeIntervalSince1970: 1_700_000_000)),
-            NetdiskEntry(fsID: 2, name: "a.zip", path: "/a.zip", isDirectory: false, size: 10),
+            RemoteEntry(fsID: 2, name: "a.zip", path: "/a.zip", isDirectory: false, size: 10),
         ]
         var job = Job(netdiskEntries: entries)
         #expect(job.source == .netdisk(entries: entries))
@@ -160,7 +172,7 @@ import Testing
         #expect(job.phase == .transferring)
 
         job.phase = .failed(.download)
-        job.accountUK = 7
+        job.accountKey = AccountKey(provider: .baidu, accountID: "7")
         job.files = [JobFile(remotePath: "/a.zip", relativePath: "a.zip", size: 10)]
         let data = try JSONEncoder().encode([job])
         #expect(try JSONDecoder().decode([Job].self, from: data) == [job])
@@ -277,6 +289,6 @@ import Testing
 
     @Test func downloadContextCarriesRemotePath() {
         let path = "/Ferry/ABCD/目录/a b.zip"
-        #expect(BaiduDownloadSource.remotePath(from: BaiduDownloadSource.context(forRemotePath: path)) == path)
+        #expect((try? JSONDecoder().decode(DownloadContext.self, from: DownloadContext(account: AccountKey(provider: .baidu, accountID: "1"), reference: .baidu(path: path, fsID: 1), size: 0).encoded()).reference.identifier) == path)
     }
 }

@@ -12,6 +12,42 @@ import Testing
         "empty.txt": Data(),
     ]
 
+    @Test func persistenceFailurePreventsRemoteMutation() async throws {
+        let fixture = Fixture(share: ["a.bin": randomData(10)])
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+        // 用目录占用任务文件名，稳定模拟原子写入失败；不依赖运行用户的权限级别。
+        let saved = fixture.store.fileURL
+        try FileManager.default.moveItem(at: saved, to: saved.appendingPathExtension("saved"))
+        try FileManager.default.createDirectory(at: saved, withIntermediateDirectories: false)
+        let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
+        try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
+        #expect(fixture.netdisk.operations.isEmpty)
+        #expect(coordinator.job(job.id)?.transferProgress == nil)
+    }
+
+    @Test func failedIntentWriteCanRetryWithoutSubmittingTwice() async throws {
+        let fixture = Fixture(share: ["a.bin": randomData(10)])
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+        let saved = fixture.store.fileURL
+        let backup = saved.appendingPathExtension("before-intent")
+        fixture.netdisk.beforeNextShareOpen {
+            try FileManager.default.moveItem(at: saved, to: backup)
+            try FileManager.default.createDirectory(at: saved, withIntermediateDirectories: false)
+        }
+        let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
+        try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
+        #expect(coordinator.job(job.id)?.transferProgress == nil)
+        #expect(!fixture.netdisk.operations.contains(.transfer(job.remoteDirectory)))
+        try FileManager.default.moveItem(at: saved, to: saved.appendingPathExtension("blocked"))
+        try FileManager.default.moveItem(at: backup, to: saved)
+        await coordinator.retry(job.id)
+        try await coordinator.waitForPhase(.completed, of: job.id)
+        #expect(fixture.netdisk.operations.count { $0 == .createDirectory(job.remoteDirectory) } == 1)
+        #expect(fixture.netdisk.operations.count { $0 == .transfer(job.remoteDirectory) } == 1)
+    }
+
     @Test func downloadsTransferredFilesPreservingStructure() async throws {
         let fixture = Fixture(share: share)
         let coordinator = fixture.makeCoordinator()
@@ -32,8 +68,8 @@ import Testing
         #expect(Set(finished.files.map(\.remotePath)) == Set(share.keys.map { job.remoteDirectory + "/" + $0 }))
         #expect(coordinator.progress(of: finished).fractionCompleted == 1)
         #expect(completed == [job.id])
-        #expect(fixture.netdisk.operations.prefix(3) == [
-            .createDirectory(job.remoteDirectory), .transfer(job.remoteDirectory), .list(job.remoteDirectory),
+        #expect(fixture.netdisk.operations.prefix(4) == [
+            .createDirectory(job.remoteDirectory), .openShare, .transfer(job.remoteDirectory), .list(job.remoteDirectory),
         ])
         // 清理默认关闭。
         #expect(!finished.isCleanedUp)
@@ -69,7 +105,7 @@ import Testing
         #expect(finished.error == nil)
     }
 
-    @Test func transferRetryDeletesJobDirectoryFirst() async throws {
+    @Test func uncertainTransferRetryDoesNotSubmitAgain() async throws {
         let fixture = Fixture(share: share)
         let coordinator = fixture.makeCoordinator()
         await coordinator.start()
@@ -77,21 +113,16 @@ import Testing
 
         let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
         try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
-        #expect(coordinator.job(job.id)?.error?.isEmpty == false)
-        // 失败的转存在网盘中留下了一部分文件。
         #expect(!fixture.netdisk.remotePaths().isEmpty)
+        #expect(coordinator.job(job.id)?.transferProgress?.submitted == true)
+        #expect(coordinator.job(job.id)?.transferProgress?.completed == false)
+        let operations = fixture.netdisk.operations
 
         await coordinator.retry(job.id)
-        try await coordinator.waitForPhase(.completed, of: job.id)
-
-        let operations = fixture.netdisk.operations
-        let retryStart = try #require(operations.firstIndex(of: .delete([job.remoteDirectory])))
-        #expect(Array(operations[retryStart...].prefix(3)) == [
-            .delete([job.remoteDirectory]), .openShare, .createDirectory(job.remoteDirectory),
-        ])
-        for (path, data) in share {
-            #expect(fixture.contents(path) == data, "\(path)")
-        }
+        try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
+        #expect(coordinator.job(job.id)?.error == TransferCheckError.unconfirmedTransfer.errorDescription)
+        #expect(fixture.netdisk.operations == operations)
+        #expect(fixture.netdisk.deletes.isEmpty)
     }
 
     @Test func downloadRetryOnlyRestartsFailedFiles() async throws {
@@ -440,12 +471,12 @@ import Testing
     @Test func failsWithoutLogin() async throws {
         let fixture = Fixture(share: ["a.bin": randomData(10)])
         let coordinator = fixture.makeCoordinator()
-        coordinator.netdisk = nil
+        coordinator.netdisks[.baidu] = nil
         await coordinator.start()
 
         let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
         try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
-        #expect(coordinator.job(job.id)?.error == "未登录百度网盘。")
+        #expect(coordinator.job(job.id)?.error == CoordinatorError.notLoggedIn.errorDescription)
     }
 
     // MARK: - 任务列表中无效的任务子目录
@@ -457,7 +488,8 @@ import Testing
     private func savedShareJob(remoteDirectory: String?, phase: Job.Phase, fixture: Fixture) throws -> Job {
         var job = Job(link: FakeNetdisk.link, password: nil, entries: fixture.netdisk.rootEntries(), transferFolder: "/Ferry")
         job.phase = phase
-        job.accountUK = Fixture.accountUK
+        job.accountKey = Fixture.account
+        job.transferProgress = TransferProgress(submitted: true, completed: true)
         if phase == .downloading {
             let url = fixture.downloads.appending(path: "a.bin")
             try Data().write(to: url)
@@ -490,17 +522,19 @@ import Testing
         #expect(fixture.netdisk.deletes == [[valid.remoteDirectory]])
     }
 
-    @Test func retryOfValidJobDirectoryStillDeletesFirst() async throws {
+    @Test func retryOfConfirmedTransferReusesDirectory() async throws {
         let fixture = Fixture(share: ["a.bin": randomData(10)])
-        let job = try savedShareJob(remoteDirectory: nil, phase: .failed(.transfer), fixture: fixture)
+        var job = try savedShareJob(remoteDirectory: nil, phase: .failed(.transfer), fixture: fixture)
+        try await fixture.netdisk.transfer(FakeNetdisk.session, entries: fixture.netdisk.rootEntries(), to: job.remoteDirectory)
+        job.transferDirectory = TransferDirectory(reference: .baidu(path: job.remoteDirectory, fsID: 0), name: Job.shortID(job.id))
         try fixture.store.save([job])
         let coordinator = fixture.makeCoordinator(settings: FerrySettings(cleanupAfterDownload: true, maxConcurrentFiles: 4))
         await coordinator.start()
 
         await coordinator.retry(job.id)
         try await coordinator.waitForPhase(.completed, of: job.id)
-        // 重试前删除一次，清理时再删除一次。
-        #expect(fixture.netdisk.deletes == [[job.remoteDirectory], [job.remoteDirectory]])
+        // 已确认的转存重用目录，只在下载完成后清理一次。
+        #expect(fixture.netdisk.deletes == [[job.remoteDirectory]])
     }
 
     @Test func cleanupDeletesOnlyValidJobDirectory() async throws {

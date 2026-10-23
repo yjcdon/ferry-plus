@@ -112,17 +112,19 @@ enum DemoData {
         let isDirectory = !name.contains(".")
         let entry = ShareEntry(fsID: Int64(abs(name.hashValue % 1_000_000)), name: name, path: "/" + name,
                                isDirectory: isDirectory, size: 0)
-        var job = Job(link: ShareLink(surl: surl)!, password: nil, entries: [entry], transferFolder: "/Ferry",
+        var job = Job(link: DiskShareLink(provider: .baidu, code: surl), password: nil, entries: [BaiduNetdisk.convert(entry)], transferFolder: "/Ferry",
                       createdAt: now.addingTimeInterval(-minutesAgo * 60))
-        job.accountUK = account.uk
+        job.accountKey = AccountKey(provider: .baidu, accountID: String(account.uk))
+        job.accountName = account.username
         job.downloadFolder = DownloadFolder(url: downloads)
         return job
     }
 
     private static func netdiskJob(_ entries: [(path: String, isDirectory: Bool)], minutesAgo: Double, now: Date) -> Job {
-        var job = Job(netdiskEntries: entries.map { netdiskEntry($0.path, isDirectory: $0.isDirectory) },
+        var job = Job(netdiskEntries: entries.map { BaiduNetdisk.convert(netdiskEntry($0.path, isDirectory: $0.isDirectory)) },
                       createdAt: now.addingTimeInterval(-minutesAgo * 60))
-        job.accountUK = account.uk
+        job.accountKey = AccountKey(provider: .baidu, accountID: String(account.uk))
+        job.accountName = account.username
         job.downloadFolder = DownloadFolder(url: downloads)
         return job
     }

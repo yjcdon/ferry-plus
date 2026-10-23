@@ -1,10 +1,12 @@
 import Foundation
+import os
 
 /// 百度网盘协议客户端。所有网络请求都经过它。它负责 Cookie、User-Agent 和错误码到 `BaiduError` 的转换。
 public actor BaiduClient {
     public let credential: Credential
     let session: URLSession
     private let ownsSession: Bool
+    private let revoked = OSAllocatedUnfairLock(initialState: false)
     /// `locatedownload` 签名要用的百度 uid。只查一次，查不到时用 `fallbackUID`。
     var uidLookup: Task<UInt64?, Never>?
 
@@ -29,6 +31,12 @@ public actor BaiduClient {
         if ownsSession {
             session.finishTasksAndInvalidate()
         }
+    }
+
+    /// 换号或更换网络会话时立即撤销旧客户端，已排队的后续请求不能继续写入旧账号。
+    public nonisolated func revoke() {
+        revoked.withLock { $0 = true }
+        if ownsSession { session.invalidateAndCancel() }
     }
 
     /// Cookie 由客户端自己管理：系统的 Cookie 存储会按域名过滤，dlink 主机和同名 Cookie 都处理不了。
@@ -68,6 +76,8 @@ extension BaiduClient {
     }
 
     func send(_ request: BaiduRequest) async throws -> (Data, HTTPURLResponse) {
+        try Task.checkCancellation()
+        guard !revoked.withLock({ $0 }) else { throw CancellationError() }
         var urlRequest = URLRequest(url: request.url)
         urlRequest.httpMethod = request.method
         if let userAgent = request.endpoint.userAgent {

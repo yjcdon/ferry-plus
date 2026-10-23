@@ -79,20 +79,25 @@ final class StubServer: Sendable {
         let headers = request.allHTTPHeaderFields ?? [:]
         let logged = LoggedRequest(url: url, headers: headers, range: headers["Range"].flatMap(Self.parseRange))
         let path = url.path
-        let (index, rule, file, supportsRanges, isExpired) = state.withLock { state in
-            state.log.append(logged)
-            state.activeByPath[path, default: 0] += 1
-            state.maxActive = max(state.maxActive, state.activeByPath.values.reduce(0, +))
-            state.maxActiveFiles = max(state.maxActiveFiles, state.activeByPath.values.count { $0 > 0 })
-            return (
-                state.log.count - 1,
-                state.faultRule,
-                state.files[path],
-                state.supportsRanges,
-                logged.token.map { state.expiredTokens.contains($0) } ?? false
-            )
-        }
+        // startLoading 的后台工作可能在 stopLoading 之后才获得执行机会。
+        // 取消检查和日志准入必须是同一个短临界区，避免 clearLog 后混入旧请求。
+        guard let (index, rule, file, supportsRanges, isExpired) = connection.ifLoading({
+            state.withLock { state in
+                state.log.append(logged)
+                state.activeByPath[path, default: 0] += 1
+                state.maxActive = max(state.maxActive, state.activeByPath.values.reduce(0, +))
+                state.maxActiveFiles = max(state.maxActiveFiles, state.activeByPath.values.count { $0 > 0 })
+                return (
+                    state.log.count - 1,
+                    state.faultRule,
+                    state.files[path],
+                    state.supportsRanges,
+                    logged.token.map { state.expiredTokens.contains($0) } ?? false
+                )
+            }
+        }) else { return }
         defer { state.withLock { $0.activeByPath[path, default: 0] -= 1 } }
+        guard !connection.isStopped else { return }
         let fault = rule?(logged, index)
         let client = connection.client!
 
@@ -203,6 +208,14 @@ final class StubProtocol: URLProtocol, @unchecked Sendable {
     }
 
     var isStopped: Bool { stopped.withLock { $0 } }
+
+    /// 只让尚未取消的请求加入服务器日志；不在这个锁中发送响应或等待。
+    func ifLoading<Result: Sendable>(_ action: @Sendable () -> Result) -> Result? {
+        stopped.withLock { isStopped in
+            guard !isStopped else { return nil }
+            return action()
+        }
+    }
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }

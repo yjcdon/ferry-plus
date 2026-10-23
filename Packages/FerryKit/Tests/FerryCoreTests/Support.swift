@@ -17,6 +17,7 @@ final class FakeNetdisk: Netdisk {
     }
 
     private struct State {
+        var beforeShareOpen: (@Sendable () throws -> Void)?
         var share: [String: Data] = [:]
         /// 分享中没有文件的目录（相对路径）。
         var emptyDirectories: Set<String> = []
@@ -29,10 +30,22 @@ final class FakeNetdisk: Netdisk {
         var deleteFailures = 0
     }
 
-    private let state = OSAllocatedUnfairLock(initialState: State())
+    private let state: OSAllocatedUnfairLock<State>
+    let account: AccountKey
+
+    private init(state: OSAllocatedUnfairLock<State>, account: AccountKey) {
+        self.state = state
+        self.account = account
+    }
+
+    func withAccount(_ id: Int64) -> FakeNetdisk {
+        FakeNetdisk(state: state, account: AccountKey(provider: .baidu, accountID: String(id)))
+    }
 
     /// - Parameter disk: 自己网盘中原来就有的文件，键是网盘路径。
     init(share: [String: Data], emptyDirectories: Set<String> = [], disk: [String: Data] = [:]) {
+        state = OSAllocatedUnfairLock(initialState: State())
+        account = AccountKey(provider: .baidu, accountID: "1")
         state.withLock {
             $0.share = share
             $0.emptyDirectories = emptyDirectories
@@ -41,6 +54,9 @@ final class FakeNetdisk: Netdisk {
     }
 
     var operations: [Operation] { state.withLock { $0.operations } }
+    func beforeNextShareOpen(_ action: @escaping @Sendable () throws -> Void) {
+        state.withLock { $0.beforeShareOpen = action }
+    }
     func data(at path: String) -> Data? { state.withLock { $0.disk[path] } }
     func remotePaths() -> [String] { state.withLock { $0.disk.keys.sorted() } }
 
@@ -55,8 +71,13 @@ final class FakeNetdisk: Netdisk {
     }
     func setNextListing(_ files: [RemoteFile]) { state.withLock { $0.nextListing = files } }
 
-    func openShare(_ link: ShareLink, password: String?) async throws -> ShareSession {
-        state.withLock { $0.operations.append(.openShare) }
+    func openShare(_ link: DiskShareLink, password: String?) async throws -> DiskShareSession {
+        let action = state.withLock { state in
+            state.operations.append(.openShare)
+            defer { state.beforeShareOpen = nil }
+            return state.beforeShareOpen
+        }
+        try action?()
         return Self.session
     }
 
@@ -64,7 +85,7 @@ final class FakeNetdisk: Netdisk {
         state.withLock { $0.operations.append(.createDirectory(path)) }
     }
 
-    func transfer(_ session: ShareSession, entries: [ShareEntry], to directory: String) async throws {
+    func transfer(_ session: DiskShareSession, entries: [RemoteEntry], to directory: String) async throws {
         try state.withLock { state in
             state.operations.append(.transfer(directory))
             let shouldFail = state.transferFailures > 0
@@ -82,12 +103,12 @@ final class FakeNetdisk: Netdisk {
         }
     }
 
-    func listShare(_ session: ShareSession, directory: ShareEntry?) async throws -> [ShareEntry] {
+    func listShare(_ session: DiskShareSession, directory: RemoteEntry?) async throws -> [RemoteEntry] {
         let prefix = directory.map { $0.relativePath + "/" } ?? ""
         return entries(under: prefix)
     }
 
-    func listDirectory(_ path: String) async throws -> [NetdiskEntry] {
+    func listDirectory(_ path: String) async throws -> [RemoteEntry] {
         state.withLock { state in
             state.operations.append(.listDirectory(path))
             let prefix = path.hasSuffix("/") ? path : path + "/"
@@ -96,7 +117,7 @@ final class FakeNetdisk: Netdisk {
             return names.sorted().map { name in
                 let child = prefix + name
                 let data = state.disk[child]
-                return NetdiskEntry(fsID: Int64(child.hashValue), name: name, path: child, isDirectory: data == nil,
+                return RemoteEntry(fsID: Int64(child.hashValue), name: name, path: child, isDirectory: data == nil,
                                     size: Int64(data?.count ?? 0))
             }
         }
@@ -132,16 +153,63 @@ final class FakeNetdisk: Netdisk {
         }
     }
 
-    static let link = ShareLink.parse("https://pan.baidu.com/s/1qYZEsSc")!
-    static let session = ShareSession(link: link, password: nil, shareID: 1, shareUK: 2, bdstoken: "token", cookies: [])
+    func createTransferDirectory(parentPath: String, name: String) async throws -> TransferDirectory {
+        let path = RemotePath.join(parentPath, name)
+        try await createDirectory(path)
+        return TransferDirectory(reference: .baidu(path: path, fsID: 0), name: name)
+    }
+
+    func submitTransfer(_ session: DiskShareSession, entries: [RemoteEntry], to directory: TransferDirectory) async throws -> TransferProgress {
+        try await transfer(session, entries: entries, to: directory.reference.identifier)
+        return TransferProgress(submitted: true, completed: true)
+    }
+
+    func waitForTransfer(_ progress: TransferProgress) async throws -> TransferProgress {
+        guard progress.completed else { throw TransferCheckError.unconfirmedTransfer }
+        return progress
+    }
+
+    func deleteDirectory(_ directory: TransferDirectory) async throws {
+        try await delete(paths: [directory.reference.identifier])
+    }
+
+    func listDirectory(_ directory: RemoteReference?) async throws -> [RemoteEntry] {
+        let path = directory?.identifier ?? "/"
+        return try state.withLock { state in
+            state.operations.append(.list(path))
+            if state.listFailures > 0 {
+                state.listFailures -= 1
+                throw BaiduError.network("connection lost")
+            }
+            if let listing = state.nextListing {
+                state.nextListing = nil
+                return listing.map {
+                    RemoteEntry(fsID: $0.fsID, name: String($0.path.split(separator: "/").last ?? ""),
+                                path: $0.path, isDirectory: false, size: $0.size)
+                }
+            }
+            let prefix = path.hasSuffix("/") ? path : path + "/"
+            let names = Set(state.disk.keys.filter { $0.hasPrefix(prefix) }
+                .map { String($0.dropFirst(prefix.count).split(separator: "/")[0]) })
+            return names.sorted().map { name in
+                let child = prefix + name
+                let data = state.disk[child]
+                return RemoteEntry(fsID: Int64(child.hashValue), name: name, path: child,
+                                   isDirectory: data == nil, size: Int64(data?.count ?? 0))
+            }
+        }
+    }
+
+    static let link = DiskShareLink.parse("https://pan.baidu.com/s/1qYZEsSc")!
+    static let session = DiskShareSession(link: link, password: nil, account: AccountKey(provider: .baidu, accountID: "1"), title: "Test share")
 
     /// 分享根目录中的条目。
-    func rootEntries() -> [ShareEntry] {
+    func rootEntries() -> [RemoteEntry] {
         entries(under: "")
     }
 
     /// `prefix` 为空或以 `/` 结尾的相对目录。
-    private func entries(under prefix: String) -> [ShareEntry] {
+    private func entries(under prefix: String) -> [RemoteEntry] {
         let (share, emptyDirectories) = state.withLock { ($0.share, $0.emptyDirectories) }
         let paths = Array(share.keys) + Array(emptyDirectories)
         let names = Set(paths.filter { $0.hasPrefix(prefix) }.map { String($0.dropFirst(prefix.count).split(separator: "/")[0]) })
@@ -149,7 +217,7 @@ final class FakeNetdisk: Netdisk {
         return names.sorted().enumerated().map { index, name in
             let path = prefix + name
             let isDirectory = share[path] == nil
-            return ShareEntry(fsID: Int64(path.hashValue), name: name, path: "/share/" + path, isDirectory: isDirectory,
+            return RemoteEntry(fsID: Int64(path.hashValue), name: name, path: "/share/" + path, isDirectory: isDirectory,
                               size: Int64(share[path]?.count ?? 0), relativeDirectory: directory)
         }
     }
@@ -272,7 +340,8 @@ struct FileServerSource: DownloadSource {
     let server: FileServer
 
     func resolve(_ request: DownloadRequest) async throws -> ResolvedURL {
-        let path = BaiduDownloadSource.remotePath(from: request.context)
+        let context = try JSONDecoder().decode(DownloadContext.self, from: request.context)
+        let path = context.reference.identifier
         server.recordResolve(path)
         return ResolvedURL(url: server.url(for: path))
     }
@@ -318,11 +387,15 @@ final class Fixture {
             JobFile(remotePath: file.path, relativePath: RemotePath.relativePath(of: file.path, in: job.remoteDirectory)!, size: file.size)
         }
         job.phase = .downloading
+        job.accountKey = Self.account
+        job.transferDirectory = TransferDirectory(reference: .baidu(path: job.remoteDirectory, fsID: 0), name: Job.shortID(job.id))
+        job.transferProgress = TransferProgress(submitted: true, completed: true)
         return job
     }
     var store: JobStore { JobStore(fileURL: directory.appendingPathComponent("jobs.json")) }
 
-    static let accountUK: Int64 = 1
+    static let account = AccountKey(provider: .baidu, accountID: "1")
+    static let otherAccount = AccountKey(provider: .baidu, accountID: "2")
 
     static let configuration = DownloadConfiguration(
         maxConcurrentFiles: 4,
@@ -348,8 +421,7 @@ final class Fixture {
                                          folderAccess: folderAccess, trashItem: Self.trashItem(into: trash),
                                          baseConfiguration: Self.configuration)
         source.connect(coordinator)
-        coordinator.netdisk = netdisk
-        coordinator.accountUK = Self.accountUK
+        coordinator.netdisks[.baidu] = netdisk
         // 每个测试的每个事件都检查增量维护的计数。
         coordinator.tallyMismatchHandler = { Issue.record(Comment(rawValue: $0)) }
         return coordinator
@@ -357,10 +429,10 @@ final class Fixture {
 
     var stateDirectory: URL { directory.appendingPathComponent("state") }
 
-    /// 下载引擎状态目录中的文件名。
+    /// 下载引擎仍在追踪的状态文件，不把升级前备份当作活跃下载。
     func stateFiles() throws -> Set<String> {
         guard FileManager.default.fileExists(atPath: stateDirectory.path) else { return [] }
-        return Set(try FileManager.default.contentsOfDirectory(atPath: stateDirectory.path))
+        return Set(try FileManager.default.contentsOfDirectory(atPath: stateDirectory.path).filter { $0.hasSuffix(".json") })
     }
 
     func contents(_ relativePath: String) -> Data? {
@@ -414,5 +486,18 @@ extension JobCoordinator {
 
     func waitForPhase(_ phase: Job.Phase, of id: Job.ID) async throws {
         try await waitUntil("phase \(phase)") { job(id)?.phase == phase }
+    }
+}
+
+
+extension RemoteEntry {
+    init(fsID: Int64, name: String, path: String, isDirectory: Bool, size: Int64,
+         modifiedAt: Date? = nil, relativeDirectory: String = "") {
+        self.init(reference: .baidu(path: path, fsID: fsID), name: name, isDirectory: isDirectory,
+                  size: size, modifiedAt: modifiedAt, relativeDirectory: relativeDirectory)
+    }
+
+    var relativePath: String {
+        path.hasPrefix("/share/") ? String(path.dropFirst("/share/".count)) : path
     }
 }

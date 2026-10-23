@@ -19,9 +19,9 @@ import Testing
             coordinator.job(first.id)?.phase == .downloading && coordinator.job(second.id)?.phase == .downloading
                 && coordinator.job(first.id)?.files.first.map { fixture.server.requests(for: $0.remotePath) > 0 } == true
         }
-        #expect(coordinator.job(first.id)?.accountUK == Fixture.accountUK)
+        #expect(coordinator.job(first.id)?.accountKey == Fixture.account)
 
-        coordinator.accountUK = 2
+        coordinator.netdisks[.baidu] = fixture.netdisk.withAccount(2)
         #expect(coordinator.job(first.id).map(coordinator.belongsToOtherAccount) == true)
         let operations = fixture.netdisk.operations.count
         await coordinator.remove(second.id)
@@ -31,31 +31,31 @@ import Testing
         #expect(fixture.netdisk.operations.count == operations)
         let finished = try #require(coordinator.job(first.id))
         #expect(!finished.isCleanedUp)
-        #expect(finished.warning?.contains("另一个百度账号") == true)
+        #expect(finished.warning?.contains("另一个网盘账号") == true)
     }
 
     @Test func otherAccountCannotRetryTransfer() async throws {
         let fixture = Fixture(share: ["a.bin": randomData(10)])
         let coordinator = fixture.makeCoordinator()
         await coordinator.start()
-        fixture.netdisk.failNextTransfer()
+        fixture.netdisk.failNextList()
         let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
         try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
 
-        coordinator.accountUK = 2
+        coordinator.netdisks[.baidu] = fixture.netdisk.withAccount(2)
         let operations = fixture.netdisk.operations.count
         await coordinator.retry(job.id)
         try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
-        #expect(coordinator.job(job.id)?.error?.contains("另一个百度账号") == true)
+        #expect(coordinator.job(job.id)?.error?.contains("另一个网盘账号") == true)
         #expect(fixture.netdisk.operations.count == operations)
 
-        coordinator.accountUK = Fixture.accountUK
+        coordinator.netdisks[.baidu] = fixture.netdisk
         await coordinator.retry(job.id)
         try await coordinator.waitForPhase(.completed, of: job.id)
     }
 
-    /// 旧版本创建的分享任务没有记录账号。重试时记为当前账号：任务子目录由转存创建，不是用户自己的文件。
-    @Test func oldShareJobAdoptsCurrentAccount() async throws {
+    /// 旧任务未记录账号时，必须重新添加，不能自动认领当前账号。
+    @Test func oldShareJobDoesNotAdoptCurrentAccount() async throws {
         let fixture = Fixture(share: ["a.bin": randomData(10)])
         let saved = Job(link: FakeNetdisk.link, password: nil, entries: fixture.netdisk.rootEntries(), transferFolder: "/Ferry")
         try fixture.store.save([saved])
@@ -63,8 +63,10 @@ import Testing
         await coordinator.start()
 
         await coordinator.retry(saved.id)
-        try await coordinator.waitForPhase(.completed, of: saved.id)
-        #expect(coordinator.job(saved.id)?.accountUK == Fixture.accountUK)
+        try await coordinator.waitForPhase(.failed(.transfer), of: saved.id)
+        #expect(coordinator.job(saved.id)?.accountKey == nil)
+        #expect(coordinator.job(saved.id)?.error == CoordinatorError.unknownAccount.errorDescription)
+        #expect(fixture.netdisk.operations.isEmpty)
     }
 
     /// 文件下载加入引擎前换了账号：不为它获取下载链接，文件下载直接失败。换回原来的账号后重试，正常下载。
@@ -72,16 +74,16 @@ import Testing
         let fixture = Fixture(share: ["a.bin": randomData(10_000)])
         let coordinator = fixture.makeCoordinator()
         await coordinator.start()
-        coordinator.willEnqueue = { _ in coordinator.accountUK = 2 }
+        coordinator.willEnqueue = { _ in coordinator.netdisks[.baidu] = fixture.netdisk.withAccount(2) }
         let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
         try await coordinator.waitForPhase(.failed(.download), of: job.id)
 
         let file = try #require(coordinator.job(job.id)?.files.first)
-        #expect(coordinator.job(job.id)?.error == DownloadFailure.resolveFailed(CoordinatorError.otherAccount.errorDescription!).message)
+        #expect(coordinator.job(job.id)?.error == CoordinatorError.otherAccount.errorDescription)
         #expect(fixture.server.resolves(for: file.remotePath) == 0)
 
         coordinator.willEnqueue = nil
-        coordinator.accountUK = Fixture.accountUK
+        coordinator.netdisks[.baidu] = fixture.netdisk
         await coordinator.retry(job.id)
         try await coordinator.waitForPhase(.completed, of: job.id)
         #expect(fixture.contents("a.bin") == fixture.netdisk.data(at: file.remotePath))

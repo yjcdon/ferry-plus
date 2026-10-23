@@ -10,6 +10,9 @@ public struct FerrySettings: Codable, Sendable, Hashable {
     public var cleanupAfterDownload: Bool
     public var maxConcurrentFiles: Int
     public var connectionsPerFile: Int
+    public var quarkTransferFolder: String = "/Ferry Plus"
+    public var quarkCleanupAfterDownload: Bool = true
+    public var quarkConnectionsPerFile: Int = 1
     public var proxy: ProxySettings
     /// 切换到 Ferry 时，剪贴板中有新复制的分享链接就打开“添加链接”。
     public var detectsCopiedLinks: Bool
@@ -38,6 +41,9 @@ public struct FerrySettings: Codable, Sendable, Hashable {
         cleanupAfterDownload = value(.cleanupAfterDownload) ?? defaults.cleanupAfterDownload
         maxConcurrentFiles = value(.maxConcurrentFiles) ?? defaults.maxConcurrentFiles
         connectionsPerFile = value(.connectionsPerFile) ?? defaults.connectionsPerFile
+        quarkTransferFolder = value(.quarkTransferFolder) ?? defaults.quarkTransferFolder
+        quarkCleanupAfterDownload = value(.quarkCleanupAfterDownload) ?? defaults.quarkCleanupAfterDownload
+        quarkConnectionsPerFile = value(.quarkConnectionsPerFile) ?? defaults.quarkConnectionsPerFile
         proxy = value(.proxy) ?? defaults.proxy
         detectsCopiedLinks = value(.detectsCopiedLinks) ?? defaults.detectsCopiedLinks
         limitConcurrency()
@@ -50,7 +56,7 @@ public struct FerrySettings: Codable, Sendable, Hashable {
 
     /// 按当前的每个文件的连接数，同时下载文件数可以取的值。
     public var allowedConcurrentFiles: ClosedRange<Int> {
-        Self.concurrentFilesRange.clamped(to: 1...max(1, Self.totalConnectionsLimit / max(1, connectionsPerFile)))
+        Self.concurrentFilesRange.clamped(to: 1...max(1, Self.totalConnectionsLimit / max(1, max(connectionsPerFile, quarkConnectionsPerFile))))
     }
 
     /// 按当前的同时下载文件数，每个文件的连接数可以取的值。
@@ -62,6 +68,13 @@ public struct FerrySettings: Codable, Sendable, Hashable {
     public mutating func limitConcurrency() {
         maxConcurrentFiles = maxConcurrentFiles.clamped(to: Self.concurrentFilesRange)
         connectionsPerFile = connectionsPerFile.clamped(to: allowedConnections)
+        quarkConnectionsPerFile = quarkConnectionsPerFile.clamped(to: allowedConnections)
+    }
+
+    public func transferFolder(for provider: Provider) -> String { provider == .baidu ? transferFolder : quarkTransferFolder }
+    public func cleanupAfterDownload(for provider: Provider) -> Bool { provider == .baidu ? cleanupAfterDownload : quarkCleanupAfterDownload }
+    public func connections(for provider: Provider) -> Int {
+        (provider == .baidu ? connectionsPerFile : quarkConnectionsPerFile).clamped(to: allowedConnections)
     }
 
     /// 当前两项等于的预设。不等于任何预设时为 `nil`。
@@ -74,6 +87,7 @@ public struct FerrySettings: Codable, Sendable, Hashable {
     public mutating func apply(_ preset: ConcurrencyPreset) {
         maxConcurrentFiles = preset.maxConcurrentFiles
         connectionsPerFile = preset.connectionsPerFile
+        limitConcurrency()
     }
 
     /// 只覆盖并发设置，其余沿用 `base`。
@@ -82,7 +96,7 @@ public struct FerrySettings: Codable, Sendable, Hashable {
         limited.limitConcurrency()
         var configuration = base
         configuration.maxConcurrentFiles = limited.maxConcurrentFiles
-        configuration.segmentsPerFile = limited.connectionsPerFile
+        configuration.segmentsPerFile = max(limited.connectionsPerFile, limited.quarkConnectionsPerFile)
         return configuration
     }
 }

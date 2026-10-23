@@ -54,7 +54,7 @@ open ".build/Ferry Plus.app" --args --quark-login
 | 未登录账号边界 | 账号接口的成功码及空账号数据不会被判作已登录；匿名请求冒烟验证通过 |
 | 网页凭据边界 | 非夸克域 Cookie 被拒绝；合法域候选凭据序列化往返后保留域、路径与有效期，冒烟验证通过 |
 | App 内自动验证入口 | 未登录时返回 authenticated=false、退出码 1；完成登录后新进程返回 authenticated=true、退出码 0 |
-| 既有 Swift 测试 | 本机 Command Line Tools 缺少 Testing 模块，测试目标无法编译；未新增测试类 |
+| Swift 测试 | 已定位本机 Command Line Tools 自带 Testing.framework 与宏插件，可用 `bash Scripts/test-packages.sh` 运行；未新增测试类，已迁移既有套件并在其中增加针对账号路由、撤销会话和写盘失败的断言 |
 | 真实官方网页登录 | 用户已在官方页面完成登录，页面会话导入及账号、根目录鉴权通过 |
 | 钥匙串写入及新进程恢复 | 通过。2026-10-23 23:49（Asia/Shanghai）独立 App 进程从钥匙串恢复凭据，账号身份校验及根目录读取成功；没有再次登录或导出 Cookie |
 | 短信验证码自动读取及填写 | 尚未实现或验证；本次登录成功不代表能够自动读取“信息”App |

@@ -1,17 +1,16 @@
-import BaiduKit
+import FerryCore
 import Foundation
 import Observation
 
 /// 文件树中的一个条目：分享中的条目，或网盘中的条目。
-nonisolated protocol FileTreeEntry: Identifiable {
+nonisolated protocol FileTreeEntry: Identifiable, Sendable {
     var name: String { get }
     var isDirectory: Bool { get }
     /// 字节数。目录为 0。
     var size: Int64 { get }
 }
 
-extension ShareEntry: FileTreeEntry {}
-extension NetdiskEntry: FileTreeEntry {}
+extension RemoteEntry: FileTreeEntry {}
 
 /// 文件树中的一个目录或文件。目录的子项在展开时才加载。
 @Observable

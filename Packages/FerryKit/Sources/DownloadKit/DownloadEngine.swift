@@ -102,10 +102,15 @@ public actor DownloadEngine {
     /// 暂停或失败过的恢复为 paused，其余恢复为 queued 并开始下载。
     /// 调用前，应用要先取得目标目录的访问权限。
     @discardableResult
-    public func restore() throws -> [DownloadSnapshot] {
+    public func restore(contexts: [String: Data] = [:], pausedIDs: Set<String> = []) throws -> [DownloadSnapshot] {
         let records = try store.loadAll().sorted { $0.createdAt < $1.createdAt }
         var restored: [DownloadSnapshot] = []
-        for record in records where entries[record.request.id] == nil {
+        for var record in records where entries[record.request.id] == nil {
+            if let context = contexts[record.request.id], context != record.request.context {
+                try store.backupBeforeContextMigration(id: record.request.id)
+                record.request.context = context
+            }
+            if pausedIDs.contains(record.request.id) { record.isPaused = true }
             let state: DownloadState = if let url = record.completedURL {
                 .completed(url)
             } else {

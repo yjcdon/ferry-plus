@@ -16,8 +16,9 @@ import Testing
 
         let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
         try await coordinator.waitForPhase(.completed, of: job.id)
-        // 添加、开始下载、完成各保存一次；40 个文件的完成状态随这些保存一起写入。
-        #expect(coordinator.saveCount - before <= 4)
+        // 添加、开始下载、完成合并保存；另有专用目录、提交意图和转存回执三次必要落盘。
+        // 40 个文件完成仍随这些保存批量写入，避免每个文件都写一次任务列表。
+        #expect(coordinator.saveCount - before <= 7)
         let saved = try #require(try fixture.store.load().first)
         #expect(saved.files.count == 40)
         #expect(saved.files.allSatisfy { $0.isCompleted })

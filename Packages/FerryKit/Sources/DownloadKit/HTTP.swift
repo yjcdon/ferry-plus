@@ -105,6 +105,8 @@ final class DataTaskRunner: NSObject, URLSessionDataDelegate, Sendable {
         var error: (any Error)?
         var errorBody: Data?
         var stoppedAfterResponse = false
+        var completed = false
+        var completionError: (any Error)?
     }
 
     private let headers: [String: String]
@@ -134,6 +136,8 @@ final class DataTaskRunner: NSObject, URLSessionDataDelegate, Sendable {
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 runner.state.withLock { $0.continuation = continuation }
+                // 取消可能先于 continuation 注册，保留的完成结果仍须交还调用方。
+                runner.resumeIfCompleted()
                 task.resume()
             }
         } onCancel: {
@@ -189,7 +193,7 @@ final class DataTaskRunner: NSObject, URLSessionDataDelegate, Sendable {
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         enum Next { case deliver, stop, ignore }
         let next = state.withLock { state -> Next in
-            if state.error != nil { return .ignore }
+            if state.completed || state.error != nil { return .ignore }
             guard var body = state.errorBody else { return .deliver }
             body.append(data.prefix(Self.errorBodyLimit - body.count))
             state.errorBody = body
@@ -211,20 +215,30 @@ final class DataTaskRunner: NSObject, URLSessionDataDelegate, Sendable {
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: (any Error)?) {
-        let state = state.withLock { state in
+        state.withLock {
+            $0.completed = true
+            $0.completionError = error
+        }
+        resumeIfCompleted()
+    }
+
+    /// 完成与 continuation 注册无论谁先发生，结果都只交付一次。
+    private func resumeIfCompleted() {
+        let completed = state.withLock { state -> State? in
+            guard state.completed else { return nil }
             defer { state.continuation = nil }
             return state
         }
-        guard let continuation = state.continuation else { return }
+        guard let state = completed, let continuation = state.continuation else { return }
         if let recorded = state.error {
             continuation.resume(throwing: recorded)
         } else if let response = state.response, let body = state.errorBody {
             let message = String(decoding: body, as: UTF8.self)
             continuation.resume(throwing: FetchError.http(status: response.statusCode, body: message))
-        } else if let response = state.response, state.stoppedAfterResponse || error == nil {
+        } else if let response = state.response, state.stoppedAfterResponse || state.completionError == nil {
             continuation.resume(returning: response)
         } else {
-            continuation.resume(throwing: FetchError(error ?? URLError(.badServerResponse)))
+            continuation.resume(throwing: FetchError(state.completionError ?? URLError(.badServerResponse)))
         }
     }
 }

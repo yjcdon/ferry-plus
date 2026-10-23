@@ -1,4 +1,3 @@
-import BaiduKit
 import Foundation
 
 /// 用户勾选条目并点击“下载”后产生的工作单元。分享任务先转存勾选的条目，再把它们下载到本地；网盘任务直接下载。
@@ -6,9 +5,9 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
     /// 任务的来源。创建任务时确定，以后不变。
     public enum Source: Sendable, Hashable {
         /// 分享链接。勾选的条目转存到任务子目录，再从那里下载。
-        case share(ShareLink, password: String?, entries: [ShareEntry])
+        case share(DiskShareLink, password: String?, entries: [RemoteEntry])
         /// 自己的网盘。直接下载勾选的条目。Ferry 不删除、不移动、不修改它们。
-        case netdisk(entries: [NetdiskEntry])
+        case netdisk(entries: [RemoteEntry])
 
         /// 勾选条目的名字，按勾选的顺序。
         public var names: [String] {
@@ -37,7 +36,7 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
 
     /// 失败发生的步骤。它决定重试从哪里开始。
     public enum Step: String, Codable, Sendable, Hashable {
-        /// 分享任务：建目录、转存或列出转存后的文件。重试时删除任务子目录，重新转存。
+        /// 分享任务：建目录、转存或列文件。重试优先查询已保存回执，不自动重复提交未知结果。
         /// 网盘任务：列出勾选的目录（准备）。重试时只重新列出，不删除。
         case transfer
         /// 文件下载。重试时只继续没有完成的文件下载。
@@ -63,11 +62,16 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
     public var isCleanedUp: Bool
     /// 创建任务时的下载目录。之后修改设置中的下载目录不影响这个任务。旧版本创建的任务为 nil。
     public var downloadFolder: DownloadFolder?
-    /// 创建任务时登录的账号的 uk。转存到的、或者下载的是这个账号的网盘。旧版本创建的任务为 nil。
-    public var accountUK: Int64?
+    public var accountKey: AccountKey?
+    public var accountName: String?
+    public var transferDirectory: TransferDirectory?
+    public var transferProgress: TransferProgress?
+    public var provider: Provider {
+        switch source { case .share(let link, _, _): link.provider; case .netdisk(let entries): accountKey?.provider ?? entries.first?.reference.provider ?? .baidu }
+    }
 
     /// 分享任务。
-    public init(link: ShareLink, password: String?, entries: [ShareEntry], transferFolder: String,
+    public init(link: DiskShareLink, password: String?, entries: [RemoteEntry], transferFolder: String,
                 id: UUID = UUID(), createdAt: Date = .now) {
         self.init(source: .share(link, password: password, entries: entries),
                   remoteDirectory: RemotePath.join(RemotePath.normalized(transferFolder), Self.shortID(id)),
@@ -75,7 +79,7 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
     }
 
     /// 网盘任务。它没有任务子目录。
-    public init(netdiskEntries entries: [NetdiskEntry], id: UUID = UUID(), createdAt: Date = .now) {
+    public init(netdiskEntries entries: [RemoteEntry], id: UUID = UUID(), createdAt: Date = .now) {
         self.init(source: .netdisk(entries: entries), remoteDirectory: "", id: id, createdAt: createdAt)
     }
 
@@ -92,7 +96,7 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
     }
 
     /// 来源的分享链接。网盘任务为 nil。
-    public var link: ShareLink? {
+    public var link: DiskShareLink? {
         if case .share(let link, _, _) = source { link } else { nil }
     }
 
@@ -106,6 +110,10 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
     /// Ferry 写入的任务子目录一定是规范的路径，最后一级是任务的短 ID（见 `init(link:password:entries:transferFolder:id:createdAt:)`）。
     /// 任务列表中的值不是这样时（例如 `/` 或 `/我的资料`），按没有任务子目录处理：这个路径可能是用户自己的目录。
     public var hasJobDirectory: Bool {
+        if provider == .quark {
+            guard case .share = source, let directory = transferDirectory else { return false }
+            return directory.name == Self.shortID(id) && directory.reference.provider == .quark && !directory.reference.identifier.isEmpty && directory.reference.identifier != "0"
+        }
         guard case .share = source, remoteDirectory == RemotePath.normalized(remoteDirectory) else { return false }
         return RemotePath.components(of: remoteDirectory, omittingEmpty: true).last == Self.shortID(id)
     }
@@ -118,22 +126,26 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, title, source, link, password, entries, remoteDirectory, phase, files, isPaused, error, warning,
-             createdAt, isCleanedUp, downloadFolder, accountUK
+             createdAt, isCleanedUp, downloadFolder, accountUK, accountKey, accountName, transferDirectory, transferProgress, version, provider
     }
 
     /// 缺少的字段用默认值，以后新增字段时，旧版本保存的任务列表仍能读取。
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        let version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 0
+        guard (0...1).contains(version) else {
+            throw DecodingError.dataCorruptedError(forKey: .version, in: container, debugDescription: "不支持的任务格式版本")
+        }
         id = try container.decode(UUID.self, forKey: .id)
         switch try container.decodeIfPresent(SourceKind.self, forKey: .source) ?? .share {
         case .share:
-            let link = try container.decode(ShareLink.self, forKey: .link)
+            let link = try container.decode(DiskShareLink.self, forKey: .link)
             let password = try container.decodeIfPresent(String.self, forKey: .password)
-            let entries = try container.decodeIfPresent([ShareEntry].self, forKey: .entries) ?? []
+            let entries = try container.decodeIfPresent([RemoteEntry].self, forKey: .entries) ?? []
             source = .share(link, password: password, entries: entries)
             remoteDirectory = try container.decode(String.self, forKey: .remoteDirectory)
         case .netdisk:
-            source = .netdisk(entries: try container.decodeIfPresent([NetdiskEntry].self, forKey: .entries) ?? [])
+            source = .netdisk(entries: try container.decodeIfPresent([RemoteEntry].self, forKey: .entries) ?? [])
             // 网盘任务没有任务子目录。不读取文件中的值，所以 `remoteDirectory` 一定为空。
             remoteDirectory = ""
         }
@@ -147,12 +159,21 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
         createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt) ?? .distantPast
         isCleanedUp = try container.decodeIfPresent(Bool.self, forKey: .isCleanedUp) ?? false
         downloadFolder = try container.decodeIfPresent(DownloadFolder.self, forKey: .downloadFolder)
-        accountUK = try container.decodeIfPresent(Int64.self, forKey: .accountUK)
+        let accountUK = try container.decodeIfPresent(Int64.self, forKey: .accountUK)
+        accountKey = try container.decodeIfPresent(AccountKey.self, forKey: .accountKey) ?? accountUK.map { AccountKey(provider: .baidu, accountID: String($0)) }
+        accountName = try container.decodeIfPresent(String.self, forKey: .accountName)
+        transferDirectory = try container.decodeIfPresent(TransferDirectory.self, forKey: .transferDirectory)
+        transferProgress = try container.decodeIfPresent(TransferProgress.self, forKey: .transferProgress)
+        if let declared = try container.decodeIfPresent(Provider.self, forKey: .provider), declared != provider {
+            throw DecodingError.dataCorruptedError(forKey: .provider, in: container, debugDescription: "任务网盘与来源不一致")
+        }
     }
 
     /// 分享任务的 `link`、`password`、`entries` 和 `remoteDirectory` 仍在顶层，和旧版本相同，只多了 `source`。
     public func encode(to encoder: any Encoder) throws {
         var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(1, forKey: .version)
+        try container.encode(provider, forKey: .provider)
         try container.encode(id, forKey: .id)
         switch source {
         case .share(let link, let password, let entries):
@@ -174,7 +195,10 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(isCleanedUp, forKey: .isCleanedUp)
         try container.encodeIfPresent(downloadFolder, forKey: .downloadFolder)
-        try container.encodeIfPresent(accountUK, forKey: .accountUK)
+        try container.encodeIfPresent(accountKey, forKey: .accountKey)
+        try container.encodeIfPresent(accountName, forKey: .accountName)
+        try container.encodeIfPresent(transferDirectory, forKey: .transferDirectory)
+        try container.encodeIfPresent(transferProgress, forKey: .transferProgress)
     }
 
     public static func shortID(_ id: UUID) -> String {
@@ -207,6 +231,8 @@ public struct JobFile: Codable, Sendable, Hashable, Identifiable {
     /// 也是 `DownloadRequest.id`。
     public var id: String
     public var remotePath: String
+    public var remoteReference: RemoteReference?
+    public var md5: String?
     /// 相对于下载目录的路径。分享任务保留分享中的目录结构；网盘任务从勾选的条目开始，不含它在网盘中的上层目录。
     public var relativePath: String
     public var size: Int64
@@ -225,6 +251,8 @@ public struct JobFile: Codable, Sendable, Hashable, Identifiable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decode(String.self, forKey: .id)
         remotePath = try container.decode(String.self, forKey: .remotePath)
+        remoteReference = try container.decodeIfPresent(RemoteReference.self, forKey: .remoteReference)
+        md5 = try container.decodeIfPresent(String.self, forKey: .md5)
         relativePath = try container.decode(String.self, forKey: .relativePath)
         size = try container.decodeIfPresent(Int64.self, forKey: .size) ?? 0
         localURL = try container.decodeIfPresent(URL.self, forKey: .localURL)

@@ -1,5 +1,6 @@
 import BaiduKit
 import FerryCore
+import QuarkKit
 import SwiftUI
 
 /// 添加链接：输入链接和提取码并打开分享，在文件树中勾选要下载的文件，然后下载。
@@ -39,13 +40,13 @@ struct AddLinkView: View {
         .frame(minWidth: 600, idealWidth: 640, minHeight: 460, idealHeight: 540)
         .task { await fillFromPasteboard() }
         // 关闭 sheet 时取消正在打开的分享。
-        .onDisappear { openTask?.cancel() }
+        .onDisappear { openTask?.cancel(); releaseShare() }
     }
 
     private var linkFields: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                TextField("分享链接", text: $linkText, prompt: Text("https://pan.baidu.com/s/1…"))
+                TextField("分享链接", text: $linkText, prompt: Text("百度或夸克分享链接"))
                     .labelsHidden()
                     .autocorrectionDisabled()
                     .onChange(of: linkText) {
@@ -53,7 +54,7 @@ struct AddLinkView: View {
                         closeShare()
                     }
                 PasteButton(payloadType: String.self) { strings in
-                    guard let text = strings.first, let link = ShareLink.parse(text) else { return }
+                    guard let text = strings.first, let link = DiskShareLink.parse(text) else { return }
                     fillAndOpen(link)
                 }
                 .labelStyle(.iconOnly)
@@ -96,8 +97,11 @@ struct AddLinkView: View {
             } description: {
                 Text(errorMessage)
             } actions: {
+                if let link = DiskShareLink.parse(linkText), model.accountKey(for: link.provider) == nil {
+                    Button("登录\(link.provider.title)…") { model.presentLogin(for: link.provider) }
+                }
                 // 未登录或链接无效时，重试不会成功。
-                if model.client != nil, ShareLink.parse(linkText) != nil {
+                if DiskShareLink.parse(linkText) != nil {
                     Button("重试", action: openShare)
                         .disabled(!canOpen)
                 }
@@ -106,7 +110,7 @@ struct AddLinkView: View {
             ContentUnavailableView {
                 Label("打开分享链接", systemImage: "link")
             } description: {
-                Text("粘贴百度网盘分享链接，点击“打开”或按回车键。链接带提取码时自动填入。")
+                Text("粘贴百度或夸克网盘分享链接，点击“打开”或按回车键。链接带提取码时自动填入。")
             }
         }
     }
@@ -135,14 +139,14 @@ struct AddLinkView: View {
         pasted = (linkText, password)
     }
 
-    private func fillAndOpen(_ link: BaiduKit.ShareLink) {
+    private func fillAndOpen(_ link: DiskShareLink) {
         linkText = link.url.absoluteString
         password = link.password ?? ""
         openShare()
     }
 
     private func fillPassword() {
-        if password.isEmpty, let found = ShareLink.parse(linkText)?.password {
+        if password.isEmpty, let found = DiskShareLink.parse(linkText)?.password {
             password = found
         }
     }
@@ -151,41 +155,45 @@ struct AddLinkView: View {
     /// 打开期间输入框不可用，这时的变化来自填入后立即打开，不清空。
     private func closeShare() {
         guard !isOpening else { return }
-        share = nil
+        releaseShare()
         errorMessage = nil
     }
 
     /// 在启动任务之前就进入“正在打开”状态，连按也只打开一次。
     private func openShare() {
         guard !isOpening else { return }
-        share = nil
-        guard let client = model.client else {
-            errorMessage = "未登录百度网盘。"
-            return
-        }
-        guard let link = ShareLink.parse(linkText) else {
-            errorMessage = BaiduError.invalidShareLink.localizedDescription
+        releaseShare()
+        guard let link = DiskShareLink.parse(linkText) else {
+            errorMessage = "请输入有效的百度或夸克网盘分享链接。"
             return
         }
         errorMessage = nil
         let password = password
         openTask = Task {
             defer { openTask = nil }
+            var openedDisk: (any Netdisk)?
             do {
-                let session = try await client.openShare(link, password: password)
-                try Task.checkCancellation()
-                let tree = FileTree<ShareEntry>(initialSelection: .all) { directory in
-                    try await client.listShare(session, directory: directory)
-                } onError: { model.noteError($0) }
-                share = OpenedShare(session: session, tree: tree)
+                let disk = try model.netdisk(for: link.provider)
+                openedDisk = disk
+                let session = try await disk.openShare(link, password: password)
+                guard !Task.isCancelled, model.accountKey(for: session.account.provider) == session.account else {
+                    await disk.releaseShare(session)
+                    return
+                }
+                let tree = FileTree<RemoteEntry>(initialSelection: .all) { directory in
+                    try await disk.listShare(session, directory: directory)
+                } onError: { model.noteError($0, from: disk) }
+                share = OpenedShare(session: session, disk: disk, tree: tree)
                 await tree.load(tree.root)
             } catch is CancellationError {
                 return
             } catch {
                 guard !Task.isCancelled else { return }
-                model.noteError(error)
+                if let openedDisk { model.noteError(error, from: openedDisk) }
                 errorMessage = error.localizedDescription
-                if let error = error as? BaiduError, [.passwordRequired, .wrongPassword].contains(error) {
+                let needsBaiduCode = (error as? BaiduError).map { [.passwordRequired, .wrongPassword].contains($0) } ?? false
+                let needsQuarkCode = (error as? QuarkError).map { [.shareRequiresCode, .invalidPasscode].contains($0) } ?? false
+                if needsBaiduCode || needsQuarkCode {
                     // 先结束“正在打开”，提取码框可用后才能获得焦点。
                     openTask = nil
                     isPasswordFocused = true
@@ -197,20 +205,32 @@ struct AddLinkView: View {
     private func download() {
         guard let share, !share.tree.selection.isEmpty, !isSubmitting else { return }
         isSubmitting = true
+        guard model.accountKey(for: share.session.account.provider) == share.session.account else {
+            errorMessage = "账号已变化，请重新打开分享。"
+            releaseShare()
+            isSubmitting = false
+            return
+        }
         model.addJob(session: share.session, entries: share.tree.selectedEntries, downloadFolder: selectedFolder)
         dismiss()
+    }
+
+    private func releaseShare() {
+        if let share { Task { await share.disk.releaseShare(share.session) } }
+        share = nil
     }
 }
 
 /// 已打开的分享会话和它的文件树。
 private struct OpenedShare {
-    let session: ShareSession
-    let tree: FileTree<ShareEntry>
+    let session: DiskShareSession
+    let disk: any Netdisk
+    let tree: FileTree<RemoteEntry>
 }
 
 /// 分享的文件树：表头的全选和文件列表。
 private struct ShareBrowser: View {
-    let tree: FileTree<ShareEntry>
+    let tree: FileTree<RemoteEntry>
 
     var body: some View {
         VStack(spacing: 0) {

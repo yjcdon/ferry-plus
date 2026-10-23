@@ -10,12 +10,17 @@ public struct DownloadRequest: Codable, Sendable, Hashable {
     public var expectedSize: Int64?
     /// 应用层自定义的数据。应用重启后，`DownloadSource` 用它重新获取下载链接。
     public var context: Data
+    /// 来源设置的单文件连接数，缺失时沿用引擎默认值。
+    public var connections: Int?
+    public var expectedMD5: String?
 
-    public init(id: String, destination: URL, expectedSize: Int64? = nil, context: Data = Data()) {
+    public init(id: String, destination: URL, expectedSize: Int64? = nil, context: Data = Data(), connections: Int? = nil, expectedMD5: String? = nil) {
         self.id = id
         self.destination = destination
         self.expectedSize = expectedSize
         self.context = context
+        self.connections = connections
+        self.expectedMD5 = expectedMD5
     }
 }
 

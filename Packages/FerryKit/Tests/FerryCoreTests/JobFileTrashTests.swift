@@ -23,8 +23,8 @@ import Testing
 
     /// 文件都已下载完，位置是下载目录中的相对路径。
     private func job(_ relativePaths: [String]) -> Job {
-        let entry = ShareEntry(fsID: 1, name: "x", path: "/x", isDirectory: false, size: 1)
-        var job = Job(link: ShareLink.parse("https://pan.baidu.com/s/1qYZEsSc")!, password: nil, entries: [entry], transferFolder: "/Ferry")
+        let entry = RemoteEntry(fsID: 1, name: "x", path: "/x", isDirectory: false, size: 1)
+        var job = Job(link: DiskShareLink.parse("https://pan.baidu.com/s/1qYZEsSc")!, password: nil, entries: [entry], transferFolder: "/Ferry")
         job.files = relativePaths.map { path in
             JobFile(remotePath: "/Ferry/x/" + path, relativePath: path, size: 1, localURL: downloads.appending(path: path))
         }

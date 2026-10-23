@@ -30,6 +30,7 @@ final class QuarkAccountSession {
     @ObservationIgnored private var revision = UUID()
     @ObservationIgnored private var loginAttempt: UUID?
     @ObservationIgnored private var hasStarted = false
+    @ObservationIgnored var onSessionChange: ((QuarkClient?, AccountSummary?) -> Void)?
 
     var summary: AccountSummary? {
         account.map { AccountSummary(key: AccountKey(provider: .quark, accountID: $0.id),
@@ -75,13 +76,18 @@ final class QuarkAccountSession {
         guard loginAttempt == attempt else { throw CancellationError() }
         try QuarkCredentialStore.save(StoredQuarkLogin(credential: login.credential, account: login.account))
         revision = UUID()
+        self.client?.revoke()
         self.client = client
         account = login.account
         verifiedAt = login.verifiedAt
         state = .loggedIn
         problem = nil
         loginAttempt = nil
-        await observeCookies(client: client, revision: revision)
+        let installedRevision = revision
+        let installedSummary = summary
+        await observeCookies(client: client, revision: installedRevision)
+        guard revision == installedRevision else { return }
+        onSessionChange?(client, installedSummary)
     }
 
     /// 界面按钮、启动恢复和命令行验证执行同一只读鉴权流程。
@@ -99,11 +105,15 @@ final class QuarkAccountSession {
             verifiedAt = login.verifiedAt
             state = .loggedIn
             await observeCookies(client: client, revision: revision)
+            guard self.revision == revision else { return }
+            onSessionChange?(client, summary)
         } catch {
             guard self.revision == revision else { return }
             problem = error.localizedDescription
             if let error = error as? QuarkError, error == .loginExpired || error == .accountChanged {
                 state = .expired
+                client.revoke()
+                onSessionChange?(nil, nil)
             } else {
                 state = .problem(error.localizedDescription)
             }
@@ -115,10 +125,12 @@ final class QuarkAccountSession {
         try QuarkCredentialStore.delete()
         revision = UUID()
         loginAttempt = nil
+        client?.revoke()
         client = nil
         account = nil
         verifiedAt = nil
         problem = nil
+        onSessionChange?(nil, nil)
         state = .loggedOut
     }
 
@@ -127,9 +139,13 @@ final class QuarkAccountSession {
         self.configuration = configuration
         revision = UUID()
         loginAttempt = nil
+        client?.revoke()
+        client = nil
+        onSessionChange?(nil, nil)
         do {
             if let login = try QuarkCredentialStore.load() {
                 client = QuarkClient(credential: login.credential, configuration: configuration)
+                onSessionChange?(client, summary)
                 Task { await revalidate() }
             }
         } catch {
@@ -142,6 +158,21 @@ final class QuarkAccountSession {
     func authenticatedClient() throws -> QuarkClient {
         guard case .loggedIn = state, let client else { throw QuarkError.loginExpired }
         return client
+    }
+
+    /// 保存的固定账号与客户端可先交给任务恢复，网络校验在后台独立完成。
+    func publishRestoredSession() {
+        if let client, account != nil { onSessionChange?(client, summary) }
+    }
+
+    /// 只接受当前客户端的失效信号，旧窗口的迟到错误不能撤销新登录。
+    func noteExpired(client expected: QuarkClient) {
+        guard client === expected else { return }
+        revision = UUID()
+        expected.revoke()
+        state = .expired
+        problem = "夸克登录已失效，请重新登录。"
+        onSessionChange?(nil, nil)
     }
 
     private func observeCookies(client: QuarkClient, revision: UUID) async {

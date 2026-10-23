@@ -5,6 +5,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     let model = AppModel()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--verify-drive-interfaces") {
+            NSApp.setActivationPolicy(.prohibited)
+            NSApp.windows.forEach { $0.orderOut(nil) }
+            Task {
+                let report = await model.verifyInterfaces()
+                do {
+                    let encoder = JSONEncoder()
+                    encoder.outputFormatting = [.sortedKeys]
+                    FileHandle.standardOutput.write(try encoder.encode(report) + Data([10]))
+                    await model.shutdown()
+                    exit(report.results.allSatisfy { $0.downloadedBytes != nil } ? 0 : 1)
+                } catch {
+                    FileHandle.standardError.write(Data("无法生成接口验证报告。\n".utf8))
+                    await model.shutdown()
+                    exit(1)
+                }
+            }
+            return
+        }
+        #endif
         // 同一个签名应用读取同一个钥匙串条目，命令行只返回脱敏鉴权结果。
         if ProcessInfo.processInfo.arguments.contains("--verify-quark-session") {
             NSApp.setActivationPolicy(.prohibited)

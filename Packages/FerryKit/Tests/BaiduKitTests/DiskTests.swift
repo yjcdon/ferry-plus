@@ -27,6 +27,14 @@ struct DownloadURLSelectionTests {
 
 extension StubbedNetworkTests {
     @Suite struct DiskTests {
+        @Test func ownedDirectoryRejectsExistingAndPreservesIdentity() async throws {
+            let existing = Fixture.client { _ in .json(#"{"error_code":31061}"#, status: 400) }
+            await #expect(throws: BaiduError.alreadyExists) { try await existing.createOwnedDirectory("/Ferry/job") }
+            let fresh = Fixture.client { _ in .json(#"{"fs_id":123,"path":"/Ferry/job","isdir":1}"#) }
+            let entry = try await fresh.createOwnedDirectory("/Ferry/job")
+            #expect(entry.fsID == 123)
+            #expect(entry.path == "/Ferry/job")
+        }
         @Test func createDirectoryTreatsExistingAsSuccess() async throws {
             let client = Fixture.client { _ in .json(#"{"error_code":31061,"error_msg":"file already exists"}"#, status: 400) }
             try await client.createDirectory("/Ferry/job 1")

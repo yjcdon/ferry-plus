@@ -36,6 +36,9 @@ final class AppModel {
     }
 
     var sheet: Sheet?
+    var netdiskProvider: Provider?
+    var lastAddedJobID: UUID?
+    @ObservationIgnored var openQuarkLoginWindow: (() -> Void)?
 
     /// 移除任务时没能移到废纸篓的文件或目录。界面提示后清空。
     var untrashedItems: [URL] = []
@@ -52,8 +55,10 @@ final class AppModel {
     @ObservationIgnored var openMainWindow: (() -> Void)?
     @ObservationIgnored var openLoginWindow: (() -> Void)?
 
-    @ObservationIgnored private let source: BaiduDownloadSource
+    @ObservationIgnored private let source: RoutedDownloadSource
     @ObservationIgnored private let engine: DownloadEngine
+    @ObservationIgnored private let downloadActivity = DownloadActivity()
+    @ObservationIgnored private var installedQuarkClient: QuarkClient?
     /// 当前登录的凭据。换代理时用它同步创建新客户端；后台校验用它判断期间是否换了账号，因为换代理也会换 `client`。
     @ObservationIgnored private var credential: Credential?
     /// 引擎和 `client` 的会话使用的代理。只在它变化时换会话。
@@ -64,7 +69,7 @@ final class AppModel {
     @ObservationIgnored private var hasRequestedNotifications = false
     /// 最近一次读取剪贴板的结果。剪贴板没变时不再读取，所以每次复制最多触发一次系统的剪贴板隐私提示，
     /// 也最多自动打开一次添加链接。
-    @ObservationIgnored private var pasteboardCheck: (changeCount: Int, link: ShareLink?)?
+    @ObservationIgnored private var pasteboardCheck: (changeCount: Int, link: DiskShareLink?)?
     /// 设置中的下载目录。应用在选择期间一直持有它的访问权限；任务另外持有各自目录的访问权限。
     @ObservationIgnored private var accessedDirectory: URL?
 
@@ -83,16 +88,23 @@ final class AppModel {
             .flatMap { try? JSONDecoder().decode(FerrySettings.self, from: $0) } ?? FerrySettings()
         #if DEBUG
         if DemoData.isEnabled { settings = FerrySettings() }
+        if ProcessInfo.processInfo.arguments.contains("--verify-drive-interfaces") { settings.detectsCopiedLinks = false }
         #endif
         let proxyPassword = ProxyPasswordStore.load()
         let proxy = ActiveProxy(settings.proxy, password: proxyPassword)
-        let source = BaiduDownloadSource()
+        let source = RoutedDownloadSource()
         var stateDirectory = FerryDirectories.downloadState
         var jobsFile = FerryDirectories.jobsFile
         #if DEBUG
         if DemoData.isEnabled {
             stateDirectory = DemoData.directory.appendingPathComponent("Downloads", isDirectory: true)
             jobsFile = DemoData.directory.appendingPathComponent("jobs.json")
+        }
+        if ProcessInfo.processInfo.arguments.contains("--verify-drive-interfaces") {
+            let directory = URL(filePath: FileManager.default.currentDirectoryPath)
+                .appendingPathComponent(".build/verification-session-\(UUID().uuidString)", isDirectory: true)
+            stateDirectory = directory.appendingPathComponent("Downloads", isDirectory: true)
+            jobsFile = directory.appendingPathComponent("jobs.json")
         }
         #endif
         let checkedSource = AccountCheckedSource(source)
@@ -110,12 +122,15 @@ final class AppModel {
                                      settings: settings, downloadFolder: DownloadFolder(url: Self.defaultDownloadDirectory))
         checkedSource.connect(coordinator)
         coordinator.onJobCompleted = { [weak self] job in self?.notifyCompletion(of: job) }
+        #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--verify-drive-interfaces") { coordinator.onJobCompleted = nil }
+        #endif
+        coordinator.onRunningChanged = { [weak self] active in self?.downloadActivity.setActive(active) }
         resolveDownloadDirectory()
         #if DEBUG
         if DemoData.isEnabled {
             if DemoData.isLoggedIn {
                 account = DemoData.account
-                coordinator.accountUK = DemoData.account.uk
             }
             return
         }
@@ -138,8 +153,10 @@ final class AppModel {
             return
         }
         #endif
+        quark.onSessionChange = { [weak self] client, summary in self?.installQuark(client, summary: summary) }
+        quark.publishRestoredSession()
         await coordinator.start()
-        await quark.start()
+        Task { await quark.start() }
         // 启动时应用变为活跃的那次检测在任务列表加载前，被跳过，所以加载后再检测一次。
         if NSApp.isActive { await detectCopiedLink() }
         await revalidate()
@@ -147,6 +164,9 @@ final class AppModel {
 
     func shutdown() async {
         await coordinator.shutdown()
+        downloadActivity.close()
+        await sessionReplacement?.value
+        releaseAccessedDirectory()
     }
 
     // MARK: - 账号
@@ -172,28 +192,31 @@ final class AppModel {
 
     func logOut() {
         CredentialStore.delete()
+        client?.revoke()
         client = nil
         credential = nil
         account = nil
         isLoginExpired = false
-        source.setClient(nil)
-        coordinator.netdisk = nil
-        coordinator.accountUK = nil
+        source.setBaidu(nil, account: nil)
+        coordinator.netdisks[.baidu] = nil
     }
 
     private func apply(_ client: BaiduClient, credential: Credential, account: Account) {
+        self.account = account
         replaceClient(client)
         self.credential = credential
         self.account = account
         isLoginExpired = false
-        coordinator.accountUK = account.uk
     }
 
     /// 只换客户端，不改变账号和登录状态。
     private func replaceClient(_ client: BaiduClient) {
+        self.client?.revoke()
         self.client = client
-        source.setClient(client)
-        coordinator.netdisk = client
+        let key = account.map { AccountKey(provider: .baidu, accountID: String($0.uk)) }
+        source.setBaidu(client, account: key)
+        if let key { coordinator.netdisks[.baidu] = BaiduNetdisk(client: client, account: key) }
+        coordinator.accountNames[.baidu] = account?.username
     }
 
     private func makeClient(credential: Credential) -> BaiduClient {
@@ -208,10 +231,9 @@ final class AppModel {
             // 校验期间退出登录或换了账号。
             guard credential == self.credential else { return }
             self.account = account
-            coordinator.accountUK = account.uk
-            try? CredentialStore.save(StoredLogin(credential: credential, account: account))
+                try? CredentialStore.save(StoredLogin(credential: credential, account: account))
         } catch BaiduError.loginExpired {
-            if credential == self.credential { isLoginExpired = true }
+            if credential == self.credential, client === self.client { markBaiduExpired() }
         } catch {}
     }
 
@@ -353,19 +375,36 @@ final class AppModel {
 
     // MARK: - 任务
 
-    /// 未登录时改为打开登录。已经显示了一个 sheet 时不替换它（见 `present(_:)`）。
-    func presentAddLink() {
-        if account == nil {
-            presentLogin()
-        } else {
-            present(.addLink)
-        }
+    /// 来源由链接或文件窗口选择，入口不绑定百度登录。
+    func presentAddLink() { present(.addLink) }
+
+    func presentNetdiskDownload(provider: Provider? = nil) {
+        guard sheet == nil else { return }
+        netdiskProvider = provider
+        present(.netdiskDownload)
     }
 
-    /// 未登录时入口不可用（见 `canDownloadFromNetdisk`）。已经显示了一个 sheet 时不替换它（见 `present(_:)`）。
-    func presentNetdiskDownload() {
-        guard canDownloadFromNetdisk else { return }
-        present(.netdiskDownload)
+    func accountKey(for provider: Provider) -> AccountKey? { coordinator.netdisks[provider]?.account }
+
+    func netdisk(for provider: Provider) throws -> any Netdisk {
+        guard let disk = coordinator.netdisks[provider] else {
+            throw AppAccountError(message: "\(provider.title)尚未登录，请先登录。")
+        }
+        return disk
+    }
+
+    func presentLogin(for provider: Provider) {
+        if provider == .baidu { presentLogin() } else { openQuarkLoginWindow?() }
+    }
+
+    private func installQuark(_ client: QuarkClient?, summary: AccountSummary?) {
+        if let client, installedQuarkClient === client, coordinator.netdisks[.quark]?.account == summary?.key { return }
+        installedQuarkClient = client
+        source.setQuark(client, account: summary?.key)
+        if let client, let summary {
+            coordinator.netdisks[.quark] = QuarkNetdisk(client: client, account: summary.key)
+            coordinator.accountNames[.quark] = summary.name
+        } else { coordinator.netdisks[.quark] = nil }
     }
 
     /// 已经显示了一个 sheet 时什么也不做：替换它会丢掉用户在其中的操作，例如已打开的分享。
@@ -374,12 +413,12 @@ final class AppModel {
         self.sheet = sheet
     }
 
-    var canDownloadFromNetdisk: Bool { account != nil }
+    var canDownloadFromNetdisk: Bool { true }
 
     /// 应用变为活跃时调用。剪贴板中有新复制的分享链接时，打开添加链接，由 sheet 填入。
     /// 未登录、已有 sheet、剪贴板已经读过（包括手动打开添加链接时），或链接已经是一个任务的来源时不打开。
     func detectCopiedLink() async {
-        guard settings.detectsCopiedLinks, coordinator.isStarted, account != nil, sheet == nil,
+        guard settings.detectsCopiedLinks, coordinator.isStarted, sheet == nil,
               pasteboardCheck?.changeCount != NSPasteboard.general.changeCount else { return }
         guard let link = await shareLinkOnPasteboard(), sheet == nil,
               !coordinator.jobs.contains(where: { $0.link?.surl == link.surl }) else { return }
@@ -388,15 +427,15 @@ final class AppModel {
     }
 
     /// 剪贴板中有网址时才读取内容（见 `pasteboardMayContainWebURL`）。
-    func shareLinkOnPasteboard() async -> ShareLink? {
+    func shareLinkOnPasteboard() async -> DiskShareLink? {
         let pasteboard = NSPasteboard.general
         let changeCount = pasteboard.changeCount
         if let pasteboardCheck, pasteboardCheck.changeCount == changeCount {
             return pasteboardCheck.link
         }
-        var link: ShareLink?
+        var link: DiskShareLink?
         if await pasteboardMayContainWebURL(), let text = pasteboard.string(forType: .string) {
-            link = ShareLink.parse(text)
+            link = DiskShareLink.parse(text)
         }
         pasteboardCheck = (changeCount, link)
         return link
@@ -419,10 +458,21 @@ final class AppModel {
     }
 
     /// 百度明确返回登录失效时，显示失效横幅。其他错误不影响登录状态。
-    func noteError(_ error: any Error) {
+    func noteError(_ error: any Error, from disk: any Netdisk) {
+        guard coordinator.netdisks[disk.account.provider] === disk else { return }
         if let error = error as? BaiduError, error == .loginExpired, client != nil {
-            isLoginExpired = true
+            markBaiduExpired()
         }
+        if let error = error as? QuarkError, error == .loginExpired, let installedQuarkClient {
+            quark.noteExpired(client: installedQuarkClient)
+        }
+    }
+
+    private func markBaiduExpired() {
+        isLoginExpired = true
+        client?.revoke()
+        source.setBaidu(nil, account: nil)
+        coordinator.netdisks[.baidu] = nil
     }
 
     /// 没有未完成的任务时直接退出登录，返回 false；否则返回 true，由界面先确认。
@@ -435,24 +485,26 @@ final class AppModel {
     }
 
     var hasUnfinishedJobs: Bool {
-        coordinator.jobs.contains { $0.isUnfinished }
+        coordinator.jobs.contains { $0.provider == .baidu && $0.isUnfinished }
     }
 
     /// `downloadFolder` 为 nil 时，任务使用设置中的下载目录。
-    func addJob(session: ShareSession, entries: [ShareEntry], downloadFolder: DownloadFolder? = nil) {
-        coordinator.addJob(session: session, entries: entries, downloadFolder: downloadFolder)
+    func addJob(session: DiskShareSession, entries: [RemoteEntry], downloadFolder: DownloadFolder? = nil) {
+        guard accountKey(for: session.account.provider) == session.account else { return }
+        lastAddedJobID = coordinator.addJob(session: session, entries: entries, downloadFolder: downloadFolder).id
         requestNotificationAuthorization()
     }
 
     /// `accountUK` 是勾选的条目所在网盘的账号。`downloadFolder` 为 nil 时，任务使用设置中的下载目录。
-    func addNetdiskJob(entries: [NetdiskEntry], accountUK: Int64, downloadFolder: DownloadFolder? = nil) {
-        coordinator.addNetdiskJob(entries: entries, accountUK: accountUK, downloadFolder: downloadFolder)
+    func addNetdiskJob(entries: [RemoteEntry], account: AccountKey, downloadFolder: DownloadFolder? = nil) {
+        guard accountKey(for: account.provider) == account else { return }
+        lastAddedJobID = coordinator.addNetdiskJob(entries: entries, account: account, downloadFolder: downloadFolder).id
         requestNotificationAuthorization()
     }
 
     /// 启动恢复完成前和移除期间，任务不接受操作。
     func canOperate(on job: Job) -> Bool {
-        coordinator.isStarted && !coordinator.removingJobs.contains(job.id)
+        coordinator.isStarted && coordinator.restorationProblem == nil && !coordinator.removingJobs.contains(job.id)
     }
 
     func pause(_ job: Job) {
@@ -505,9 +557,9 @@ final class AppModel {
         jobs.contains { canOperate(on: $0) && $0.files.contains(where: \.isCompleted) }
     }
 
-    func remove(_ job: Job, trashingFiles: Bool = false) {
+    func remove(_ job: Job, trashingFiles: Bool = false, cleanupConfirmed: Bool? = nil) {
         Task {
-            let failed = await coordinator.remove(job.id, trashingFiles: trashingFiles)
+            let failed = await coordinator.remove(job.id, trashingFiles: trashingFiles, cleanupConfirmed: cleanupConfirmed)
             untrashedItems += failed
         }
     }
@@ -523,8 +575,13 @@ final class AppModel {
     private func notifyCompletion(of job: Job) {
         let content = UNMutableNotificationContent()
         content.title = "下载完成"
-        content.body = job.title
+        content.body = job.provider.title + " · " + job.title
         let request = UNNotificationRequest(identifier: job.id.uuidString, content: content, trigger: nil)
         Task { try? await UNUserNotificationCenter.current().add(request) }
     }
+}
+
+private struct AppAccountError: LocalizedError {
+    let message: String
+    var errorDescription: String? { message }
 }

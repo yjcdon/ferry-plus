@@ -1,8 +1,10 @@
 import Foundation
+import os
 
 /// 本机直连的夸克登录客户端。Cookie 按域和路径发送，独立于系统及百度会话。
 public actor QuarkClient {
     private let session: URLSession
+    private let revoked = OSAllocatedUnfairLock(initialState: false)
     private var cookies: [QuarkCredential.Cookie]
     private var credentialDidChange: (@Sendable (QuarkCredential) async throws -> Void)?
 
@@ -13,6 +15,12 @@ public actor QuarkClient {
     }
 
     deinit { session.invalidateAndCancel() }
+
+    /// 换号或更换网络会话时立即撤销，避免旧适配器恢复等待后继续发起写请求。
+    public nonisolated func revoke() {
+        revoked.withLock { $0 = true }
+        session.invalidateAndCancel()
+    }
 
     private static let userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/2.5.20 Chrome/100.0.4896.160 Electron/18.3.5.4-b478491100 Safari/537.36 Channel/pckk_other_ch"
     private static let commonQuery = [("pr", "ucpro"), ("fr", "pc"), ("uc_param_str", "")]
@@ -233,6 +241,7 @@ public actor QuarkClient {
         var payload = body
         for _ in 0..<6 {
             try Task.checkCancellation()
+            guard !revoked.withLock({ $0 }) else { throw CancellationError() }
             guard url.scheme == "https", let host = url.host,
                   host == "quark.cn" || host.hasSuffix(".quark.cn") else { throw QuarkError.unsafeRedirect }
             var request = URLRequest(url: url)

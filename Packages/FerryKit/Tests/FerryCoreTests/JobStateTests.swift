@@ -1,11 +1,52 @@
 import BaiduKit
-import DownloadKit
+@testable import DownloadKit
 import Foundation
 import Testing
 @testable import FerryCore
 
 /// 任务状态和引擎状态的一致性：暂停与继续交错、转存刚结束时的操作、启动前的操作、完成状态的保存。
 @MainActor @Suite struct JobStateTests {
+    @Test func migratesLegacyPathContextKeepingPartialBytesAndBackup() async throws {
+        let fixture = Fixture(share: ["a.bin": randomData(50_000)])
+        let job = try await fixture.makeTransferredJob()
+        try fixture.store.save([job])
+        let file = try #require(job.files.first)
+        let source = try #require(fixture.netdisk.data(at: file.remotePath))
+        let request = DownloadRequest(id: file.id, destination: fixture.downloads.appendingPathComponent(file.relativePath),
+                                      expectedSize: file.size, context: Data(file.remotePath.utf8))
+        try FileManager.default.createDirectory(at: fixture.downloads, withIntermediateDirectories: true)
+        try source.prefix(10_000).write(to: request.temporaryURL)
+        var record = DownloadRecord(request: request)
+        record.acceptsRanges = true
+        record.segments = [Segment(start: 0, end: file.size, received: 10_000)]
+        record.isPaused = true
+        let state = StateStore(directory: fixture.stateDirectory)
+        try state.save(record)
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+        try await coordinator.waitForPhase(.completed, of: job.id)
+        let completed = try #require(coordinator.job(job.id)?.files.first)
+        #expect(completed.id == file.id)
+        #expect(try Data(contentsOf: #require(completed.localURL)) == source)
+        let backup = try JSONDecoder().decode(DownloadRecord.self, from: Data(contentsOf: state.fileURL(for: file.id).appendingPathExtension("before-context")))
+        #expect(backup.request.context == Data(file.remotePath.utf8))
+        #expect(backup.receivedBytes == 10_000)
+    }
+    @Test func corruptDownloadRecordStopsRestorationWithoutOverwritingProgress() async throws {
+        let fixture = Fixture(share: ["a.bin": randomData(10)])
+        let job = try await fixture.makeTransferredJob()
+        try fixture.store.save([job])
+        try FileManager.default.createDirectory(at: fixture.stateDirectory, withIntermediateDirectories: true)
+        let corrupt = fixture.stateDirectory.appendingPathComponent("corrupt.json")
+        let bytes = Data("{".utf8)
+        try bytes.write(to: corrupt)
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+        #expect(coordinator.restorationProblem != nil)
+        #expect(coordinator.job(job.id)?.isPaused == true)
+        #expect(try Data(contentsOf: corrupt) == bytes)
+        #expect(fixture.server.log.isEmpty)
+    }
     private func files(_ count: Int, size: Int = 200_000) -> [String: Data] {
         Dictionary(uniqueKeysWithValues: (0..<count).map { ("f\($0).bin", randomData(size)) })
     }
@@ -195,7 +236,7 @@ import Testing
         let events = engine.events()
         try await engine.enqueue(DownloadRequest(
             id: file.id, destination: fixture.downloads.appending(path: file.relativePath), expectedSize: file.size,
-            context: BaiduDownloadSource.context(forRemotePath: file.remotePath)))
+            context: try DownloadContext(account: Fixture.account, reference: .baidu(path: file.remotePath, fsID: 0), size: file.size).encoded()))
         for await event in events {
             if case .stateChanged(let snapshot) = event, case .completed = snapshot.state { break }
         }

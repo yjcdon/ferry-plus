@@ -16,6 +16,11 @@ public struct JobStore: Sendable {
 
     public func save(_ jobs: [Job]) throws {
         try FileManager.default.createDirectory(at: fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        // 首次升级前保留原始 JSON；分片和下载 ID 不变。
+        let backup = fileURL.appendingPathExtension("before-dual-drive")
+        if FileManager.default.fileExists(atPath: fileURL.path), !FileManager.default.fileExists(atPath: backup.path) {
+            try FileManager.default.copyItem(at: fileURL, to: backup)
+        }
         try JSONEncoder().encode(jobs).write(to: fileURL, options: .atomic)
     }
 

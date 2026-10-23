@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 /// 下载一个文件：规划分片、并行下载、重试、保存进度，完成后移到目标路径。
 ///
@@ -140,7 +141,7 @@ struct FileTransfer: Sendable {
         try await withThrowingTaskGroup(of: Void.self) { group in
             var running = 0
             while true {
-                while running < max(1, configuration.segmentsPerFile), let index = next.next() {
+                while running < max(1, min(record.request.connections ?? configuration.segmentsPerFile, configuration.segmentsPerFile)), let index = next.next() {
                     group.addTask { try await downloadSegment(index) }
                     running += 1
                 }
@@ -167,6 +168,19 @@ struct FileTransfer: Sendable {
                 record.totalBytes = record.request.expectedSize
             }
             throw FetchError.invalidResponse("file size \(size ?? 0) does not match \(expected)")
+        }
+        if let expectedMD5 = current.request.expectedMD5 {
+            let handle = try FileHandle(forReadingFrom: temporaryURL)
+            defer { try? handle.close() }
+            var hash = Insecure.MD5()
+            while let chunk = try handle.read(upToCount: 1024 * 1024), !chunk.isEmpty {
+                try Task.checkCancellation()
+                hash.update(data: chunk)
+            }
+            let actual = hash.finalize().map { String(format: "%02x", $0) }.joined()
+            guard actual.caseInsensitiveCompare(expectedMD5) == .orderedSame else {
+                throw FetchError.invalidResponse("文件 MD5 与远端校验值不一致，请重新添加任务")
+            }
         }
         do {
             return try FileManager.default.moveItem(temporaryURL, toAvailable: record.request.destination)
@@ -207,6 +221,16 @@ struct FileTransfer: Sendable {
         let range = usesRange ? "bytes=\(segment.offset)-\(segment.end.map { String($0 - 1) } ?? "")" : nil
         try await DataTaskRunner.run(makeRequest(link, range: range), session: session) { response in
             try Self.validate(response, for: segment, usesRange: usesRange, totalBytes: totalBytes)
+            let tag = response.value(forHTTPHeaderField: "ETag")
+            let modified = response.value(forHTTPHeaderField: "Last-Modified")
+            let changed = record.update { value in
+                if let previous = value.entityTag, let tag, previous != tag { return true }
+                if value.entityTag == nil, let previous = value.lastModified, let modified, previous != modified { return true }
+                value.entityTag = value.entityTag ?? tag
+                value.lastModified = value.lastModified ?? modified
+                return false
+            }
+            if changed { throw FetchError.invalidResponse("远端文件内容已变化，请重新添加任务") }
             return true
         } onData: { data in
             let count = Int64(data.count)
@@ -273,6 +297,12 @@ struct FileTransfer: Sendable {
         request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
         if let range {
             request.setValue(range, forHTTPHeaderField: "Range")
+            let current = record.value
+            if let tag = current.entityTag, !tag.hasPrefix("W/") {
+                request.setValue(tag, forHTTPHeaderField: "If-Range")
+            } else if let modified = current.lastModified {
+                request.setValue(modified, forHTTPHeaderField: "If-Range")
+            }
         }
         return request
     }
