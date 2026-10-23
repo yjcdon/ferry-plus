@@ -114,8 +114,39 @@ public struct TransferProgress: Codable, Sendable, Hashable {
     public var taskID: String?
     public var submitted: Bool
     public var completed: Bool
-    public init(taskID: String? = nil, submitted: Bool = false, completed: Bool = false) {
+    public var batches: [TransferBatchProgress]?
+    public init(taskID: String? = nil, submitted: Bool = false, completed: Bool = false,
+                batches: [TransferBatchProgress]? = nil) {
         self.taskID = taskID; self.submitted = submitted; self.completed = completed
+        self.batches = batches
+    }
+
+    public var needsSubmission: Bool { batches.map { $0.contains { !$0.submitted } } ?? !submitted }
+
+    /// 已提交意图在写盘失败时仍未发出 POST，可以安全恢复前态；回执和完成状态不能回滚。
+    func introducesSubmissionIntent(comparedTo previous: Self?) -> Bool {
+        if let batches {
+            return batches.contains { batch in
+                batch.submitted && batch.taskID == nil && !batch.completed &&
+                    previous?.batches?.first(where: { $0.relativeDirectory == batch.relativeDirectory })?.submitted != true
+            }
+        }
+        return submitted && taskID == nil && !completed && previous?.submitted != true
+    }
+}
+
+/// 每个分享相对目录的独立转存回执；不含分享令牌，任务恢复只重提明确未提交的组。
+public struct TransferBatchProgress: Codable, Sendable, Hashable {
+    public let relativeDirectory: String
+    public let entryIDs: [String]
+    public var destination: RemoteReference?
+    public var submitted: Bool
+    public var taskID: String?
+    public var completed: Bool
+    public init(relativeDirectory: String, entryIDs: [String], destination: RemoteReference? = nil,
+                submitted: Bool = false, taskID: String? = nil, completed: Bool = false) {
+        self.relativeDirectory = relativeDirectory; self.entryIDs = entryIDs; self.destination = destination
+        self.submitted = submitted; self.taskID = taskID; self.completed = completed
     }
 }
 

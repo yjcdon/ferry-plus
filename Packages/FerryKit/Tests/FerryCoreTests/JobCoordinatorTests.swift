@@ -2,9 +2,224 @@ import BaiduKit
 @testable import DownloadKit
 import Foundation
 import Testing
+import QuarkKit
+import os
 @testable import FerryCore
 
 @MainActor @Suite struct JobCoordinatorTests {
+    private func quarkSelection(_ disk: QuarkNetdisk) async throws -> (DiskShareSession, [RemoteEntry]) {
+        let session = try await disk.openShare(DiskShareLink(provider: .quark, code: "test"), password: nil)
+        let root = try await disk.listShare(session, directory: nil)
+        let docs = try #require(root.first { $0.name == "docs" })
+        let children = try await disk.listShare(session, directory: docs)
+        let readme = try #require(children.first { !$0.isDirectory })
+        let nested = try #require(children.first { $0.isDirectory })
+        let report = try #require(try await disk.listShare(session, directory: nested).first)
+        return (session, [readme, report])
+    }
+
+    @Test func quarkPartialSelectionPreservesSameNamesInDifferentDirectories() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        let disk = stub.makeDisk()
+        let (session, entries) = try await quarkSelection(disk)
+        defer { Task { await disk.releaseShare(session) } }
+        #expect(entries.map(\.relativeDirectory) == ["docs", "docs/nested"])
+        #expect(entries.map(\.name) == ["readme.txt", "readme.txt"])
+        let ledger = OSAllocatedUnfairLock<[TransferProgress]>(initialState: [])
+        let result = try await disk.submitTransfer(session, entries: entries,
+            to: TransferDirectory(reference: .quark(fid: "owned"), name: "TASK"), previous: nil) { progress in
+                ledger.withLock { $0.append(progress) }
+            }
+        let state = stub.state.withLock { $0 }
+        #expect(state.saves.count == 2)
+        #expect(state.saves[0].fids == ["readme"])
+        #expect(state.saves[1].fids == ["report"])
+        #expect(state.folders["owned"]?.first?.name == "docs")
+        let docs = try #require(state.folders["owned"]?.first?.fid)
+        #expect(state.folders[docs]?.first?.name == "nested")
+        #expect(state.saves[0].destination == docs)
+        #expect(state.saves[1].destination == state.folders[docs]?.first?.fid)
+        #expect(result.completed && result.batches?.allSatisfy(\.completed) == true)
+        for index in 0..<2 {
+            let history = ledger.withLock { $0.compactMap { $0.batches?[index] } }
+            let intent = try #require(history.firstIndex { $0.submitted && $0.taskID == nil })
+            let receipt = try #require(history.firstIndex { $0.taskID != nil && !$0.completed })
+            let complete = try #require(history.firstIndex { $0.completed })
+            #expect(intent < receipt && receipt < complete)
+        }
+    }
+
+    @Test func quarkResumesKnownBatchAndSubmitsOnlyRemainingBatch() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        let disk = stub.makeDisk()
+        let (session, entries) = try await quarkSelection(disk)
+        let ledger = OSAllocatedUnfairLock<TransferProgress?>(initialState: nil)
+        _ = stub.state.withLock { $0.failQueries.insert("task-1") }
+        do {
+            _ = try await disk.submitTransfer(session, entries: entries,
+                to: TransferDirectory(reference: .quark(fid: "owned"), name: "TASK"), previous: nil) { progress in ledger.withLock { $0 = progress } }
+            Issue.record("expected interrupted polling")
+        } catch {}
+        let previous = try #require(ledger.withLock { $0 })
+        #expect(previous.batches?[0].taskID == "task-1")
+        #expect(previous.batches?[1].submitted == false)
+        await disk.releaseShare(session)
+        let resumed = stub.makeDisk()
+        let reopened = try await resumed.openShare(DiskShareLink(provider: .quark, code: "test"), password: nil)
+        try await resumed.prepareTransfer(reopened, entries: [entries[1]])
+        let result = try await resumed.submitTransfer(reopened, entries: entries,
+            to: TransferDirectory(reference: .quark(fid: "owned"), name: "TASK"), previous: previous) { progress in ledger.withLock { $0 = progress } }
+        await resumed.releaseShare(reopened)
+        let state = stub.state.withLock { $0 }
+        #expect(result.completed)
+        #expect(state.saves.count == 2)
+        #expect(state.queried == ["task-1", "task-1", "task-2"])
+        #expect(state.folders.count == 3)
+    }
+
+    @Test func quarkUnknownSubmissionNeverRepeatsOrStartsNextBatch() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        let disk = stub.makeDisk()
+        let (session, entries) = try await quarkSelection(disk)
+        _ = stub.state.withLock { $0.loseReceipts.insert(1) }
+        let ledger = OSAllocatedUnfairLock<TransferProgress?>(initialState: nil)
+        do {
+            _ = try await disk.submitTransfer(session, entries: entries,
+                to: TransferDirectory(reference: .quark(fid: "owned"), name: "TASK"), previous: nil) { progress in ledger.withLock { $0 = progress } }
+            Issue.record("expected lost receipt")
+        } catch {}
+        let previous = try #require(ledger.withLock { $0 })
+        #expect(previous.batches?[0].submitted == true && previous.batches?[0].taskID == nil)
+        do {
+            _ = try await disk.submitTransfer(session, entries: entries,
+                to: TransferDirectory(reference: .quark(fid: "owned"), name: "TASK"), previous: previous) { progress in ledger.withLock { $0 = progress } }
+            Issue.record("unknown submission should stop")
+        } catch TransferCheckError.unconfirmedTransfer {}
+        await disk.releaseShare(session)
+        #expect(stub.state.withLock { $0.saves.count } == 1)
+        #expect(stub.state.withLock { $0.queried.isEmpty })
+    }
+
+    @Test func quarkCompletedFirstBatchSkipsItWhenRestoringSecond() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        let disk = stub.makeDisk()
+        let (session, entries) = try await quarkSelection(disk)
+        let ledger = OSAllocatedUnfairLock<TransferProgress?>(initialState: nil)
+        do {
+            _ = try await disk.submitTransfer(session, entries: entries,
+                to: TransferDirectory(reference: .quark(fid: "owned"), name: "TASK"), previous: nil) { progress in
+                    ledger.withLock { $0 = progress }
+                    if progress.batches?[0].completed == true, progress.batches?[1].destination == nil { throw CancellationError() }
+                }
+            Issue.record("expected interruption between batches")
+        } catch is CancellationError {}
+        let previous = try #require(ledger.withLock { $0 })
+        #expect(previous.batches?[0].completed == true && previous.batches?[1].submitted == false)
+        let result = try await disk.submitTransfer(session, entries: entries,
+            to: TransferDirectory(reference: .quark(fid: "owned"), name: "TASK"), previous: previous) { progress in ledger.withLock { $0 = progress } }
+        await disk.releaseShare(session)
+        #expect(result.completed)
+        #expect(stub.state.withLock { $0.saves.count } == 2)
+        #expect(stub.state.withLock { $0.queried } == ["task-1", "task-2"])
+    }
+
+    @Test func quarkReceiptWriteFailureRetainsTaskIDForRetry() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        let disk = stub.makeDisk()
+        let (session, entries) = try await quarkSelection(disk)
+        let fixture = Fixture()
+        let coordinator = fixture.makeCoordinator()
+        coordinator.netdisks[.quark] = disk
+        await coordinator.start()
+        let file = fixture.store.fileURL
+        let backup = file.appendingPathExtension("before-receipt")
+        stub.state.withLock { state in
+            state.afterSave = {
+                try FileManager.default.moveItem(at: file, to: backup)
+                try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+            }
+        }
+        let job = coordinator.addJob(session: session, entries: entries)
+        try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
+        let progress = try #require(coordinator.job(job.id)?.transferProgress)
+        #expect(progress.batches?[0].taskID == "task-1")
+        #expect(stub.state.withLock { $0.saves.count } == 1)
+        try FileManager.default.moveItem(at: file, to: file.appendingPathExtension("blocked-receipt"))
+        try FileManager.default.moveItem(at: backup, to: file)
+        await coordinator.retry(job.id)
+        try await waitUntil("all restored Quark batches completed") { coordinator.job(job.id)?.transferProgress?.completed == true }
+        // 此桩只模拟转存协议，不提供下载文件；等目录核对自然结束后再关停。
+        try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
+        #expect(stub.state.withLock { $0.saves.count } == 2)
+        #expect(stub.state.withLock { $0.queried } == ["task-1", "task-2"])
+        await disk.releaseShare(session)
+        await coordinator.shutdown()
+    }
+
+    @Test func quarkSelectedParentSuppressesAlreadyIncludedDescendants() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        let disk = stub.makeDisk()
+        let (session, children) = try await quarkSelection(disk)
+        let root = try await disk.listShare(session, directory: nil)
+        let docs = try #require(root.first { $0.id == "docs" })
+        let result = try await disk.submitTransfer(session, entries: [docs] + children,
+            to: TransferDirectory(reference: .quark(fid: "owned"), name: "TASK"), previous: nil) { _ in }
+        await disk.releaseShare(session)
+        #expect(result.batches?.count == 1)
+        #expect(stub.state.withLock { $0.saves.first?.fids } == ["docs"])
+        #expect(stub.state.withLock { $0.saves.first?.destination } == "owned")
+    }
+
+    @Test func quarkPartialDirectoryAndSiblingFileShareCorrectParentBatch() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        let disk = stub.makeDisk()
+        let (session, leaves) = try await quarkSelection(disk)
+        let root = try await disk.listShare(session, directory: nil)
+        let docs = try #require(root.first { $0.id == "docs" })
+        let children = try await disk.listShare(session, directory: docs)
+        let nested = try #require(children.first { $0.id == "nested" })
+        let result = try await disk.submitTransfer(session, entries: [leaves[0], nested],
+            to: TransferDirectory(reference: .quark(fid: "owned"), name: "TASK"), previous: nil) { _ in }
+        await disk.releaseShare(session)
+        #expect(result.completed && result.batches?.count == 1)
+        #expect(result.batches?.first?.relativeDirectory == "docs")
+        #expect(stub.state.withLock { $0.saves.first?.fids } == ["nested", "readme"])
+        #expect(stub.state.withLock { $0.saves.count } == 1)
+    }
+
+    @Test func quarkSavedDestinationMustRemainInsideOwnedRoot() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        let disk = stub.makeDisk()
+        let (session, entries) = try await quarkSelection(disk)
+        let previous = TransferProgress(batches: [TransferBatchProgress(relativeDirectory: "docs", entryIDs: [entries[0].id],
+            destination: .quark(fid: "outside-owned-root"))])
+        do {
+            _ = try await disk.submitTransfer(session, entries: [entries[0]],
+                to: TransferDirectory(reference: .quark(fid: "owned"), name: "TASK"), previous: previous) { _ in }
+            Issue.record("foreign destination should fail")
+        } catch QuarkError.invalidSelection {}
+        await disk.releaseShare(session)
+        #expect(stub.state.withLock { $0.saves.isEmpty })
+        #expect(stub.state.withLock { $0.folders.count } == 1)
+    }
+
+    @Test func quarkBatchProgressKeepsLegacySingleTaskCompatibility() throws {
+        let legacy = try JSONDecoder().decode(TransferProgress.self,
+            from: Data(#"{"taskID":"old-task","submitted":true,"completed":false}"#.utf8))
+        #expect(legacy.batches == nil && !legacy.needsSubmission)
+        let batch = TransferProgress(submitted: true, batches: [TransferBatchProgress(relativeDirectory: "docs", entryIDs: ["f1"],
+            destination: .quark(fid: "owned-child"), submitted: true, taskID: "batch-task")])
+        #expect(try JSONDecoder().decode(TransferProgress.self, from: JSONEncoder().encode(batch)) == batch)
+    }
+
     private let share: [String: Data] = [
         "a.bin": randomData(300_000),
         "docs/readme.txt": randomData(1_000),

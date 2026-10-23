@@ -2,6 +2,7 @@ import BaiduKit
 import DownloadKit
 import Foundation
 import os
+import QuarkKit
 import Testing
 @testable import FerryCore
 
@@ -159,13 +160,15 @@ final class FakeNetdisk: Netdisk {
         return TransferDirectory(reference: .baidu(path: path, fsID: 0), name: name)
     }
 
-    func submitTransfer(_ session: DiskShareSession, entries: [RemoteEntry], to directory: TransferDirectory) async throws -> TransferProgress {
+    func submitTransfer(_ session: DiskShareSession?, entries: [RemoteEntry], to directory: TransferDirectory,
+                        previous: TransferProgress?,
+                        onProgress: @Sendable (TransferProgress) async throws -> Void) async throws -> TransferProgress {
+        if let previous, previous.completed { return previous }
+        guard previous?.submitted != true, let session else { throw TransferCheckError.unconfirmedTransfer }
+        try await onProgress(TransferProgress(submitted: true))
         try await transfer(session, entries: entries, to: directory.reference.identifier)
-        return TransferProgress(submitted: true, completed: true)
-    }
-
-    func waitForTransfer(_ progress: TransferProgress) async throws -> TransferProgress {
-        guard progress.completed else { throw TransferCheckError.unconfirmedTransfer }
+        let progress = TransferProgress(submitted: true, completed: true)
+        try await onProgress(progress)
         return progress
     }
 
@@ -305,6 +308,28 @@ final class FileServer: Sendable {
 final class FileProtocol: URLProtocol, @unchecked Sendable {
     private static let servers = OSAllocatedUnfairLock<[String: FileServer]>(initialState: [:])
     private let stopped = OSAllocatedUnfairLock(initialState: false)
+    private static let apiHandlers = OSAllocatedUnfairLock<[String: @Sendable (URLRequest) throws -> Data]>(initialState: [:])
+
+    static func registerAPI(_ id: String, handler: @escaping @Sendable (URLRequest) throws -> Data) {
+        apiHandlers.withLock { $0[id] = handler }
+    }
+    static func removeAPI(_ id: String) { apiHandlers.withLock { $0[id] = nil } }
+
+    static func body(_ request: URLRequest) throws -> [String: Any] {
+        var body = request.httpBody ?? Data()
+        if body.isEmpty, let stream = request.httpBodyStream {
+            stream.open()
+            defer { stream.close() }
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while true {
+                let count = stream.read(&buffer, maxLength: buffer.count)
+                if count < 0 { throw stream.streamError ?? URLError(.cannotDecodeRawData) }
+                if count == 0 { break }
+                body.append(contentsOf: buffer.prefix(count))
+            }
+        }
+        return try JSONSerialization.jsonObject(with: body) as! [String: Any]
+    }
 
     static func register(_ server: FileServer, host: String) {
         servers.withLock { $0[host] = server }
@@ -323,6 +348,18 @@ final class FileProtocol: URLProtocol, @unchecked Sendable {
 
     override func startLoading() {
         let request = request
+        if let id = request.value(forHTTPHeaderField: "X-Ferry-Test-API"),
+           let handler = Self.apiHandlers.withLock({ $0[id] }) {
+            do {
+                let data = try handler(request)
+                let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+                    headerFields: ["Content-Type": "application/json"])!
+                client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+                client?.urlProtocol(self, didLoad: data)
+                client?.urlProtocolDidFinishLoading(self)
+            } catch { client?.urlProtocol(self, didFailWithError: error) }
+            return
+        }
         guard let host = request.url?.host(), let server = Self.servers.withLock({ $0[host] }) else {
             client?.urlProtocol(self, didFailWithError: URLError(.cannotFindHost))
             return
@@ -332,6 +369,84 @@ final class FileProtocol: URLProtocol, @unchecked Sendable {
 
     override func stopLoading() {
         stopped.withLock { $0 = true }
+    }
+}
+
+/// 在真实 QuarkClient 请求边界模拟分组转存，只记录脱敏的文件和目的目录 ID。
+struct QuarkAPIStub: Sendable {
+    struct State {
+        var folders: [String: [(fid: String, name: String)]] = ["owned": []]
+        var saves: [(fids: [String], destination: String)] = []
+        var queried: [String] = []
+        var failQueries = Set<String>()
+        var loseReceipts = Set<Int>()
+        var afterSave: (@Sendable () throws -> Void)?
+    }
+    let id = UUID().uuidString
+    let state = OSAllocatedUnfairLock(initialState: State())
+
+    func makeDisk() -> QuarkNetdisk {
+        let state = state
+        FileProtocol.registerAPI(id) { request in
+            let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
+            let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+            let path = components.path
+            let data: Any
+            if path.hasSuffix("/share/sharepage/token") { data = ["stoken": "test-only", "title": "Test share"] }
+            else if path.hasSuffix("/share/sharepage/detail") {
+                let fid = query["pdir_fid"]!
+                let files: [(String, String, Bool)]
+                switch fid {
+                case "0": files = [("docs", "docs", true), ("cover", "cover.txt", false)]
+                case "docs": files = [("readme", "readme.txt", false), ("nested", "nested", true)]
+                case "nested": files = [("report", "readme.txt", false)]
+                default: files = []
+                }
+                data = ["list": files.map { item in ["fid": item.0, "file_name": item.1, "dir": item.2,
+                    "size": item.2 ? 0 : 12, "share_fid_token": "test-" + item.0, "pdir_fid": fid] as [String: Any] }]
+            } else if path.hasSuffix("/file/sort") {
+                let parent = query["pdir_fid"]!
+                let children = state.withLock { $0.folders[parent] ?? [] }
+                data = ["list": children.map { ["fid": $0.fid, "file_name": $0.name, "dir": true, "size": 0, "pdir_fid": parent] as [String: Any] }]
+            } else if path.hasSuffix("/file") {
+                let body = try FileProtocol.body(request)
+                let parent = body["pdir_fid"] as! String
+                let name = body["file_name"] as! String
+                data = state.withLock { state -> [String: String] in
+                    let fid = "created-\(state.folders.count)"
+                    state.folders[parent, default: []].append((fid, name))
+                    state.folders[fid] = []
+                    return ["fid": fid]
+                }
+            } else if path.hasSuffix("/share/sharepage/save") {
+                let body = try FileProtocol.body(request)
+                let fids = body["fid_list"] as! [String]
+                let destination = body["to_pdir_fid"] as! String
+                let result = state.withLock { state -> (Int, Bool, (@Sendable () throws -> Void)?) in
+                    state.saves.append((fids, destination))
+                    let count = state.saves.count
+                    let action = state.afterSave
+                    state.afterSave = nil
+                    return (count, state.loseReceipts.remove(count) != nil, action)
+                }
+                try result.2?()
+                if result.1 { throw URLError(.networkConnectionLost) }
+                data = ["task_id": "task-\(result.0)"]
+            } else if path.hasSuffix("/task") {
+                let task = query["task_id"]!
+                let failed = state.withLock { state -> Bool in
+                    state.queried.append(task)
+                    return state.failQueries.remove(task) != nil
+                }
+                if failed { throw URLError(.timedOut) }
+                data = ["status": 2]
+            } else { throw URLError(.unsupportedURL) }
+            return try JSONSerialization.data(withJSONObject: ["status": 200, "code": 0, "data": data])
+        }
+        let configuration = QuarkClient.defaultConfiguration()
+        configuration.protocolClasses = [FileProtocol.self]
+        configuration.httpAdditionalHeaders = ["X-Ferry-Test-API": id]
+        return QuarkNetdisk(client: QuarkClient(configuration: configuration), account: AccountKey(provider: .quark, accountID: "test"))
     }
 }
 

@@ -9,8 +9,9 @@ public protocol Netdisk: AnyObject, Sendable {
     func prepareTransfer(_ session: DiskShareSession, entries: [RemoteEntry]) async throws
     func listDirectory(_ directory: RemoteReference?) async throws -> [RemoteEntry]
     func createTransferDirectory(parentPath: String, name: String) async throws -> TransferDirectory
-    func submitTransfer(_ session: DiskShareSession, entries: [RemoteEntry], to directory: TransferDirectory) async throws -> TransferProgress
-    func waitForTransfer(_ progress: TransferProgress) async throws -> TransferProgress
+    func submitTransfer(_ session: DiskShareSession?, entries: [RemoteEntry], to directory: TransferDirectory,
+                        previous: TransferProgress?,
+                        onProgress: @Sendable (TransferProgress) async throws -> Void) async throws -> TransferProgress
     func deleteDirectory(_ directory: TransferDirectory) async throws
 }
 

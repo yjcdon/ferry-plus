@@ -36,14 +36,17 @@ public actor BaiduNetdisk: Netdisk {
         let entry = try await client.createOwnedDirectory(path)
         return TransferDirectory(reference: .baidu(path: path, fsID: entry.fsID), name: name)
     }
-    public func submitTransfer(_ session: DiskShareSession, entries: [RemoteEntry], to directory: TransferDirectory) async throws -> TransferProgress {
-        guard let share = shares[session.handle], session.account == account,
+    public func submitTransfer(_ session: DiskShareSession?, entries: [RemoteEntry], to directory: TransferDirectory,
+                               previous: TransferProgress?,
+                               onProgress: @Sendable (TransferProgress) async throws -> Void) async throws -> TransferProgress {
+        if let previous, previous.completed { return previous }
+        guard previous?.submitted != true else { throw TransferCheckError.unconfirmedTransfer }
+        guard let session, let share = shares[session.handle], session.account == account,
               case .baidu(let path, _) = directory.reference else { throw CoordinatorError.otherAccount }
+        try await onProgress(TransferProgress(submitted: true))
         try await client.transfer(share, entries: entries.map(Self.shareEntry), to: path)
-        return TransferProgress(submitted: true, completed: true)
-    }
-    public func waitForTransfer(_ progress: TransferProgress) async throws -> TransferProgress {
-        guard progress.completed else { throw TransferCheckError.unconfirmedTransfer }
+        let progress = TransferProgress(submitted: true, completed: true)
+        try await onProgress(progress)
         return progress
     }
     public func deleteDirectory(_ directory: TransferDirectory) async throws {

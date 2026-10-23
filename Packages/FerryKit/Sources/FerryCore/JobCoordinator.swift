@@ -490,31 +490,22 @@ public final class JobCoordinator {
         }
         guard let directory else { throw TransferCheckError.missingJobDirectory }
         var progress = original.transferProgress
-        if progress?.submitted != true {
-            // 使用本次策略打开分享，不复用已被代理/会话替换的窗口句柄。
-            let share = try await netdisk.openShare(link, password: password)
-            ownedShare = share
-            try await netdisk.prepareTransfer(share, entries: entries)
-            try checkCurrentAccount(original, expected: netdisk.account)
-            update(id) { $0.transferProgress = TransferProgress(submitted: true) }
-            do { try persistRequired() }
-            catch {
-                // 尚未发送提交请求，写盘失败可以安全重试，不能留下假“结果未知”。
-                update(id) { $0.transferProgress = original.transferProgress }
-                throw error
+        if progress?.completed != true {
+            if progress?.needsSubmission ?? true {
+                // 只有明确尚未提交的批次需要新的分享令牌，已有回执可直接恢复核对。
+                let share = try await netdisk.openShare(link, password: password)
+                ownedShare = share
+                let pendingIDs = progress?.batches.map { Set($0.filter { !$0.submitted }.flatMap(\.entryIDs)) }
+                let pending = pendingIDs.map { ids in entries.filter { ids.contains($0.id) } } ?? entries
+                try await netdisk.prepareTransfer(share, entries: pending)
             }
-            progress = try await netdisk.submitTransfer(share, entries: entries, to: directory)
-            update(id) { $0.transferProgress = progress }
-            try persistRequired()
-        }
-        guard var progress else { throw TransferCheckError.unconfirmedTransfer }
-        if !progress.completed {
-            progress = try await netdisk.waitForTransfer(progress)
             try checkCurrentAccount(original, expected: netdisk.account)
-            update(id) { $0.transferProgress = progress }
-            try persistRequired()
+            progress = try await netdisk.submitTransfer(ownedShare, entries: entries, to: directory, previous: progress) { [weak self] reported in
+                guard let self else { throw CancellationError() }
+                try await self.recordTransferProgress(reported, for: id, using: netdisk)
+            }
         }
-        guard progress.completed else { throw TransferCheckError.unconfirmedTransfer }
+        guard progress?.completed == true else { throw TransferCheckError.unconfirmedTransfer }
         let children = try await netdisk.listDirectory(directory.reference)
         try netdisk.validateChildren(children, of: directory.reference)
         let files = try await netdisk.files(in: children)
@@ -535,6 +526,20 @@ public final class JobCoordinator {
             }
         }
         return files
+    }
+
+    /// 批次意图写盘失败时尚未发出请求；已收到的回执即使磁盘失败也保留在内存供再次保存。
+    private func recordTransferProgress(_ progress: TransferProgress, for id: Job.ID, using netdisk: any Netdisk) throws {
+        guard let current = job(id) else { throw CancellationError() }
+        let previous = current.transferProgress
+        let isIntent = progress.introducesSubmissionIntent(comparedTo: previous)
+        if isIntent { try checkCurrentAccount(current, expected: netdisk.account) }
+        update(id) { $0.transferProgress = progress }
+        do { try persistRequired() }
+        catch {
+            if isIntent { update(id) { $0.transferProgress = previous } }
+            throw error
+        }
     }
 
     /// 校验并统一本地路径，保留每个文件的真实远端引用。
