@@ -29,6 +29,8 @@ public actor DownloadEngine {
     private var order: [String] = []
     /// 所有还没结束的传输任务，包括 `cancel(id:)` 已经从 `entries` 移除、还在收尾的。
     private var workers: [UUID: Task<Void, Never>] = [:]
+    /// 取消收尾仍拥有该 ID 的状态和临时文件，清理完成前不接纳同 ID 下载。
+    private var cancellingIDs: Set<String> = []
     /// 因为换会话而取消的传输任务。它们结束后，所属的文件下载立即在新会话上重新开始。
     private var restarting: Set<UUID> = []
     private let broadcaster = EventBroadcaster()
@@ -105,7 +107,7 @@ public actor DownloadEngine {
     public func restore(contexts: [String: Data] = [:], pausedIDs: Set<String> = []) throws -> [DownloadSnapshot] {
         let records = try store.loadAll().sorted { $0.createdAt < $1.createdAt }
         var restored: [DownloadSnapshot] = []
-        for var record in records where entries[record.request.id] == nil {
+        for var record in records where entries[record.request.id] == nil && !cancellingIDs.contains(record.request.id) {
             if let context = contexts[record.request.id], context != record.request.context {
                 try store.backupBeforeContextMigration(id: record.request.id)
                 record.request.context = context
@@ -124,9 +126,9 @@ public actor DownloadEngine {
         return restored
     }
 
-    /// 加入队列。已有同一 id 的下载（包括已完成的）时不做任何事。
+    /// 加入队列。已有同一 id 的下载（包括已完成或取消收尾中的）时不做任何事。
     public func enqueue(_ request: DownloadRequest) throws {
-        guard entries[request.id] == nil else { return }
+        guard entries[request.id] == nil, !cancellingIDs.contains(request.id) else { return }
         let record = DownloadRecord(request: request)
         try store.save(record)
         add(Entry(record: LiveRecord(record), state: .queued))
@@ -171,6 +173,8 @@ public actor DownloadEngine {
     /// 直到应用保存了最终路径并调用这个方法确认。这时只删除状态文件，不删除下载好的文件。
     public func cancel(id: String) async {
         guard let entry = entries.removeValue(forKey: id) else { return }
+        cancellingIDs.insert(id)
+        defer { cancellingIDs.remove(id) }
         order.removeAll { $0 == id }
         if let worker = entry.worker {
             worker.task.cancel()
@@ -249,7 +253,8 @@ public actor DownloadEngine {
 
     private func schedule() {
         guard !isShutDown else { return }
-        var active = entries.values.count { $0.worker != nil }
+        // 移出列表的取消任务仍可能收尾，结束前继续占用全局并发名额。
+        var active = workers.count
         for id in order where active < configuration.maxConcurrentFiles {
             guard let entry = entries[id], entry.state == .queued, entry.worker == nil else { continue }
             start(id)
@@ -283,8 +288,11 @@ public actor DownloadEngine {
     private func finish(_ id: String, _ workerID: UUID, _ outcome: FileTransfer.Outcome) {
         workers[workerID] = nil
         let restarts = restarting.remove(workerID) != nil
-        // cancel(id:) 等待期间，同一个 id 可能已经重新加入队列并开始了新的传输任务。
-        guard var entry = entries[id], entry.worker?.id == workerID else { return }
+        // cancel(id:) 已把任务移出列表，但收尾完成前仍占用 ID 和并发名额。
+        guard var entry = entries[id], entry.worker?.id == workerID else {
+            schedule()
+            return
+        }
         entry.worker = nil
         switch outcome {
         case .completed(let url):

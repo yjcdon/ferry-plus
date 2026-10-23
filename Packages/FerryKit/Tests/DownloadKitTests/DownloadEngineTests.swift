@@ -453,6 +453,64 @@ private let megabyte = 1 << 20
         #expect(!FileManager.default.fileExists(atPath: fixture.request("a.bin").temporaryURL.path))
     }
 
+    /// 移出列表的取消任务要等链接源收尾；期间新任务仍应排队，不能突破全局文件数。
+    @Test func cancellingWorkerKeepsItsGlobalConcurrencySlotUntilFinished() async throws {
+        let fixture = Fixture()
+        fixture.addFile("a.bin", size: 100 * kilobyte)
+        let expected = fixture.addFile("b.bin", size: 100 * kilobyte)
+        let source = GatedSource(fixture.source, gating: ["a.bin"])
+        defer { source.open() }
+        let engine = DownloadEngine(stateDirectory: fixture.stateDirectory, source: source,
+                                    configuration: .test(files: 1), session: fixture.session)
+        try await engine.enqueue(fixture.request("a.bin"))
+        try await waitUntil("a.bin waits for its link") { source.hasEntered("a.bin") }
+
+        let cancellation = Task { await engine.cancel(id: "a.bin") }
+        try await waitUntil("a.bin cancellation reaches the source") { source.wasCancelled("a.bin") }
+        try await engine.enqueue(fixture.request("b.bin"))
+        #expect(await engine.snapshot(id: "a.bin") == nil)
+        #expect(await engine.snapshot(id: "b.bin")?.state == .queued)
+        #expect(fixture.server.log.isEmpty)
+
+        source.open()
+        await cancellation.value
+        _ = try await engine.waitForCompletion(of: "b.bin")
+        #expect(fixture.contents("b.bin") == expected)
+        await engine.shutdown()
+    }
+
+    /// 同 ID 的清理与重新加入不能交叠，避免旧取消删除新下载的分片和状态文件。
+    @Test func sameIDIsReservedUntilCancellationCleanupCompletes() async throws {
+        let fixture = Fixture()
+        let expected = fixture.addFile("a.bin", size: 100 * kilobyte)
+        let source = GatedSource(fixture.source, gating: ["a.bin"])
+        defer { source.open() }
+        let engine = DownloadEngine(stateDirectory: fixture.stateDirectory, source: source,
+                                    configuration: .test(files: 1), session: fixture.session)
+        try await engine.enqueue(fixture.request("a.bin"))
+        try await waitUntil("a.bin waits for its first link") { source.hasEntered("a.bin") }
+
+        let cancellation = Task { await engine.cancel(id: "a.bin") }
+        try await waitUntil("a.bin cancellation reaches the source") { source.wasCancelled("a.bin") }
+        try await engine.enqueue(fixture.request("a.bin"))
+        #expect(await engine.snapshot(id: "a.bin") == nil)
+        #expect(try await engine.restore().isEmpty)
+        #expect(await engine.snapshot(id: "a.bin") == nil)
+        #expect(fixture.server.log.isEmpty)
+
+        source.open()
+        await cancellation.value
+        #expect(try fixture.savedRecords().isEmpty)
+        try await engine.enqueue(fixture.request("a.bin"))
+        _ = try await engine.waitForCompletion(of: "a.bin")
+        #expect(fixture.contents("a.bin") == expected)
+        let record = try #require(try fixture.savedRecords().first)
+        #expect(record.request.id == "a.bin")
+        #expect(record.receivedBytes == Int64(expected.count))
+        #expect(record.completedURL != nil)
+        await engine.shutdown()
+    }
+
     @Test func savesProgressPeriodicallyAndCancelRemovesFiles() async throws {
         let fixture = Fixture()
         fixture.addFile("a.bin", size: megabyte)
