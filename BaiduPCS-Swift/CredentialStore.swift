@@ -1,5 +1,6 @@
 import BaiduKit
 import Foundation
+import QuarkKit
 import Security
 
 /// 登录信息。账号随凭据一起保存，启动时不用等校验就能显示用户名。
@@ -23,6 +24,28 @@ enum CredentialStore {
     static func delete() {
         item.delete()
     }
+}
+
+/// 夸克凭据与账号使用独立条目保存，验证工具与界面共用此入口。
+struct StoredQuarkLogin: Codable {
+    let credential: QuarkCredential
+    let account: QuarkAccount
+}
+
+enum QuarkCredentialStore {
+    private static let item = KeychainItem(account: "quark-login", name: "夸克登录信息")
+
+    /// 仅“尚未保存”返回 nil，读取失败或数据损坏必须显示原因。
+    static func load() throws -> StoredQuarkLogin? {
+        guard let data = try item.loadChecked() else { return nil }
+        return try JSONDecoder().decode(StoredQuarkLogin.self, from: data)
+    }
+
+    static func save(_ login: StoredQuarkLogin) throws {
+        try item.save(JSONEncoder().encode(login))
+    }
+
+    static func delete() throws { try item.deleteChecked() }
 }
 
 /// 把 SOCKS5 代理的密码保存在 Keychain 中。代理的其他设置在 `FerrySettings` 中。
@@ -59,12 +82,19 @@ private struct KeychainItem {
     }
 
     func load() -> Data? {
+        try? loadChecked()
+    }
+
+    func loadChecked() throws -> Data? {
         var query = query
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess else { return nil }
-        return result as? Data
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        try check(status)
+        guard let data = result as? Data else { throw CocoaError(.coderReadCorrupt) }
+        return data
     }
 
     func save(_ data: Data) throws {
@@ -81,6 +111,11 @@ private struct KeychainItem {
 
     func delete() {
         SecItemDelete(query as CFDictionary)
+    }
+
+    func deleteChecked() throws {
+        let status = SecItemDelete(query as CFDictionary)
+        if status != errSecItemNotFound { try check(status) }
     }
 
     private func check(_ status: OSStatus) throws {

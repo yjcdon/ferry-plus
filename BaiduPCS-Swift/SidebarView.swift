@@ -73,52 +73,50 @@ struct SidebarView: View {
     }
 }
 
-/// 侧边栏底部的账号：用户名和状态。点击后弹出账号菜单。未登录时显示“登录…”。
+/// 两家账号入口共用应用会话；下载任务仍沿用当前百度链路。
 private struct AccountView: View {
     @Environment(AppModel.self) private var model
     @State private var isConfirmingLogOut = false
 
     var body: some View {
-        if let account = model.account {
-            Menu {
-                if model.isLoginExpired {
-                    Button("重新登录…") { model.presentLogin() }
+        Menu {
+            Section("百度网盘") {
+                if let account = model.account {
+                    Text(account.username.isEmpty ? "百度账号" : account.username)
+                    Text(model.isLoginExpired ? "登录已失效" : "已登录")
+                    Button("重新登录百度…") { model.presentLogin() }
+                    Button("退出百度登录") { isConfirmingLogOut = model.requestLogOut() }
+                } else {
+                    Text("未登录")
+                    Button("登录百度网盘…") { model.presentLogin() }
                 }
-                Button("退出登录") { isConfirmingLogOut = model.requestLogOut() }
-                Divider()
-                SettingsLink { Text("设置…") }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: model.isLoginExpired ? "person.crop.circle.badge.exclamationmark" : "person.crop.circle")
-                        .font(.title2)
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 0) {
-                        Text(account.username.isEmpty ? "百度账号" : account.username)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
-                        Text(model.isLoginExpired ? "登录已失效" : "已登录")
-                            .font(.caption)
-                            .foregroundStyle(model.isLoginExpired ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-                    }
-                    Spacer(minLength: 0)
+            }
+            Section("夸克网盘") {
+                QuarkAccountControls()
+            }
+            Divider()
+            SettingsLink { Text("设置…") }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "person.crop.circle").font(.title2)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("账号与登录")
+                    Text(accountStatus).font(.caption).foregroundStyle(.secondary)
                 }
-                .contentShape(.rect)
+                Spacer(minLength: 0)
             }
-            .menuStyle(.button)
-            // 悬停和按下时有高亮，看得出可以点击。
-            .buttonStyle(.accessoryBar)
-            .menuIndicator(.hidden)
-            .help("账号")
-            .logOutConfirmation(isPresented: $isConfirmingLogOut)
-        } else {
-            Button {
-                model.presentLogin()
-            } label: {
-                Label("登录…", systemImage: "person.crop.circle")
-                    .frame(maxWidth: .infinity)
-            }
-            .controlSize(.large)
+            .contentShape(.rect)
         }
+        .menuStyle(.button)
+        .buttonStyle(.accessoryBar)
+        .menuIndicator(.hidden)
+        .help("百度与夸克账号")
+        .logOutConfirmation(isPresented: $isConfirmingLogOut)
+    }
+
+    private var accountStatus: String {
+        let baidu = model.account == nil ? "百度未登录" : "百度已登录"
+        let quark = model.quark.account == nil ? "夸克未登录" : "夸克" + model.quark.state.title
+        return baidu + " · " + quark
     }
 }

@@ -6,7 +6,7 @@ struct FerryApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     var body: some Scene {
-        Window("Ferry", id: ContentView.windowID) {
+        Window("Ferry Plus", id: ContentView.windowID) {
             ContentView()
                 .environment(appDelegate.model)
         }
@@ -20,6 +20,13 @@ struct FerryApp: App {
         // 百度的登录页可能比主窗口大，所以登录用单独的窗口，不用 sheet。
         Window("登录百度网盘", id: LoginView.windowID) {
             LoginView()
+                .environment(appDelegate.model)
+        }
+        .windowResizability(.contentSize)
+        .commandsRemoved()
+
+        Window("登录夸克网盘", id: QuarkLoginView.windowID) {
+            QuarkLoginView()
                 .environment(appDelegate.model)
         }
         .windowResizability(.contentSize)
@@ -60,6 +67,13 @@ private struct FerryCommands: Commands {
                 .disabled(model.pausableJobs(in: jobs).isEmpty)
             Button("全部继续") { model.resumeAll(jobs) }
                 .disabled(model.resumableJobs(in: jobs).isEmpty)
+        }
+        CommandMenu("账号") {
+            Button("登录百度网盘…") {
+                openWindow(id: ContentView.windowID)
+                model.presentLogin()
+            }
+            Button("登录夸克网盘…") { openWindow(id: QuarkLoginView.windowID) }
         }
     }
 }

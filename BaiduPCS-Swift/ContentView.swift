@@ -9,6 +9,7 @@ struct ContentView: View {
 
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
+    @State private var hasShownQuarkLogin = false
     #if DEBUG
     @Environment(\.openSettings) private var openSettings
     #endif
@@ -25,6 +26,10 @@ struct ContentView: View {
             .onAppear {
                 model.openMainWindow = { [openWindow] in openWindow(id: Self.windowID) }
                 model.openLoginWindow = { [openWindow] in openWindow(id: LoginView.windowID) }
+                if ProcessInfo.processInfo.arguments.contains("--quark-login"), !hasShownQuarkLogin {
+                    hasShownQuarkLogin = true
+                    openWindow(id: QuarkLoginView.windowID)
+                }
                 #if DEBUG
                 if DemoData.isEnabled, DemoData.settingsTab != nil { openSettings() }
                 if DemoData.isEnabled, let sheet = DemoData.sheet.flatMap(AppModel.Sheet.init(rawValue:)) {

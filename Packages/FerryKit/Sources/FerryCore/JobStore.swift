@@ -41,7 +41,7 @@ public struct JobStore: Sendable {
 /// Ferry 在 Application Support 中的文件。
 public enum FerryDirectories {
     public static var applicationSupport: URL {
-        URL.applicationSupportDirectory.appendingPathComponent("Ferry", isDirectory: true)
+        URL.applicationSupportDirectory.appendingPathComponent("Ferry Plus", isDirectory: true)
     }
 
     public static var jobsFile: URL { applicationSupport.appendingPathComponent("jobs.json") }

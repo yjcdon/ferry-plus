@@ -308,6 +308,11 @@ private struct AccountSettingsView: View {
                         Button("登录…", action: showLogin)
                     }
                 }
+            } header: {
+                Text("百度网盘")
+            }
+            Section("夸克网盘") {
+                QuarkAccountControls()
             }
         }
         .formStyle(.grouped)

@@ -5,6 +5,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     let model = AppModel()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // 同一个签名应用读取同一个钥匙串条目，命令行只返回脱敏鉴权结果。
+        if ProcessInfo.processInfo.arguments.contains("--verify-quark-session") {
+            NSApp.setActivationPolicy(.prohibited)
+            NSApp.windows.forEach { $0.orderOut(nil) }
+            Task {
+                await model.quark.start()
+                do {
+                    let report = try model.quark.verificationReport()
+                    FileHandle.standardOutput.write(report + Data([10]))
+                    if case .loggedIn = model.quark.state { exit(0) }
+                    exit(1)
+                } catch {
+                    FileHandle.standardError.write(Data("无法生成夸克登录验证结果。\n".utf8))
+                    exit(1)
+                }
+            }
+            return
+        }
         UNUserNotificationCenter.current().delegate = self
         #if DEBUG
         if DemoData.isEnabled, let appearance = DemoData.appearance { NSApp.appearance = appearance }

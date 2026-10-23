@@ -131,8 +131,16 @@ struct JobSelection {
     let onRemove: ([Job], JobRemoval) -> Void
 }
 
+private struct JobSelectionKey: FocusedValueKey {
+    typealias Value = JobSelection
+}
+
 extension FocusedValues {
-    @Entry var jobSelection: JobSelection?
+    /// 显式声明键，保持原菜单行为且无需 Xcode 的 SwiftUI 宏插件。
+    var jobSelection: JobSelection? {
+        get { self[JobSelectionKey.self] }
+        set { self[JobSelectionKey.self] = newValue }
+    }
 }
 
 /// 移除任务时怎样处理已下载的文件。没完成的文件下载总是取消，并删除已下载的部分。

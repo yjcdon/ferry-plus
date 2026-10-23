@@ -10,10 +10,11 @@
 		18F1CB333086E8A000A59465 /* BaiduKit in Frameworks */ = {isa = PBXBuildFile; productRef = 18F1CB313086E8A000A59465 /* BaiduKit */; };
 		18F1CB343086E8A000A59465 /* DownloadKit in Frameworks */ = {isa = PBXBuildFile; productRef = 18F1CB323086E8A000A59465 /* DownloadKit */; };
 		18F1CB363086E8A000A59465 /* FerryCore in Frameworks */ = {isa = PBXBuildFile; productRef = 18F1CB353086E8A000A59465 /* FerryCore */; };
+		A1F100013086E8A000000001 /* QuarkKit in Frameworks */ = {isa = PBXBuildFile; productRef = A1F100023086E8A000000001 /* QuarkKit */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		18F1CB143086E87B00A59465 /* BaiduPCS-Swift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "BaiduPCS-Swift.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		18F1CB143086E87B00A59465 /* BaiduPCS-Swift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Ferry Plus.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		18F1CB403086E8A000A59465 /* Shared.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Shared.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -33,6 +34,7 @@
 				18F1CB333086E8A000A59465 /* BaiduKit in Frameworks */,
 				18F1CB343086E8A000A59465 /* DownloadKit in Frameworks */,
 				18F1CB363086E8A000A59465 /* FerryCore in Frameworks */,
+				A1F100013086E8A000000001 /* QuarkKit in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -87,6 +89,7 @@
 				18F1CB313086E8A000A59465 /* BaiduKit */,
 				18F1CB323086E8A000A59465 /* DownloadKit */,
 				18F1CB353086E8A000A59465 /* FerryCore */,
+				A1F100023086E8A000000001 /* QuarkKit */,
 			);
 			productName = "BaiduPCS-Swift";
 			productReference = 18F1CB143086E87B00A59465 /* BaiduPCS-Swift.app */;
@@ -286,15 +289,16 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Ferry;
+				INFOPLIST_KEY_CFBundleDisplayName = "Ferry Plus";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = app.ferry.Ferry;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.yjcdon.FerryPlus;
+				PRODUCT_NAME = "Ferry Plus";
+				ARCHS = arm64;
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -321,15 +325,16 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readwrite;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_CFBundleDisplayName = Ferry;
+				INFOPLIST_KEY_CFBundleDisplayName = "Ferry Plus";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 1.0;
-				PRODUCT_BUNDLE_IDENTIFIER = app.ferry.Ferry;
-				PRODUCT_NAME = "$(TARGET_NAME)";
+				PRODUCT_BUNDLE_IDENTIFIER = io.github.yjcdon.FerryPlus;
+				PRODUCT_NAME = "Ferry Plus";
+				ARCHS = arm64;
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
@@ -382,6 +387,10 @@
 		18F1CB353086E8A000A59465 /* FerryCore */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = FerryCore;
+		};
+		A1F100023086E8A000000001 /* QuarkKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = QuarkKit;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

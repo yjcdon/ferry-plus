@@ -1,5 +1,7 @@
 import BaiduKit
+import FerryCore
 import OSLog
+import QuarkKit
 import SwiftUI
 import WebKit
 
@@ -107,7 +109,7 @@ struct WebLoginView: View {
     }
 }
 
-/// 登录页的网页和 Cookie 检查。Ferry 不向页面注入脚本，不读取页面内容，只读取数据存储中的 Cookie。
+/// 两家官方登录页共用网页及 Cookie 监听；只读取 Cookie，不注入表单或登录脚本。
 @Observable
 final class WebLoginSession: NSObject {
     /// 主页面开始加载，还没有显示内容。不用 `WKWebView.isLoading`：它要等页面的所有子资源结束，
@@ -119,6 +121,8 @@ final class WebLoginSession: NSObject {
     private(set) var isMissingNetdiskSTOKEN = false
     /// 取得凭据时调用。之后不再检查，直到调用 `checkAgain()`。
     @ObservationIgnored var onCredential: ((Credential) -> Void)?
+    @ObservationIgnored var onQuarkCredential: ((QuarkCredential) -> Void)?
+    @ObservationIgnored private let provider: Provider
 
     @ObservationIgnored let webView: WKWebView
     @ObservationIgnored private let cookieStore: WKHTTPCookieStore
@@ -139,7 +143,9 @@ final class WebLoginSession: NSObject {
     /// 只有主版本号，其余为 0。Chrome 更新后，改这里的主版本号。
     private static let chromeUserAgent =
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0.0.0 Safari/537.36"
-    private static let startURL = URL(string: "https://pan.baidu.com/")!
+    private var startURL: URL {
+        URL(string: provider == .baidu ? "https://pan.baidu.com/" : "https://pan.quark.cn/")!
+    }
     /// 只有 BDUSS 时加载它。网盘的 STOKEN 在这一步写入。
     private static let diskMainURL = URL(string: "https://pan.baidu.com/disk/main")!
     /// 看到 BDUSS 后等这么久再加载网盘主页，不打断 passport 的安全验证等后续步骤。
@@ -148,7 +154,8 @@ final class WebLoginSession: NSObject {
     private static let diskMainTimeout: Duration = .seconds(10)
 
     /// 网页使用系统的代理设置，不使用设置中的 SOCKS5 代理。
-    override init() {
+    init(provider: Provider = .baidu) {
+        self.provider = provider
         let configuration = WKWebViewConfiguration()
         // 每次登录都是新的环境。关闭窗口后网页的 Cookie 全部丢弃，凭据只存在 Keychain 中。
         let dataStore = WKWebsiteDataStore.nonPersistent()
@@ -165,7 +172,7 @@ final class WebLoginSession: NSObject {
         guard !isActive else { return }
         isActive = true
         cookieStore.add(self)
-        webView.load(URLRequest(url: Self.startURL))
+        webView.load(URLRequest(url: startURL))
         // 登录后 Cookie 变化的通知不一定到达，网盘页面也可能一直不触发加载完成，所以还要定时检查。
         pollTask = Task { [weak self] in
             while (try? await Task.sleep(for: .seconds(1))) != nil {
@@ -180,12 +187,14 @@ final class WebLoginSession: NSObject {
         isActive = false
         pollTask?.cancel()
         onCredential = nil
+        onQuarkCredential = nil
         cookieStore.remove(self)
         webView.stopLoading()
     }
 
     func reload() {
         loadError = nil
+        hasDeliveredCredential = false
         if let failedURL {
             webView.load(URLRequest(url: failedURL))
         } else {
@@ -209,6 +218,19 @@ final class WebLoginSession: NSObject {
             let cookies = await cookieStore.allCookies()
             // 等待期间可能已经交出凭据，或窗口已经关闭。
             guard isActive, !hasDeliveredCredential else { return }
+            if provider == .quark {
+                // 官方页面自行完成扫码、短信及安全验证；应用只接收最终 Cookie。
+                do {
+                    let credential = try QuarkCredential(webCookies: cookies)
+                    hasDeliveredCredential = true
+                    onQuarkCredential?(credential)
+                } catch QuarkError.missingCredential {
+                    // 用户尚未完成官方登录，继续监听 Cookie。
+                } catch {
+                    loadError = error.localizedDescription
+                }
+                return
+            }
             Self.logCheck(cookies, page: webView.url, trigger: trigger, duration: .now - started)
             do {
                 let credential = try Credential.parse(cookies)
@@ -315,7 +337,7 @@ extension WebLoginSession: WKUIDelegate {
 }
 
 /// 显示 `WebLoginSession` 的网页。SwiftUI 的 `WebView` 不能处理 `window.open`，所以包装 `WKWebView`。
-private struct WebViewContainer: NSViewRepresentable {
+struct WebViewContainer: NSViewRepresentable {
     let webView: WKWebView
 
     func makeNSView(context: Context) -> WKWebView { webView }

@@ -9,11 +9,13 @@ let package = Package(
     ],
     products: [
         .library(name: "BaiduKit", targets: ["BaiduKit"]),
+        .library(name: "QuarkKit", targets: ["QuarkKit"]),
         .library(name: "DownloadKit", targets: ["DownloadKit"]),
         .library(name: "FerryCore", targets: ["FerryCore"]),
     ],
     targets: [
         .target(name: "BaiduKit"),
+        .target(name: "QuarkKit"),
         .target(name: "DownloadKit"),
         .target(name: "FerryCore", dependencies: ["BaiduKit", "DownloadKit"]),
         .testTarget(name: "BaiduKitTests", dependencies: ["BaiduKit"]),

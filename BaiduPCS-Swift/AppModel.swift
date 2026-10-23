@@ -4,11 +4,13 @@ import DownloadKit
 import FerryCore
 import Network
 import Observation
+import QuarkKit
 import UserNotifications
 
 /// 界面读取的全部状态：账号、设置和任务列表。界面的操作都经过它。
 @Observable
 final class AppModel {
+    let quark: QuarkAccountSession
     private(set) var account: Account?
     private(set) var client: BaiduClient?
     /// 后台校验发现 Cookie 已失效。正在进行的下载不停止。
@@ -98,6 +100,7 @@ final class AppModel {
                                     configuration: settings.downloadConfiguration(),
                                     sessionConfiguration: Self.applying(proxy, to: DownloadEngine.defaultSessionConfiguration()))
         self.settings = settings
+        quark = QuarkAccountSession(configuration: Self.applying(proxy, to: QuarkClient.defaultConfiguration()))
         self.proxyPassword = proxyPassword
         activeProxy = proxy
         self.source = source
@@ -136,6 +139,7 @@ final class AppModel {
         }
         #endif
         await coordinator.start()
+        await quark.start()
         // 启动时应用变为活跃的那次检测在任务列表加载前，被跳过，所以加载后再检测一次。
         if NSApp.isActive { await detectCopiedLink() }
         await revalidate()
@@ -265,6 +269,7 @@ final class AppModel {
         let proxy = ActiveProxy(settings.proxy, password: proxyPassword)
         guard proxy != activeProxy else { return }
         activeProxy = proxy
+        quark.updateConfiguration(Self.applying(proxy, to: QuarkClient.defaultConfiguration()))
         let configuration = Self.applying(proxy, to: DownloadEngine.defaultSessionConfiguration())
         let previous = sessionReplacement
         sessionReplacement = Task {
