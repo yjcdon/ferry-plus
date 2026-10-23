@@ -60,6 +60,66 @@ private struct DownloadSettingsView: View {
         }
     }
 
+    var body: some View {
+        @Bindable var model = model
+        Form {
+            Section {
+                // 和 Safari 的“文件下载位置”相同：系统的“下载”目录、选择的目录和“其他…”。
+                Picker("下载目录", selection: directoryChoice) {
+                    FolderLabel(url: AppModel.defaultDownloadDirectory).tag(DirectoryChoice.downloads)
+                    if !model.usesDefaultDownloadDirectory {
+                        FolderLabel(url: model.downloadDirectory).tag(DirectoryChoice.chosen)
+                    }
+                    Divider()
+                    Text("其他…").tag(DirectoryChoice.other)
+                }
+                .help(model.downloadDirectory.path(percentEncoded: false))
+                if let problem = model.downloadDirectoryProblem {
+                    Label(problem, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.orange)
+                }
+            }
+
+            Section {
+                Stepper(value: $model.settings.maxConcurrentFiles, in: model.settings.allowedConcurrentFiles) {
+                    LabeledContent("同时下载文件数", value: "\(model.settings.maxConcurrentFiles)")
+                }
+            } footer: {
+                Text("百度和夸克共用下载队列，同时下载文件数适用于所有网盘。")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle("检测剪贴板中的分享链接", isOn: $model.settings.detectsCopiedLinks)
+            } footer: {
+                Text("复制分享链接后切换到 Ferry Plus，自动打开“添加链接”并填入链接和提取码。")
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .formStyle(.grouped)
+        .fileImporter(isPresented: $isChoosingDirectory, allowedContentTypes: [.folder]) { result in
+            if case .success(let url) = result {
+                model.chooseDownloadDirectory(url)
+            }
+        }
+    }
+}
+
+/// 目录菜单中的一项：目录的显示名称和文件夹图标。
+struct FolderLabel: View {
+    let url: URL
+
+    var body: some View {
+        Label(FileManager.default.displayName(atPath: url.path(percentEncoded: false)), systemImage: "folder")
+    }
+}
+
+/// 百度与夸克各自的转存、清理和单文件连接设置。
+private struct NetdiskSettingsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var transferFolder = ""
+    @State private var quarkTransferFolder = ""
+
     /// 选择预设时填入它的两项。两项不等于任何预设时显示“自定义”。
     private var concurrencyPreset: Binding<ConcurrencyPreset?> {
         Binding {
@@ -88,23 +148,9 @@ private struct DownloadSettingsView: View {
         @Bindable var model = model
         Form {
             Section {
-                // 和 Safari 的“文件下载位置”相同：系统的“下载”目录、选择的目录和“其他…”。
-                Picker("下载目录", selection: directoryChoice) {
-                    FolderLabel(url: AppModel.defaultDownloadDirectory).tag(DirectoryChoice.downloads)
-                    if !model.usesDefaultDownloadDirectory {
-                        FolderLabel(url: model.downloadDirectory).tag(DirectoryChoice.chosen)
-                    }
-                    Divider()
-                    Text("其他…").tag(DirectoryChoice.other)
-                }
-                .help(model.downloadDirectory.path(percentEncoded: false))
-                if let problem = model.downloadDirectoryProblem {
-                    Label(problem, systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
-                }
-            }
-
-            Section {
+                TextField("转存目录", text: $transferFolder, prompt: Text("/Ferry"))
+                    .onSubmit(commitTransferFolders)
+                Toggle("下载后清理转存文件", isOn: $model.settings.cleanupAfterDownload)
                 Picker("网盘会员", selection: concurrencyPreset) {
                     Text("非超级会员").tag(ConcurrencyPreset?.some(.regular))
                     Text("超级会员").tag(ConcurrencyPreset?.some(.svip))
@@ -112,75 +158,55 @@ private struct DownloadSettingsView: View {
                         Text("自定义").tag(ConcurrencyPreset?.none)
                     }
                 }
-                Stepper(value: $model.settings.maxConcurrentFiles, in: model.settings.allowedConcurrentFiles) {
-                    LabeledContent("同时下载文件数", value: "\(model.settings.maxConcurrentFiles)")
-                }
                 Stepper(value: $model.settings.connectionsPerFile, in: model.settings.allowedConnections) {
                     LabeledContent("每个文件的连接数", value: "\(model.settings.connectionsPerFile)")
                 }
+            } header: {
+                Text("百度网盘")
             } footer: {
-                concurrencyFooter
-                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("每个分享任务转存到指定目录的独立子目录。会员预设会同时调整通用的同时下载文件数。")
+                        .foregroundStyle(.secondary)
+                    concurrencyFooter
+                }
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             Section {
-                Toggle("检测剪贴板中的分享链接", isOn: $model.settings.detectsCopiedLinks)
+                TextField("转存目录", text: $quarkTransferFolder, prompt: Text("/Ferry Plus"))
+                    .onSubmit(commitTransferFolders)
+                Toggle("下载后清理转存文件", isOn: $model.settings.quarkCleanupAfterDownload)
+                Stepper(value: $model.settings.quarkConnectionsPerFile, in: model.settings.allowedConnections) {
+                    LabeledContent("每个文件的连接数", value: "\(model.settings.quarkConnectionsPerFile)")
+                }
+            } header: {
+                Text("夸克网盘")
             } footer: {
-                Text("复制分享链接后切换到 Ferry，自动打开“添加链接”并填入链接和提取码。")
+                Text("每个分享任务转存到指定目录的独立子目录。仅清理本任务创建的转存文件，直接从网盘下载的源文件会保留。")
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
-        .fileImporter(isPresented: $isChoosingDirectory, allowedContentTypes: [.folder]) { result in
-            if case .success(let url) = result {
-                model.chooseDownloadDirectory(url)
-            }
+        .autocorrectionDisabled()
+        .onAppear {
+            transferFolder = model.settings.transferFolder
+            quarkTransferFolder = model.settings.quarkTransferFolder
         }
-    }
-}
-
-/// 目录菜单中的一项：目录的显示名称和文件夹图标。
-struct FolderLabel: View {
-    let url: URL
-
-    var body: some View {
-        Label(FileManager.default.displayName(atPath: url.path(percentEncoded: false)), systemImage: "folder")
-    }
-}
-
-/// 转存目录和清理。
-private struct NetdiskSettingsView: View {
-    @Environment(AppModel.self) private var model
-    /// 转存目录的草稿。按回车、切换标签页或关闭设置时校验并保存。
-    @State private var transferFolder = ""
-
-    var body: some View {
-        @Bindable var model = model
-        Form {
-            Section {
-                TextField("转存目录", text: $transferFolder, prompt: Text("/Ferry"))
-                    .autocorrectionDisabled()
-                    .onSubmit(commitTransferFolder)
-                Toggle("下载完成后删除网盘中的转存文件", isOn: $model.settings.cleanupAfterDownload)
-            } footer: {
-                Text("网盘中的目录。每个任务转存到其中的一个子目录。")
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .formStyle(.grouped)
-        .onAppear { transferFolder = model.settings.transferFolder }
-        .onDisappear(perform: commitTransferFolder)
+        .onDisappear(perform: commitTransferFolders)
     }
 
-    /// 空值恢复为 /Ferry；其他值整理为以 / 开头、不以 / 结尾的路径。
-    private func commitTransferFolder() {
-        let trimmed = transferFolder.trimmingCharacters(in: .whitespacesAndNewlines)
-        let normalized = RemotePath.normalized(trimmed)
-        let folder = normalized == "/" && trimmed.isEmpty ? FerrySettings().transferFolder : normalized
-        transferFolder = folder
-        if model.settings.transferFolder != folder {
-            model.settings.transferFolder = folder
-        }
+    /// 提交两个网盘目录；空值恢复各自默认目录，其他值统一为绝对路径。
+    private func commitTransferFolders() {
+        transferFolder = normalizedFolder(transferFolder, defaultValue: FerrySettings().transferFolder)
+        quarkTransferFolder = normalizedFolder(quarkTransferFolder, defaultValue: FerrySettings().quarkTransferFolder)
+        model.settings.transferFolder = transferFolder
+        model.settings.quarkTransferFolder = quarkTransferFolder
+    }
+
+    /// 目录输入在设置边界统一去除首尾空白并整理路径。
+    private func normalizedFolder(_ input: String, defaultValue: String) -> String {
+        let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? defaultValue : RemotePath.normalized(trimmed)
     }
 }
 

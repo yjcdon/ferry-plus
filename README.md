@@ -17,7 +17,7 @@ Ferry Plus 基于 [Ferry](https://github.com/yiquncode/BaiduPCS-Swift)，使用 
 - **双网盘登录**：通过百度、夸克的官方网页完成登录，分别保存账号状态。
 - **无服务器**：Cookie 凭据存在 macOS Keychain 中，不经过第三方。
 
-夸克下载、网盘切换和按网盘划分的批量操作正在开发，详细范围和进度见 [功能清单](docs/features.md)、[架构设计](docs/architecture.md) 和 [任务清单](docs/tasks.md)。上图沿用 Ferry 的界面截图。
+开发版已接入夸克下载、网盘切换、按可见范围执行批量操作，以及两家独立的转存、清理和连接数设置；真实下载和界面回归仍在进行，尚未完成整体验收。详细范围和进度见 [功能清单](docs/features.md)、[架构设计](docs/architecture.md) 和 [任务清单](docs/tasks.md)。上图沿用 Ferry 的界面截图。
 
 ## 系统要求
 
@@ -41,6 +41,12 @@ open ".build/Ferry Plus.app"
 
 脚本输出可直接运行的 `.app`。SDK 可通过 `FERRY_MACOS_SDK` 指定，具体构建和登录验证记录见 [登录说明](docs/login.md)。
 
+现有 Swift 包测试同样可使用 Command Line Tools 执行：
+
+```sh
+bash Scripts/test-packages.sh
+```
+
 ## 项目结构
 
 ```
@@ -48,9 +54,9 @@ BaiduPCS-Swift/          Ferry Plus.app：SwiftUI 界面、Keychain、下载目�
 Packages/FerryKit/
 ├── FerryCore            任务流程：任务模型、任务列表、JobCoordinator、设置
 ├── BaiduKit             百度协议：凭据、分享、转存、网盘操作、下载链接
-├── QuarkKit             夸克协议与账号验证
+├── QuarkKit             夸克登录、文件、分享、转存与下载接口
 └── DownloadKit          通用分片下载：分片、并发、断点续传、进度持久化
-Scripts/                本机 .app 构建
+Scripts/                本机 .app 构建与包测试
 docs/                   功能、架构、任务和验证记录
 ```
 
