@@ -824,6 +824,88 @@ import os
         #expect(fixture.contents("a.bin") == nil)
     }
 
+    @Test func manifestWriteFailureStopsSubmissionAndRetryPersistsManifestBeforeTransfer() async throws {
+        let fixture = Fixture(share: ["a.bin": randomData(10)])
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+        let file = fixture.store.fileURL
+        let backup = file.appendingPathExtension("before-manifest")
+        fixture.netdisk.beforeNextShareOpen {
+            try FileManager.default.moveItem(at: file, to: backup)
+            try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+        }
+        let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
+        try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
+        #expect(coordinator.job(job.id)?.transferManifest == [TransferManifestEntry(relativePath: "a.bin", size: 10)])
+        #expect(coordinator.job(job.id)?.transferProgress == nil)
+        #expect(!fixture.netdisk.operations.contains { if case .transfer = $0 { true } else { false } })
+        try FileManager.default.moveItem(at: file, to: file.appendingPathExtension("blocked-manifest"))
+        try FileManager.default.moveItem(at: backup, to: file)
+        // 重试一开始先保存包括内存清单的任务，再获取会话；此处观察提交前的磁盘内容。
+        let store = fixture.store
+        fixture.netdisk.beforeNextShareOpen {
+            let persisted = try #require(store.load().first { $0.id == job.id })
+            #expect(persisted.transferManifest == [TransferManifestEntry(relativePath: "a.bin", size: 10)])
+            #expect(persisted.transferProgress == nil)
+        }
+        await coordinator.retry(job.id)
+        try await coordinator.waitForPhase(.completed, of: job.id)
+        #expect(fixture.netdisk.operations.filter { if case .transfer = $0 { true } else { false } }.count == 1)
+        await coordinator.shutdown()
+    }
+
+    @Test func completedDirectoryTransferRestoresFromManifestAfterShareExpires() async throws {
+        let fixture = Fixture(share: ["docs/a.bin": randomData(10), "docs/b.bin": randomData(20)])
+        let first = fixture.makeCoordinator()
+        await first.start()
+        fixture.netdisk.setNextListing([])
+        let job = first.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
+        try await first.waitForPhase(.failed(.transfer), of: job.id)
+        let saved = try #require(first.job(job.id))
+        #expect(saved.transferProgress?.completed == true)
+        #expect(saved.transferManifest == [TransferManifestEntry(relativePath: "docs/a.bin", size: 10),
+                                           TransferManifestEntry(relativePath: "docs/b.bin", size: 20)])
+        await first.shutdown()
+        // 重启后的原分享已失效；已有清单和完成回执应完全脱离分享会话恢复。
+        fixture.netdisk.beforeNextShareOpen { throw QuarkError.shareUnavailable }
+        let opens = fixture.netdisk.operations.filter { $0 == .openShare }.count
+        let second = fixture.makeCoordinator()
+        await second.start()
+        await second.retry(job.id)
+        try await second.waitForPhase(.completed, of: job.id)
+        #expect(second.job(job.id)?.files.count == 2)
+        #expect(fixture.netdisk.operations.filter { $0 == .openShare }.count == opens)
+        #expect(fixture.contents("docs/a.bin") == fixture.netdisk.data(at: job.remoteDirectory + "/docs/a.bin"))
+        await second.shutdown()
+    }
+
+    @Test func legacyDirectoryReceiptWithoutManifestCannotConfirmExpiredShare() async throws {
+        let fixture = Fixture(share: ["docs/a.bin": randomData(10)])
+        var job = try await fixture.makeTransferredJob()
+        job.phase = .failed(.transfer)
+        job.files = []
+        #expect(job.transferManifest == nil)
+        try fixture.store.save([job])
+        fixture.netdisk.beforeNextShareOpen { throw QuarkError.shareUnavailable }
+        let coordinator = fixture.makeCoordinator(settings: FerrySettings(cleanupAfterDownload: true))
+        await coordinator.start()
+        await coordinator.retry(job.id)
+        try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
+        let failed = try #require(coordinator.job(job.id))
+        #expect(failed.error?.contains("旧任务没有转存文件清单") == true)
+        #expect(failed.transferProgress?.completed == true)
+        #expect(failed.transferManifest == nil)
+        #expect(failed.files.isEmpty)
+        #expect(fixture.netdisk.deletes.isEmpty)
+        #expect(fixture.netdisk.operations.filter { if case .transfer = $0 { true } else { false } }.count == 1)
+        // 原分享恢复后可补建清单，只核对既有结果，不重提旧转存。
+        await coordinator.retry(job.id)
+        try await coordinator.waitForPhase(.completed, of: job.id)
+        #expect(coordinator.job(job.id)?.transferManifest == [TransferManifestEntry(relativePath: "docs/a.bin", size: 10)])
+        #expect(fixture.netdisk.operations.filter { if case .transfer = $0 { true } else { false } }.count == 1)
+        await coordinator.shutdown()
+    }
+
     @Test func completedReceiptCannotHideMissingFileInsideSelectedDirectory() async throws {
         let fixture = Fixture(share: ["docs/a.bin": randomData(10), "docs/b.bin": randomData(20),
                                       "unselected/large.bin": randomData(30)])

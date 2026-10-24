@@ -22,6 +22,37 @@ import Testing
         #expect(throws: DecodingError.self) { try JSONDecoder().decode(Job.self, from: inconsistent) }
     }
 
+    @Test func transferManifestRoundTripsAndLegacyMissingFieldRemainsUnknown() throws {
+        var job = Job(link: link, password: nil, entries: [entry("docs", directory: true)], transferFolder: "/Ferry")
+        let old = try JSONEncoder().encode(job)
+        #expect(try JSONDecoder().decode(Job.self, from: old).transferManifest == nil)
+        job.transferManifest = [TransferManifestEntry(relativePath: "docs/a.zip", size: 10)]
+        let encoded = try JSONEncoder().encode(job)
+        #expect(try JSONDecoder().decode(Job.self, from: encoded) == job)
+        let json = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        let manifest = try #require(json["transferManifest"] as? [[String: Any]])
+        #expect(Set(manifest[0].keys) == ["relativePath", "size"])
+        #expect(!String(decoding: encoded, as: UTF8.self).contains("stoken"))
+        // 明确的空清单与没有清单不同：空目录的完成结果可以脱离原分享核对。
+        job.transferManifest = []
+        #expect(try JSONDecoder().decode(Job.self, from: JSONEncoder().encode(job)).transferManifest == [])
+    }
+
+    @Test func rejectsInvalidTransferManifestAtStorageBoundary() throws {
+        let job = Job(link: link, password: nil, entries: [entry("a.zip")], transferFolder: "/Ferry")
+        var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(job)) as? [String: Any])
+        let invalidManifests: [[[String: Any]]] = [
+            [["relativePath": "../escape", "size": 10]],
+            [["relativePath": "a.zip", "size": -1]],
+            [["relativePath": "a.zip", "size": 10], ["relativePath": "a.zip", "size": 10]],
+        ]
+        for invalid in invalidManifests {
+            json["transferManifest"] = invalid
+            let data = try JSONSerialization.data(withJSONObject: json)
+            #expect(throws: DecodingError.self) { try JSONDecoder().decode(Job.self, from: data) }
+        }
+    }
+
     @Test func titleAndRemoteDirectory() {
         let id = UUID(uuidString: "abcdef12-0000-0000-0000-000000000000")!
         let single = Job(link: link, password: nil, entries: [entry("a.zip")], transferFolder: "Ferry/", id: id)

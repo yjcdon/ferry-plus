@@ -500,15 +500,36 @@ public final class JobCoordinator {
         }
         guard let directory else { throw TransferCheckError.missingJobDirectory }
         var progress = original.transferProgress
-        if progress?.completed != true {
-            if progress?.needsSubmission ?? true {
-                // 只有明确尚未提交的批次需要新的分享令牌，已有回执可直接恢复核对。
-                let share = try await netdisk.openShare(link, password: password)
-                ownedShare = share
-                let pendingIDs = progress?.batches.map { Set($0.filter { !$0.submitted }.flatMap(\.entryIDs)) }
-                let pending = pendingIDs.map { ids in entries.filter { ids.contains($0.id) } } ?? entries
-                try await netdisk.prepareTransfer(share, entries: pending)
+        var manifest = original.transferManifest
+        if progress?.completed != true, progress?.needsSubmission ?? true {
+            // 明确尚未提交的批次才获取新的提交令牌；已有回执不再重复提交。
+            let share = try await netdisk.openShare(link, password: password)
+            ownedShare = share
+            let pendingIDs = progress?.batches.map { Set($0.filter { !$0.submitted }.flatMap(\.entryIDs)) }
+            let pending = pendingIDs.map { ids in entries.filter { ids.contains($0.id) } } ?? entries
+            try await netdisk.prepareTransfer(share, entries: pending)
+        }
+        if manifest == nil {
+            do {
+                if ownedShare == nil, entries.contains(where: { entry in
+                    entry.isDirectory || entry.relativeDirectory == nil && entry.reference.provider == .quark &&
+                        progress?.batches?.contains(where: { $0.entryIDs.contains(entry.id) }) != true
+                }) {
+                    ownedShare = try await netdisk.openShare(link, password: password)
+                }
+                manifest = try await makeTransferManifest(selected: entries, progress: progress,
+                                                        session: ownedShare, netdisk: netdisk)
+            } catch {
+                if Task.isCancelled || error is CancellationError { throw CancellationError() }
+                if progress?.submitted == true { throw TransferCheckError.unconfirmedManifest(error.localizedDescription) }
+                throw error
             }
+            try checkCurrentAccount(original, expected: netdisk.account)
+            update(id) { $0.transferManifest = manifest }
+            // 清单写盘失败时不允许提交，已收到的回执和清单仍留在内存供保存重试。
+            try persistRequired()
+        }
+        if progress?.completed != true {
             try checkCurrentAccount(original, expected: netdisk.account)
             progress = try await netdisk.submitTransfer(ownedShare, entries: entries, to: directory, previous: progress) { [weak self] reported in
                 guard let self else { throw CancellationError() }
@@ -519,57 +540,73 @@ public final class JobCoordinator {
         let children = try await netdisk.listDirectory(directory.reference)
         try netdisk.validateChildren(children, of: directory.reference)
         let files = try await netdisk.files(in: children)
-        // 回执完成只代表服务端结束处理，目标列表仍必须覆盖全部所选文件。
-        // 文件选择直接使用已保存的路径和大小；仅所选目录需要读取源目录，避免扫描整个分享。
-        if entries.contains(where: \.isDirectory), ownedShare == nil {
-            ownedShare = try await netdisk.openShare(link, password: password)
-        }
-        try await validateTransferredFiles(files, selected: entries, progress: progress,
-                                           session: ownedShare, netdisk: netdisk)
+        guard let manifest else { throw TransferCheckError.unconfirmedTransfer }
+        try validateTransferredFiles(files, manifest: manifest)
         return files
     }
 
-    /// 用原选择的相对路径和大小核对完整转存；目录只读取所选子树，目标列表复用已完成的递归结果。
-    private func validateTransferredFiles(_ files: [PreparedFile], selected: [RemoteEntry],
-                                          progress: TransferProgress?, session: DiskShareSession?,
-                                          netdisk: any Netdisk) async throws {
+    /// 提交前仅读取所选子树，保存不含短期令牌的路径和大小；恢复时不重新读取源分享。
+    private func makeTransferManifest(selected: [RemoteEntry], progress: TransferProgress?,
+                                      session: DiskShareSession?, netdisk: any Netdisk) async throws -> [TransferManifestEntry] {
+        var parents: [RemoteReference: String] = [:]
+        for entry in selected {
+            if let parent = entry.relativeDirectory { parents[entry.reference] = parent }
+            else if let parent = progress?.batches?.first(where: { $0.entryIDs.contains(entry.id) })?.relativeDirectory {
+                parents[entry.reference] = parent
+            } else if entry.reference.provider == .baidu { parents[entry.reference] = "" }
+        }
+        // 旧夸克记录只保存 fid 时无法推断路径；仅此兼容分支扫描至所选身份全部找到。
+        var unresolved = Set(selected.map(\.reference)).subtracting(parents.keys)
+        if !unresolved.isEmpty {
+            guard let session else { throw TransferCheckError.unconfirmedTransfer }
+            var directories: [(RemoteEntry?, String)] = [(nil, "")]
+            var visited = Set<RemoteReference>()
+            while !unresolved.isEmpty, let (directory, parent) = directories.popLast() {
+                try Task.checkCancellation()
+                if let directory, !visited.insert(directory.reference).inserted { continue }
+                for child in try await netdisk.listShare(session, directory: directory) {
+                    if unresolved.remove(child.reference) != nil { parents[child.reference] = parent }
+                    if child.isDirectory { directories.append((child, parent.isEmpty ? child.name : parent + "/" + child.name)) }
+                }
+            }
+            guard unresolved.isEmpty else { throw TransferCheckError.unconfirmedTransfer }
+        }
         var pending: [(RemoteEntry, String)] = selected.map { entry in
-            let recordedParent = progress?.batches?.first { $0.entryIDs.contains(entry.id) }?.relativeDirectory
-            let parent = entry.relativeDirectory ?? recordedParent ?? ""
+            let parent = parents[entry.reference]!
             return (entry, parent.isEmpty ? entry.name : parent + "/" + entry.name)
         }
         var visited = Set<RemoteReference>()
         var expected: [String: Int64] = [:]
         while let (entry, path) = pending.popLast() {
             try Task.checkCancellation()
-            guard LocalPath.isSafe(path) else { throw TransferCheckError.unsafePath(path) }
+            guard LocalPath.isSafe(path), entry.size >= 0 else { throw TransferCheckError.unsafePath(path) }
             if entry.isDirectory {
                 guard visited.insert(entry.reference).inserted else { continue }
                 guard let session else { throw TransferCheckError.unconfirmedTransfer }
-                let children = try await netdisk.listShare(session, directory: entry)
-                for child in children {
+                for child in try await netdisk.listShare(session, directory: entry) {
                     guard !child.name.contains("/"), LocalPath.isSafe(child.name) else {
                         throw TransferCheckError.unsafePath(child.name)
                     }
                     pending.append((child, path + "/" + child.name))
                 }
-            } else {
-                expected[path] = entry.size
-            }
+            } else { expected[path] = entry.size }
         }
-        if files.isEmpty, !expected.isEmpty { throw TransferCheckError.noFiles }
+        return expected.keys.sorted().map { TransferManifestEntry(relativePath: $0, size: expected[$0]!) }
+    }
+
+    /// 目标列表复用已完成的递归结果，与已保存清单核对；部分结果不进入下载或清理。
+    private func validateTransferredFiles(_ files: [PreparedFile], manifest: [TransferManifestEntry]) throws {
+        if files.isEmpty, !manifest.isEmpty { throw TransferCheckError.noFiles }
         var actual: [String: Int64] = [:]
         for file in files {
             guard actual.updateValue(file.entry.size, forKey: file.relativePath) == nil else {
                 throw TransferCheckError.incompleteTransfer(file.relativePath)
             }
         }
-        for (path, size) in expected where actual[path] != size {
-            throw TransferCheckError.incompleteTransfer(path)
+        for entry in manifest where actual.removeValue(forKey: entry.relativePath) != entry.size {
+            throw TransferCheckError.incompleteTransfer(entry.relativePath)
         }
-        for path in actual.keys where expected[path] == nil {
-            throw TransferCheckError.incompleteTransfer(path)
-        }
+        if let unexpected = actual.keys.sorted().first { throw TransferCheckError.incompleteTransfer(unexpected) }
     }
 
     /// 批次意图写盘失败时尚未发出请求；已收到的回执即使磁盘失败也保留在内存供再次保存。
@@ -1135,6 +1172,7 @@ private enum Outcome: Equatable {
 enum TransferCheckError: LocalizedError {
     case noFiles
     case incompleteTransfer(String)
+    case unconfirmedManifest(String)
     case unconfirmedTransfer
     case missingJobDirectory
     case outsideJobDirectory(String)
@@ -1146,6 +1184,8 @@ enum TransferCheckError: LocalizedError {
         switch self {
         case .unconfirmedTransfer:
             "转存结果尚未确认，已保留目录和回执。请核对原转存结果，不会自动重复提交或删除目录。"
+        case .unconfirmedManifest(let reason):
+            "旧任务没有转存文件清单，暂时无法确认完整结果，已保留目录和回执，不会重复提交或自动清理。请恢复原分享后重试核对。原因：\(reason)"
         case .incompleteTransfer(let path):
             "转存结果不完整或文件大小不一致（\(path)），已保留目录和回执。请稍后重试核对，不会重复转存或自动清理。"
         case .noFiles:

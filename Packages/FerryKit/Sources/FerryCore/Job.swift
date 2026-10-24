@@ -66,6 +66,8 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
     public var accountName: String?
     public var transferDirectory: TransferDirectory?
     public var transferProgress: TransferProgress?
+    /// 提交转存前保存的所选文件清单；不含短期分享令牌，恢复时无需重新访问原分享。
+    public var transferManifest: [TransferManifestEntry]?
     public var provider: Provider {
         switch source { case .share(let link, _, _): link.provider; case .netdisk(let entries): accountKey?.provider ?? entries.first?.reference.provider ?? .baidu }
     }
@@ -126,7 +128,7 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, title, source, link, password, entries, remoteDirectory, phase, files, isPaused, error, warning,
-             createdAt, isCleanedUp, downloadFolder, accountUK, accountKey, accountName, transferDirectory, transferProgress, version, provider
+             createdAt, isCleanedUp, downloadFolder, accountUK, accountKey, accountName, transferDirectory, transferProgress, transferManifest, version, provider
     }
 
     /// 缺少的字段用默认值，以后新增字段时，旧版本保存的任务列表仍能读取。
@@ -164,6 +166,14 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
         accountName = try container.decodeIfPresent(String.self, forKey: .accountName)
         transferDirectory = try container.decodeIfPresent(TransferDirectory.self, forKey: .transferDirectory)
         transferProgress = try container.decodeIfPresent(TransferProgress.self, forKey: .transferProgress)
+        transferManifest = try container.decodeIfPresent([TransferManifestEntry].self, forKey: .transferManifest)
+        if let transferManifest {
+            guard transferManifest.allSatisfy({ LocalPath.isSafe($0.relativePath) && $0.size >= 0 }),
+                  Set(transferManifest.map(\.relativePath)).count == transferManifest.count else {
+                throw DecodingError.dataCorruptedError(forKey: .transferManifest, in: container,
+                                                       debugDescription: "转存文件清单包含无效路径、大小或重复条目")
+            }
+        }
         if let declared = try container.decodeIfPresent(Provider.self, forKey: .provider), declared != provider {
             throw DecodingError.dataCorruptedError(forKey: .provider, in: container, debugDescription: "任务网盘与来源不一致")
         }
@@ -199,6 +209,7 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
         try container.encodeIfPresent(accountName, forKey: .accountName)
         try container.encodeIfPresent(transferDirectory, forKey: .transferDirectory)
         try container.encodeIfPresent(transferProgress, forKey: .transferProgress)
+        try container.encodeIfPresent(transferManifest, forKey: .transferManifest)
     }
 
     public static func shortID(_ id: UUID) -> String {
@@ -369,5 +380,16 @@ public enum LocalPath {
             renamed = "\(name) (\(number))"
         }
         return (parts + [renamed]).joined(separator: "/")
+    }
+}
+
+/// 转存前确定的文件身份；相对路径和字节数用于核对目标完整性，不保存登录或分享秘密。
+public struct TransferManifestEntry: Codable, Sendable, Hashable {
+    public let relativePath: String
+    public let size: Int64
+
+    public init(relativePath: String, size: Int64) {
+        self.relativePath = relativePath
+        self.size = size
     }
 }
