@@ -1,5 +1,5 @@
 import BaiduKit
-@testable @testable import DownloadKit
+@testable import DownloadKit
 import Foundation
 import Testing
 import QuarkKit
@@ -51,6 +51,92 @@ import os
             }
         }
         await coordinator.shutdown()
+    }
+
+    /// 正式客户端读取账号及分享目录时，必须继续取第二页并保留请求的目录和会话参数。
+    @Test(arguments: [false, true])
+    func quarkClientListsAllPagesOfAccountAndShareDirectories(_ share: Bool) async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        let path = share ? "/1/clouddrive/share/sharepage/detail" : "/1/clouddrive/file/sort"
+        let first = try quarkListResponse(ids: (0..<100).map { "file-\($0)" }, total: 101)
+        let second = try quarkListResponse(ids: ["file-100"], total: 101)
+        stub.state.withLock {
+            $0.listingResponses[path] = [1: first, 2: second]
+        }
+        let client = stub.makeClient()
+        defer { client.revoke() }
+        let entries = try await quarkList(client, share: share)
+        #expect(entries.map(\.fid) == (0..<101).map { "file-\($0)" })
+        let requests = stub.state.withLock { $0.listingRequests }
+        #expect(requests.map(\.path) == [path, path])
+        #expect(requests.map { $0.query["_page"] } == ["1", "2"])
+        #expect(requests.allSatisfy { $0.query["_size"] == "100" && $0.query["_fetch_total"] == "1" && $0.query["pdir_fid"] == "selected" })
+        if share {
+            #expect(requests.allSatisfy { $0.query["pwd_id"] == "test123" && $0.query["stoken"] == "test-only" })
+        }
+    }
+
+    /// 后续页业务失败必须抛出原错误，不能把首页的 100 项当作完整目录返回。
+    @Test(arguments: [false, true], ["401", "500"])
+    func quarkClientRejectsPartialListingWhenSecondPageFails(_ share: Bool, _ code: String) async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        let path = share ? "/1/clouddrive/share/sharepage/detail" : "/1/clouddrive/file/sort"
+        let first = try quarkListResponse(ids: (0..<100).map { "file-\($0)" }, total: 101)
+        stub.state.withLock {
+            $0.listingResponses[path] = [1: first, 2: "{\"status\":400,\"code\":\"\(code)\"}"]
+        }
+        let client = stub.makeClient()
+        defer { client.revoke() }
+        do {
+            _ = try await quarkList(client, share: share)
+            Issue.record("A failed second page must not return the first page as a complete directory.")
+        } catch let error as QuarkError {
+            #expect(error == (code == "401" ? .loginExpired : .serviceCode(code)))
+        }
+        #expect(stub.state.withLock { $0.listingRequests.map { $0.query["_page"] } } == ["1", "2"])
+    }
+
+    /// 分页总数自相矛盾、提前空页或跨页重复 ID 都不能产生可供下载的完整列表。
+    @Test(arguments: [false, true], ["duplicate", "total-underflow", "empty-before-total", "total-overflow"])
+    func quarkClientRejectsInconsistentPagination(_ share: Bool, _ failure: String) async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        let path = share ? "/1/clouddrive/share/sharepage/detail" : "/1/clouddrive/file/sort"
+        let first = try quarkListResponse(ids: (0..<100).map { "file-\($0)" }, total: failure == "total-underflow" ? 99 : 101)
+        let secondIDs: [String]
+        switch failure {
+        case "duplicate": secondIDs = ["file-0"]
+        case "empty-before-total": secondIDs = []
+        default: secondIDs = ["file-100", "file-101"]
+        }
+        let second = try quarkListResponse(ids: secondIDs, total: 101)
+        stub.state.withLock { $0.listingResponses[path] = [1: first, 2: second] }
+        let client = stub.makeClient()
+        defer { client.revoke() }
+        do {
+            _ = try await quarkList(client, share: share)
+            Issue.record("Invalid pagination must not return a complete directory.")
+        } catch let error as QuarkError {
+            #expect(error == .invalidResponse)
+        }
+        #expect(stub.state.withLock { $0.listingRequests.count } == (failure == "total-underflow" ? 1 : 2))
+    }
+
+    private func quarkList(_ client: QuarkClient, share: Bool) async throws -> [QuarkEntry] {
+        if share {
+            let link = try QuarkShareLink.parse("https://pan.quark.cn/s/test123")
+            let session = try await client.openShare(link)
+            return try await client.listShareDirectory(session: session, parentFID: "selected")
+        }
+        return try await client.listDirectory(parentFID: "selected")
+    }
+
+    private func quarkListResponse(ids: [String], total: Int) throws -> String {
+        let list = ids.map { ["fid": $0, "file_name": "\($0).bin", "dir": false, "size": 1, "pdir_fid": "selected"] as [String: Any] }
+        let response: [String: Any] = ["status": 200, "code": 0, "data": ["list": list], "metadata": ["_total": total]]
+        return String(decoding: try JSONSerialization.data(withJSONObject: response), as: UTF8.self)
     }
 
     @Test(arguments: [401, 403, 404, 429])

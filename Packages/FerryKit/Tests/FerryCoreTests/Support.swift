@@ -396,6 +396,8 @@ struct QuarkAPIStub: Sendable {
         var downloadBusinessCode: String?
         var downloadFailureMessage: String?
         var downloadRequests = 0
+        var listingResponses: [String: [Int: String]] = [:]
+        var listingRequests: [(path: String, query: [String: String])] = []
     }
     let id = UUID().uuidString
     let state = OSAllocatedUnfairLock(initialState: State())
@@ -410,6 +412,13 @@ struct QuarkAPIStub: Sendable {
             let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
             let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
             let path = components.path
+            if path.hasSuffix("/file/sort") || path.hasSuffix("/share/sharepage/detail") {
+                let response = state.withLock { state -> String? in
+                    state.listingRequests.append((path, query))
+                    return state.listingResponses[path]?[Int(query["_page"] ?? "") ?? 0]
+                }
+                if let response { return Data(response.utf8) }
+            }
             let data: Any
             if path.hasSuffix("/file/download") {
                 let failure = state.withLock { state -> (String?, String?) in
