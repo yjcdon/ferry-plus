@@ -12,7 +12,6 @@ struct MainView: View {
     @SceneStorage("isInspectorPresented") private var isInspectorPresented = false
     @State private var searchText = ""
     @State private var searchFocusRequest = 0
-    @State private var windowWidth: CGFloat = 960
     /// 等待确认的移除。
     @State private var pendingRemoval: PendingRemoval?
 
@@ -85,12 +84,11 @@ struct MainView: View {
                     }
                     ToolbarItem(placement: .primaryAction) {
                         TaskSearchField(text: $searchText, focusRequest: searchFocusRequest)
-                            .frame(width: min(280, max(80, windowWidth - 600)))
+                            .frame(width: 104)
                     }
                 }
         }
         .frame(minWidth: 640, minHeight: 400)
-        .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { windowWidth = $0 }
         #if DEBUG
         .task { await showDemoSelection() }
         #endif
@@ -340,6 +338,11 @@ private struct TaskSearchField: NSViewRepresentable {
             window.makeFirstResponder(field)
             field.selectText(nil)
         }
+    }
+
+    /// 搜索框使用稳定的工具栏尺寸，窗口缩放不改变相邻项目的位置约束。
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSSearchField, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? 104, height: nsView.intrinsicContentSize.height)
     }
 
     static func dismantleNSView(_ field: NSSearchField, coordinator: Coordinator) {
