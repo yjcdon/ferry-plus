@@ -56,6 +56,7 @@ public actor UploadCoordinator {
     private var globallySuspended = false
     private var suspendedProviders: Set<Provider> = []
     private var stopping: Set<UUID> = []
+    private var isRestoring = false
     private var closed = false
 
     public init(store: UploadStore, integrityStore: IntegrityStore, budget: TransferBudget,
@@ -79,11 +80,20 @@ public actor UploadCoordinator {
         for observer in activityObservers.values { observer.finish() }
     }
 
-    /// 恢复暂停意图和阶段；完成／失败项保留结果，不自动重复远端提交。
+    /// 先逐文件重建已落盘聚合，再发布和调度；保留暂停意图、阶段及远端回执。
+    /// 文件读取或聚合保存失败时明确中止恢复，不以缺失记录覆盖进度，也不启动 worker。
     public func restore() async throws {
-        guard workers.isEmpty, jobs.isEmpty else { throw UploadCoordinatorError.busy }
+        guard !isRestoring, workers.isEmpty, jobs.isEmpty else { throw UploadCoordinatorError.busy }
+        isRestoring = true
+        defer { isRestoring = false }
         let restored = try await store.loadJobs()
-        jobs = Dictionary(uniqueKeysWithValues: restored.map { ($0.id, $0) })
+        var recovered: [UUID: UploadJob] = [:]
+        for job in restored {
+            let rebuilt = try await aggregate(job)
+            if rebuilt != job { try await store.saveJob(rebuilt) }
+            recovered[job.id] = rebuilt
+        }
+        jobs = recovered
         emit(); schedule()
     }
 
@@ -91,6 +101,7 @@ public actor UploadCoordinator {
     @discardableResult
     public func add(account: AccountKey, accountName: String, destination: RemoteReference,
                     selections: [UploadSelection], conflictPolicy: UploadConflictPolicy = .keepBoth) async throws -> UUID {
+        guard !isRestoring else { throw UploadCoordinatorError.busy }
         guard !closed, !selections.isEmpty else { throw UploadCoordinatorError.missingSelections }
         let names = selections.map { $0.url.lastPathComponent }
         var job = UploadJob(account: account, accountName: accountName, title: names.count == 1 ? names[0] : "\(names[0]) 等 \(names.count) 项",
@@ -1109,7 +1120,7 @@ public actor UploadCoordinator {
         do {
             let previous = try await store.loadFile(id: file.id, in: job)
             try await store.saveFile(file, in: job)
-            let delta = confirmedBytes(file) - confirmedBytes(previous)
+            let delta = Self.confirmedBytes(file) - Self.confirmedBytes(previous)
             jobs[file.jobID]!.completedBytes = min(jobs[file.jobID]!.totalBytes, max(0, jobs[file.jobID]!.completedBytes + delta))
             jobs[file.jobID]!.completedCount += (file.phase == .completed ? 1 : 0) - (previous.phase == .completed ? 1 : 0)
             jobs[file.jobID]!.failedCount += (file.phase == .failed ? 1 : 0) - (previous.phase == .failed ? 1 : 0)
@@ -1122,7 +1133,7 @@ public actor UploadCoordinator {
         catch { throw UploadCoordinatorError.persistence(error.localizedDescription) }
     }
 
-    private func confirmedBytes(_ file: UploadFile) -> Int64 {
+    private static func confirmedBytes(_ file: UploadFile) -> Int64 {
         if file.isDirectory || file.phase == .skipped { return 0 }
         if file.phase == .completed || file.remoteReference != nil { return file.source.size }
         guard let prepared = file.preparation else { return 0 }
@@ -1132,25 +1143,43 @@ public actor UploadCoordinator {
 
     private func rebuildAggregate(_ id: UUID) async throws {
         guard let job = jobs[id] else { throw UploadCoordinatorError.missingJob }
+        let rebuilt = try await aggregate(job)
+        // 读取期间可能收到暂停／取消；只合入聚合，不用旧快照覆盖当前执行意图。
+        jobs[id]!.completedBytes = rebuilt.completedBytes; jobs[id]!.completedCount = rebuilt.completedCount
+        jobs[id]!.failedCount = rebuilt.failedCount; jobs[id]!.skippedCount = rebuilt.skippedCount
+        if rebuilt.failedCount > 0 { jobs[id]!.error = rebuilt.error }
+        try await persistJob(id)
+    }
+
+    private struct Aggregate: Sendable {
         var completed = 0, failed = 0, skipped = 0
         var bytes: Int64 = 0
         var firstFailure: String?
-        for fileID in job.fileIDs {
-            let file = try await store.loadFile(id: fileID, in: job)
-            bytes += confirmedBytes(file)
-            if file.phase == .completed { completed += 1 }
-            if file.phase == .failed {
-                failed += 1
-                if firstFailure == nil {
-                    firstFailure = "\(file.relativePath)：\(file.error ?? "上传失败，未记录具体原因")"
-                }
+    }
+
+    /// 只累加已验证文件检查点的业务计数，不读取 actor 状态或推断批次执行阶段。
+    private static func accumulating(_ previous: Aggregate, _ file: UploadFile) -> Aggregate {
+        var result = previous
+        result.bytes += confirmedBytes(file)
+        if file.phase == .completed { result.completed += 1 }
+        if file.phase == .failed {
+            result.failed += 1
+            if result.firstFailure == nil {
+                result.firstFailure = "\(file.relativePath)：\(file.error ?? "上传失败，未记录具体原因")"
             }
-            if file.phase == .skipped { skipped += 1 }
         }
-        jobs[id]!.completedBytes = bytes; jobs[id]!.completedCount = completed
-        jobs[id]!.failedCount = failed; jobs[id]!.skippedCount = skipped
-        if let firstFailure { jobs[id]!.error = "\(failed) 项失败：\(firstFailure)" }
-        try await persistJob(id)
+        if file.phase == .skipped { result.skipped += 1 }
+        return result
+    }
+
+    /// 权威成员清单仅读取一次；文件逐项归并，不推断批次阶段或用户执行意图。
+    private func aggregate(_ job: UploadJob) async throws -> UploadJob {
+        let result = try await store.reduceFiles(in: job, initial: Aggregate(), Self.accumulating)
+        var rebuilt = job
+        rebuilt.completedBytes = result.bytes; rebuilt.completedCount = result.completed
+        rebuilt.failedCount = result.failed; rebuilt.skippedCount = result.skipped
+        if let firstFailure = result.firstFailure { rebuilt.error = "\(result.failed) 项失败：\(firstFailure)" }
+        return rebuilt
     }
 
     /// 服务每读完一个有界范围后回调；只发布本轮单调进度，不触发任务落盘。

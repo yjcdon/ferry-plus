@@ -52,7 +52,7 @@ public actor UploadStore {
         }
         let existingIDs = Set(existing?.fileIDs ?? [])
         for id in job.fileIDs where !existingIDs.contains(id) {
-            _ = try readFile(id: id, in: job)
+            _ = try readMemberFile(id: id, in: job)
         }
         try UploadDiskRecord.write(job, at: jobURL(job.id))
     }
@@ -61,6 +61,18 @@ public actor UploadStore {
     public func loadFile(id: UUID, in job: UploadJob) throws -> UploadFile {
         let published = try publishedJob(for: job)
         return try readFile(id: id, in: published)
+    }
+
+    /// 按权威 manifest 流式归并文件，只读取一次成员清单；逐项校验身份和账号，不缓存完整文件数组。
+    /// 调用方摘要可过时，实际参与归并的成员以此 actor 本次读取的已发布清单为准。
+    public func reduceFiles<Result: Sendable>(in job: UploadJob, initial: Result,
+                                             _ update: @Sendable (Result, UploadFile) throws -> Result) throws -> Result {
+        let published = try publishedJob(for: job)
+        var result = initial
+        for id in published.fileIDs {
+            result = try update(result, readMemberFile(id: id, in: published))
+        }
+        return result
     }
 
     /// 保存已发布批次的文件状态；不隐式变更聚合，聚合由调度器按检查点重建。
@@ -89,6 +101,11 @@ public actor UploadStore {
     /// 发布 manifest 前也需读取新增文件，故与已发布批次的归属检查分开。
     private func readFile(id: UUID, in job: UploadJob) throws -> UploadFile {
         guard job.fileIDs.contains(id) else { throw UploadRecordError.invalid("文件不属于当前批次") }
+        return try readMemberFile(id: id, in: job)
+    }
+
+    /// 仅供已经由 manifest 成员遍历或显式成员检查证明归属的内部路径使用。
+    private func readMemberFile(id: UUID, in job: UploadJob) throws -> UploadFile {
         let file: UploadFile = try UploadDiskRecord.read(at: fileURL(jobID: job.id, fileID: id))
         guard file.id == id, file.jobID == job.id else { throw UploadRecordError.invalid("上传文件 ID 不一致") }
         try file.validate(account: job.account)
