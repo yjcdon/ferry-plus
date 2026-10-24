@@ -186,10 +186,13 @@ struct UploadView: View {
                 .frame(height: min(CGFloat(files.count) * 25, 100))
             }
             Button(action: chooseFiles) {
-                Text(files.isEmpty ? "点击选择文件或文件夹，也可拖到这里" : "点击继续添加文件或文件夹")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: files.isEmpty ? 65 : 32)
-                    .contentShape(Rectangle())
+                VStack(spacing: 4) {
+                    Text(files.isEmpty ? "点击选择文件或文件夹，也可拖到这里" : "点击继续添加文件或文件夹")
+                    Text("应用程序等包文件按文件夹上传").font(.caption)
+                }
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, minHeight: files.isEmpty ? 65 : 32)
+                .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .disabled(isSubmitting)
