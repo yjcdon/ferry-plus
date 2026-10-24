@@ -93,7 +93,7 @@ flowchart TD
 
 数据顺序为：JobCoordinator 完整任务集合 → providerJobs → 按 category 过滤 → 按 searchText 过滤 → visibleJobs。底部统计直接汇总完整任务集合，显示“全部网盘”、已下载／总大小、速度及文件完成数，统计弹层补充进度和预计剩余时间；准备中的任务注明总量尚未确定。完成文件数复用任务增量统计，避免每次进度刷新遍历全部文件。全局下载并发与通知同样不受筛选影响。
 
-搜索词只有 MainView.searchText 一份状态。工具栏的 TaskSearchField 通过 NSViewRepresentable 桥接 NSSearchField，Coordinator 同时处理文本变更 delegate 和搜索 action；每次更新视图时重新绑定当前 Binding，使输入和取消搜索立即回写同一状态。⌘F 通过主窗口的 focusedSceneValue 请求聚焦并选中搜索内容，无活动主窗口时命令禁用；搜索框拆除时解除 delegate 和 target。
+搜索词只有 MainView.searchText 一份状态。工具栏的 TaskSearchField 通过 NSViewRepresentable 桥接 NSSearchField，Coordinator 同时处理文本变更 delegate 和搜索 action；每次更新视图时重新绑定当前 Binding，使输入和取消搜索立即回写同一状态。搜索项固定为 104 点宽，sizeThatFits 返回提议宽度和原生高度，避免窗口缩放时原生工具栏项目与内部搜索框尺寸不同步。⌘F 通过主窗口的 focusedSceneValue 请求聚焦并选中搜索内容，无活动主窗口时命令禁用；搜索框拆除时解除 delegate 和 target。
 
 新任务在当前列表内时直接选中；被网盘、分类或搜索条件隐藏时，保留现有筛选并显示添加提示。提示固定为单行 40 点高度，长标题从中间截断，悬停可查看完整标题。“查看任务”重新按任务 ID 查找当前记录，再切到所属网盘、全部分类并清空搜索；记录已移除时只关闭提示。任务集合变化时同步清除已移除任务的旧提示。
 
