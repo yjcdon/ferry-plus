@@ -144,7 +144,7 @@ private struct AccountView: View {
         case .quark:
             model.quark.summary?.name ?? "登录夸克网盘…"
         case nil:
-            "账号与登录"
+            "账号与设置"
         }
     }
 }

@@ -17,6 +17,7 @@ struct ContentView: View {
     var body: some View {
         @Bindable var model = model
         MainView()
+            .logOutConfirmation(isPresented: $model.isConfirmingMenuLogOut)
             .sheet(item: $model.sheet) { sheet in
                 switch sheet {
                 case .addLink: AddLinkView()

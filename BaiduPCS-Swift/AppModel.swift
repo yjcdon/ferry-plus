@@ -36,6 +36,8 @@ final class AppModel {
     }
 
     var sheet: Sheet?
+    /// 菜单栏发起的百度退出确认由主窗口承载，避免菜单关闭后丢失对话框。
+    var isConfirmingMenuLogOut = false
     /// 菜单只请求打开；窗口未创建时保留请求，由主窗口承载下载页。
     private(set) var hasPendingNetdiskDownloadRequest = false
     var lastAddedJobID: UUID?
