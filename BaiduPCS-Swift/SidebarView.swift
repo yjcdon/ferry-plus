@@ -49,6 +49,16 @@ enum JobCategory: String, CaseIterable, Identifiable {
             false
         }
     }
+
+    /// 上传按编排阶段筛选；全跳过批次独立于已验证成功，但可在完成分类中查阅。
+    func contains(_ job: UploadJob) -> Bool {
+        switch self {
+        case .all: true
+        case .active: !job.phase.isTerminal
+        case .completed: job.phase == .completed || job.phase == .skipped
+        case .failed: job.phase == .failed
+        }
+    }
 }
 
 /// 侧边栏：任务分类和每个分类的任务数。底部是账号。
@@ -56,11 +66,12 @@ struct SidebarView: View {
     @Binding var selection: JobCategory?
     @Binding var providerFilter: Provider?
     let jobs: [Job]
+    var uploadJobs: [UploadJob] = []
     var body: some View {
         List(selection: $selection) {
             ForEach(JobCategory.allCases) { category in
                 Label(category.title, systemImage: category.systemImage)
-                    .badge(jobs.count(where: category.contains))
+                    .badge(jobs.count(where: category.contains) + uploadJobs.count(where: category.contains))
                     .tag(category)
             }
         }

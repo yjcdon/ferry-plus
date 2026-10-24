@@ -22,6 +22,11 @@ struct ContentView: View {
                 switch sheet {
                 case .addLink: AddLinkView()
                 case .netdiskDownload: NetdiskDownloadView()
+                case .upload:
+                    UploadView(initialProvider: model.uploadDraftProvider,
+                               initialDirectory: model.uploadDraftDirectory, files: model.uploadDraftFiles) { files, account, destination, policy in
+                        try await model.addUpload(files: files, account: account, destination: destination, conflictPolicy: policy)
+                    }
                 }
             }
             .onAppear {
@@ -73,6 +78,11 @@ struct Banners: View {
             if let warning = model.coordinator.loadWarning {
                 Banner(message: warning) {
                     Button("关闭") { model.coordinator.dismissLoadWarning() }
+                }
+            }
+            if let problem = model.uploadProblem {
+                Banner(message: "上传：" + problem) {
+                    Button("关闭") { model.uploadProblem = nil }
                 }
             }
             if model.account == nil, model.coordinator.jobs.contains(where: { $0.provider == .baidu && $0.isUnfinished }) {

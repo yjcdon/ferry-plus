@@ -26,21 +26,33 @@ final class AppModel {
     /// 代理密码没能存入 Keychain 时的说明。这次运行仍使用新密码。
     private(set) var proxyPasswordProblem: String?
     let coordinator: JobCoordinator
+    private(set) var uploadCoordinator: UploadCoordinator?
+    /// 上传列表仅是编排器事件的只读投影，执行状态由编排器保存。
+    private(set) var uploadJobs: [UploadJob] = []
+    var uploadProblem: String?
+    @ObservationIgnored private let transferBudget: TransferBudget
+    @ObservationIgnored private var uploadUpdates: Task<Void, Never>?
+    @ObservationIgnored private var uploadReadSession: URLSession?
 
     /// 主窗口的 sheet。同一时间只显示一个。
     enum Sheet: String, Identifiable {
         case addLink
         case netdiskDownload
+        case upload
 
         var id: String { rawValue }
     }
 
     var sheet: Sheet?
+    private(set) var uploadDraftProvider: Provider?
+    private(set) var uploadDraftDirectory: RemoteReference?
+    private(set) var uploadDraftFiles: [URL] = []
     /// 菜单栏发起的百度退出确认由主窗口承载，避免菜单关闭后丢失对话框。
     var isConfirmingMenuLogOut = false
     /// 菜单只请求打开；窗口未创建时保留请求，由主窗口承载下载页。
     private(set) var hasPendingNetdiskDownloadRequest = false
     var lastAddedJobID: UUID?
+    private(set) var lastAddedUploadID: UUID?
     @ObservationIgnored var openQuarkLoginWindow: (() -> Void)?
 
     /// 移除任务时没能移到废纸篓的文件或目录。界面提示后清空。
@@ -112,9 +124,14 @@ final class AppModel {
         }
         #endif
         let checkedSource = AccountCheckedSource(source)
+        // 固定的正数连接上限和零速率均满足预算构造契约。
+        let transferBudget = try! TransferBudget(maximumConnections: FerrySettings.totalConnectionsLimit,
+            uploadBytesPerSecond: settings.uploadBytesPerSecond, downloadBytesPerSecond: settings.downloadBytesPerSecond)
         let engine = DownloadEngine(stateDirectory: stateDirectory, source: checkedSource,
                                     configuration: settings.downloadConfiguration(),
-                                    sessionConfiguration: Self.applying(proxy, to: DownloadEngine.defaultSessionConfiguration()))
+                                    sessionConfiguration: Self.applying(proxy, to: DownloadEngine.defaultSessionConfiguration()),
+                                    transferBudget: transferBudget)
+        self.transferBudget = transferBudget
         self.settings = settings
         quark = QuarkAccountSession(configuration: Self.applying(proxy, to: QuarkClient.defaultConfiguration()))
         self.proxyPassword = proxyPassword
@@ -228,6 +245,7 @@ final class AppModel {
         quark.onSessionChange = { [weak self] client, summary in self?.installQuark(client, summary: summary) }
         quark.publishRestoredSession()
         await coordinator.start()
+        await startUploads()
         Task { await quark.start() }
         // 启动时应用变为活跃的那次检测在任务列表加载前，被跳过，所以加载后再检测一次。
         if NSApp.isActive { await detectCopiedLink() }
@@ -238,7 +256,11 @@ final class AppModel {
         isShuttingDown = true
         // 系统授权提示不一定响应取消；不等待它，回调返回后会再次检查取消状态。
         notificationAuthorizationTask?.cancel()
+        uploadUpdates?.cancel()
+        await uploadCoordinator?.shutdown()
+        uploadReadSession?.invalidateAndCancel()
         await coordinator.shutdown()
+        await transferBudget.shutdown()
         downloadActivity.close()
         await sessionReplacement?.value
         releaseAccessedDirectory()
@@ -319,7 +341,14 @@ final class AppModel {
             UserDefaults.standard.set(data, forKey: Self.settingsKey)
         }
         let settings = settings
-        Task { await coordinator.updateSettings(settings) }
+        Task {
+            await coordinator.updateSettings(settings)
+            do {
+                try await transferBudget.update(maximumConnections: FerrySettings.totalConnectionsLimit,
+                    uploadBytesPerSecond: settings.uploadBytesPerSecond, downloadBytesPerSecond: settings.downloadBytesPerSecond)
+                try await uploadCoordinator?.updateMaximumConcurrentJobs(settings.maxConcurrentUploads)
+            } catch { uploadProblem = error.localizedDescription }
+        }
         updateProxy()
     }
 
@@ -472,7 +501,83 @@ final class AppModel {
         present(.netdiskDownload)
     }
 
+    /// 沿用主窗口选定网盘及目录上下文，先展示确认窗口，再由用户创建上传任务。
+    func presentUpload(provider: Provider? = nil, directory: RemoteReference? = nil, files: [URL] = []) {
+        guard sheet == nil else { return }
+        uploadDraftProvider = provider
+        uploadDraftDirectory = directory
+        uploadDraftFiles = files
+        present(.upload)
+    }
+
     func accountKey(for provider: Provider) -> AccountKey? { coordinator.netdisks[provider]?.account }
+
+    /// 初始化一次上传编排，复用现有账号及三类传输共享预算；恢复失败保留原检查点并显示原因。
+    private func startUploads() async {
+        guard uploadCoordinator == nil else { return }
+        do {
+            let session = URLSession(configuration: Self.applying(activeProxy, to: DownloadEngine.defaultSessionConfiguration()))
+            uploadReadSession = session
+            let integrity = try IntegrityService(reader: RangeReader(session: session, budget: transferBudget))
+            let uploads = try UploadCoordinator(store: UploadStore(), integrityStore: IntegrityStore(),
+                budget: transferBudget, integrity: integrity, secrets: KeychainUploadSecretStorage(),
+                maximumConcurrentJobs: settings.maxConcurrentUploads,
+                environment: { [weak self] key in
+                    guard let self else { throw CancellationError() }
+                    return try await self.uploadEnvironment(for: key)
+                })
+            uploadCoordinator = uploads
+            uploadUpdates = Task { [weak self] in
+                for await jobs in await uploads.updates() {
+                    guard !Task.isCancelled else { break }
+                    self?.uploadJobs = jobs
+                }
+            }
+            try await uploads.restore()
+        } catch {
+            uploadProblem = error.localizedDescription
+        }
+    }
+
+    /// 用户确认网盘、账号及目标后才持久化上传选择；拖入文件本身不产生云端写入。
+    func addUpload(files: [URL], account: AccountKey, destination: RemoteReference,
+                   conflictPolicy: UploadConflictPolicy) async throws {
+        guard accountKey(for: account.provider) == account, let uploadCoordinator else {
+            throw UploadDestinationError.otherAccount
+        }
+        let selections = try files.map { try UploadSelection(url: $0, bookmark: UploadSource.bookmark(for: $0)) }
+        let name = coordinator.accountNames[account.provider] ?? account.provider.title
+        let id = try await uploadCoordinator.add(account: account, accountName: name, destination: destination,
+                                                selections: selections, conflictPolicy: conflictPolicy)
+        uploadJobs = await uploadCoordinator.snapshots()
+        lastAddedUploadID = id
+    }
+
+    /// 上传任务绑定创建时的账号和客户端；换号或换会话后不能把旧任务发给新账号。
+    func uploadEnvironment(for key: AccountKey) throws -> UploadEnvironment {
+        guard accountKey(for: key.provider) == key else { throw UploadDestinationError.otherAccount }
+        switch key.provider {
+        case .baidu:
+            guard let client else { throw UploadDestinationError.otherAccount }
+            return try UploadEnvironment.baidu(client: client, account: key) { [weak self] in
+                guard let self else { throw CancellationError() }
+                try await self.checkUploadSession(key, baidu: client)
+            }
+        case .quark:
+            guard let client = installedQuarkClient else { throw UploadDestinationError.otherAccount }
+            return try UploadEnvironment.quark(client: client, account: key, secrets: KeychainUploadSecretStorage()) { [weak self] in
+                guard let self else { throw CancellationError() }
+                try await self.checkUploadSession(key, quark: client)
+            }
+        }
+    }
+
+    /// 每次环境请求结束后仍核对同一实例，拒绝期间发生的退出、换号或代理会话替换。
+    private func checkUploadSession(_ key: AccountKey, baidu: BaiduClient? = nil, quark: QuarkClient? = nil) throws {
+        guard accountKey(for: key.provider) == key,
+              baidu == nil || client === baidu,
+              quark == nil || installedQuarkClient === quark else { throw UploadDestinationError.otherAccount }
+    }
 
     func netdisk(for provider: Provider) throws -> any Netdisk {
         guard let disk = coordinator.netdisks[provider] else {
