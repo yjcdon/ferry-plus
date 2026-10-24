@@ -171,6 +171,8 @@ public final class JobCoordinator {
         jobs += loaded
         invalidateIndex()
         hasLoaded = true
+        // 旧版本可能静默覆盖远端 MD5；先撤回错误校验状态，再恢复引擎，避免旧快照直接开跑。
+        for job in jobs { _ = failConflictingIntegrity(of: job.id) }
 
         await engine.updateConfiguration(settings.downloadConfiguration(base: baseConfiguration))
         // 任务列表读不出来时，不知道引擎中的文件下载属于谁。不恢复它们，也不取消它们。
@@ -196,7 +198,9 @@ public final class JobCoordinator {
             var connections: [String: Int] = [:]
             var pausedIDs = Set<String>()
             for job in jobs {
-                if job.isPaused { pausedIDs.formUnion(job.files.map(\.id)) }
+                if job.isPaused || job.files.contains(where: { Self.integrityConflict(of: $0) != nil }) {
+                    pausedIDs.formUnion(job.files.map(\.id))
+                }
                 guard let account = job.accountKey else { continue }
                 for file in job.files {
                     let reference = file.remoteReference ?? .baidu(path: file.remotePath, fsID: 0)
@@ -359,6 +363,7 @@ public final class JobCoordinator {
     public func resume(_ id: Job.ID) async {
         await waitUntilStarted()
         guard let job = activeJob(id), job.phase == .downloading, job.isPaused else { return }
+        guard !failConflictingIntegrity(of: id) else { return }
         update(id) { $0.isPaused = false }
         save()
         await serially(id) { await self.continueDownloads(id, resumingFailed: false) }
@@ -381,6 +386,7 @@ public final class JobCoordinator {
             // 重用已记录的目录和回执；结果不明时不会重复提交。网盘任务只重新列出。
             startTransfer(id)
         case .download:
+            guard !failConflictingIntegrity(of: id) else { return }
             update(id) {
                 $0.phase = .downloading
                 $0.error = nil
@@ -717,6 +723,7 @@ public final class JobCoordinator {
     /// `resumingFailed` 为 true 时失败的也继续（重试）。每处理一个文件都重新读取任务，任务暂停、移除或失败时停止。
     private func continueDownloads(_ id: Job.ID, resumingFailed: Bool) async {
         guard let job = activeJob(id), job.phase == .downloading else { return }
+        guard !failConflictingIntegrity(of: id) else { return }
         let files = job.files
         if files.contains(where: { !$0.isCompleted }) {
             do {
@@ -765,7 +772,7 @@ public final class JobCoordinator {
         }
     }
 
-    /// 加入引擎。加入期间任务被暂停时，立即暂停它。
+    /// 加入引擎前拒绝同算法校验依据冲突；加入期间任务被暂停时，立即暂停它。
     private func enqueue(_ file: JobFile, of id: Job.ID) async throws {
         await willEnqueue?(file)
         guard let job = activeJob(id) else { return }
@@ -774,6 +781,7 @@ public final class JobCoordinator {
         guard let destination = LocalPath.destination(for: file.relativePath, in: try folderURL(for: id)) else {
             throw TransferCheckError.unsafePath(file.relativePath)
         }
+        if let conflict = Self.integrityConflict(of: file) { throw UploadRecordError.invalid(conflict) }
         try await engine.enqueue(DownloadRequest(
             id: file.id,
             destination: destination,
@@ -826,9 +834,11 @@ public final class JobCoordinator {
     /// 把引擎报告的最终路径记入任务。已经记入时不变。
     private func recordCompletion(of fileID: String, at url: URL, evidence: DownloadSnapshot? = nil) {
         guard let (jobIndex, fileIndex) = locate(fileID), jobs[jobIndex].files[fileIndex].localURL == nil else { return }
-        let expectation = jobs[jobIndex].files[fileIndex].integrityExpectation
+        let file = jobs[jobIndex].files[fileIndex]
+        let expectation = file.integrityExpectation
         let verified: Bool
-        if let expectation, let evidence, case .completed(let completedURL) = evidence.state, completedURL == url {
+        if Self.integrityConflict(of: file) == nil,
+           let expectation, let evidence, case .completed(let completedURL) = evidence.state, completedURL == url {
             switch expectation.algorithm {
             case .sha256: verified = evidence.expectedSHA256?.lowercased() == expectation.digest
             case .md5: verified = evidence.expectedMD5?.lowercased() == expectation.digest
@@ -839,6 +849,31 @@ public final class JobCoordinator {
             jobs[jobIndex].files[fileIndex].integrityStatus = verified ? .verified : .unavailable
             jobs[jobIndex].files[fileIndex].integrityVerifiedAt = verified ? .now : nil
         }
+    }
+
+    /// 同算法的有效完整摘要必须一致；未确认语义的 HTTP ETag 不参与这个判断。
+    private static func integrityConflict(of file: JobFile) -> String? {
+        guard let expectation = file.integrityExpectation, expectation.algorithm == .md5,
+              let remoteMD5 = file.md5,
+              IntegrityExpectation.isDigest(remoteMD5.lowercased(), algorithm: .md5),
+              remoteMD5.lowercased() != expectation.digest.lowercased() else { return nil }
+        return "指定的 MD5 与网盘文件摘要冲突，请核对文件版本或校验依据"
+    }
+
+    /// 不删除内容或分片；仅撤回冲突依据产生的旧 verified，并阻止恢复、继续及自动清理。
+    @discardableResult
+    private func failConflictingIntegrity(of id: Job.ID) -> Bool {
+        guard let job = activeJob(id),
+              let conflict = job.files.lazy.compactMap(Self.integrityConflict).first else { return false }
+        update(id) {
+            for index in $0.files.indices where Self.integrityConflict(of: $0.files[index]) != nil {
+                // 两份基准相互矛盾不等于已证明实际内容不同，故标未验证并保留明确任务错误。
+                $0.files[index].integrityStatus = .unavailable
+                $0.files[index].integrityVerifiedAt = nil
+            }
+        }
+        fail(id, step: .download, UploadRecordError.invalid(conflict))
+        return true
     }
 
     /// 修改文件下载在 `downloads` 中的状态或它的 `localURL` 时都经过这里：所在任务的计数先减去这个文件原来的部分，

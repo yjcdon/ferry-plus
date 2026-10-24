@@ -444,3 +444,11 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 夸克非空秒传另已补齐：新随机 1 MiB 首次普通传输，保留原对象后新名同内容命中 instantCompleted，无分片／合并／finish 请求；两个准确 FID 均完整回读并逐范围比较源字节、SHA 一致，预算收尾为零。首次清理响应报错后仅只读确认目录消失，未重发删除。证据 `.build/t08-quark-instant-validation/report.md`。
 
 接入后的全包 307 项既有测试通过（`.build/v3-rapid-tests.log`），Release App 重新构建及签名验证通过（`.build/v3-rapid-md5-app-build.log`）。V3-T06 与 V3-T08 的自身完成标准已有证据，任务清单据此勾选；完整版本和界面验收继续执行。
+
+## 下载摘要冲突及恢复修复
+
+发现并复现：用户明确指定的 MD5 与准确远端对象的有效完整 MD5 矛盾时，旧代码静默采用输入值，仍可错误标记 verified。仅修新入队不能覆盖直接恢复的引擎记录，因此共用冲突规则覆盖启动恢复前、继续／重试、入队和完成记录。冲突任务明确失败；恢复前暂停其引擎记录，撤回旧 verified 与时间，保留本地完成文件、512 字节分片及原位移。两份基准矛盾标记未验证，不冒称已证明实际内容损坏，也不自动清理源。
+
+四类场景均已先复现再通过：新任务、自动恢复、手动继续、历史已完成记录。最终同一源码 96 项 JobModel／JobCoordinator 检查通过；额外同大小不同内容且启用自动清理的分享样本明确失败、零远端删除。DownloadKit 56 项、MD5 形状但无摘要语义的 ETag、清单 19 项及记录清理 10 项专项通过。已有两家实际上传再次下载证据已核对，三份现存本地文件重新只读计算摘要一致；早期 App 运行不冒称新修复的界面验收。证据 `.build/t11-current-validation/{report.md,core-complete-fix-tests.log,same-size-changed-share.log,final-snapshot-hashes.json}`。
+
+包含最终修复的 Release App 构建和签名验证通过（`.build/v3-rapid-md5-app-build.log`）。V3-T11 自身完成标准已核对，最终界面回归仍归 V3-T18。
