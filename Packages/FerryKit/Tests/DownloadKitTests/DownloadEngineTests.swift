@@ -714,7 +714,7 @@ private let megabyte = 1 << 20
         }
         #expect(FileManager.default.fileExists(atPath: request.temporaryURL.path))
 
-        await engine.cancel(id: "a.bin")
+        #expect(await engine.cancel(id: "a.bin") == nil)
 
         #expect(await engine.snapshot(id: "a.bin") == nil)
         #expect(!FileManager.default.fileExists(atPath: request.temporaryURL.path))
@@ -744,7 +744,7 @@ private let megabyte = 1 << 20
         #expect(fixture.server.log.isEmpty)
         #expect(fixture.source.resolveCount == 1)
 
-        await second.cancel(id: "a.bin")
+        #expect(await second.cancel(id: "a.bin") == location)
         #expect(await second.snapshot(id: "a.bin") == nil)
         #expect(try fixture.savedRecords().isEmpty)
         #expect(fixture.contents("a.bin") == data)

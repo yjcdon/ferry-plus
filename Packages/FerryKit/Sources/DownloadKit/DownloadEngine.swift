@@ -181,9 +181,11 @@ public actor DownloadEngine {
     ///
     /// 已完成的下载也要调用：引擎在完成后保留状态文件，`restore()` 时把它恢复为 completed，
     /// 直到应用保存了最终路径并调用这个方法确认。这时只删除状态文件，不删除下载好的文件。
-    public func cancel(id: String) async {
+    /// 返回收尾后确认的最终路径；取消恰逢完成时，调用方仍能准确处理已落地文件。
+    @discardableResult
+    public func cancel(id: String) async -> URL? {
         connectionOverrides[id] = nil
-        guard let entry = entries.removeValue(forKey: id) else { return }
+        guard let entry = entries.removeValue(forKey: id) else { return nil }
         cancellingIDs.insert(id)
         defer { cancellingIDs.remove(id) }
         order.removeAll { $0 == id }
@@ -197,6 +199,7 @@ public actor DownloadEngine {
         store.delete(id: id)
         emit(.removed(id: id))
         schedule()
+        return entry.record.value.completedURL
     }
 
     /// 应用退出前调用：停止所有下载并保存进度。进行中的下载下次 `restore()` 时恢复为 queued。

@@ -876,6 +876,59 @@ import os
         #expect(try FileManager.default.contentsOfDirectory(atPath: fixture.trash.path).count == 2)
     }
 
+    /// 移除等待首文件取消时，另一文件刚完成也必须按最终实际路径移入废纸篓。
+    @Test func removeTrashesFileCompletingDuringCancellationAndKeepsUnrelatedNames() async throws {
+        let names = ["a-blocked.bin", "b-finish.bin", "c-partial.bin"]
+        let fixture = Fixture(disk: Dictionary(uniqueKeysWithValues: names.map { ("/" + $0, randomData(400_000)) }))
+        let unrelated = Data("user's existing file".utf8)
+        let existing = fixture.downloads.appendingPathComponent("b-finish.bin")
+        try unrelated.write(to: existing)
+        fixture.server.setStalling(["/b-finish.bin", "/c-partial.bin"])
+        let source = RemovalGateSource(base: FileServerSource(server: fixture.server))
+        defer { source.open(); fixture.server.setStalling([]) }
+        let entries = names.enumerated().map { index, name in
+            RemoteEntry(fsID: Int64(index + 1), name: name, path: "/" + name, isDirectory: false, size: 400_000)
+        }
+        var job = Job(netdiskEntries: entries)
+        job.accountKey = Fixture.account
+        job.phase = .downloading
+        job.files = entries.map { JobFile(remotePath: $0.path, relativePath: $0.name, size: $0.size) }
+        try fixture.store.save([job])
+        let engine = fixture.makeEngine(source: source)
+        let coordinator = JobCoordinator(engine: engine, store: fixture.store,
+                                         settings: FerrySettings(cleanupAfterDownload: false, maxConcurrentFiles: 3),
+                                         downloadFolder: DownloadFolder(url: fixture.downloads),
+                                         trashItem: Fixture.trashItem(into: fixture.trash), baseConfiguration: Fixture.configuration)
+        coordinator.netdisks[.baidu] = fixture.netdisk
+        await coordinator.start()
+        let partial = job.files[2]
+        try await waitUntil("both nongated files to receive partial bytes") {
+            source.hasEntered && job.files[1...].allSatisfy { (coordinator.downloads[$0.id]?.receivedBytes ?? 0) > 0 }
+        }
+        let jobID = job.id
+        let removal = Task { await coordinator.remove(jobID, trashingFiles: true, cleanupConfirmed: false) }
+        try await waitUntil("first file cancellation to hold removal") { source.wasCancelled }
+        fixture.server.setStalling(["/c-partial.bin"])
+        try await waitUntil("second file to finish while removal is waiting") {
+            coordinator.job(jobID)?.files[1].localURL != nil
+        }
+        let completedURL = try #require(coordinator.job(jobID)?.files[1].localURL)
+        #expect(completedURL.lastPathComponent == "b-finish (1).bin")
+        #expect(coordinator.job(jobID)?.files[2].localURL == nil)
+        source.open()
+        #expect(await removal.value == [])
+        #expect(coordinator.jobs.isEmpty)
+        #expect(try Data(contentsOf: existing) == unrelated)
+        #expect(!FileManager.default.fileExists(atPath: completedURL.path))
+        #expect(!FileManager.default.fileExists(atPath: fixture.downloads.appendingPathComponent(partial.relativePath).path))
+        let trashed = try FileManager.default.contentsOfDirectory(at: fixture.trash, includingPropertiesForKeys: nil)
+        #expect(trashed.count == 1)
+        let trashedURL = try #require(trashed.first)
+        #expect(try Data(contentsOf: trashedURL) == fixture.netdisk.data(at: "/b-finish.bin"))
+        #expect(try FileManager.default.contentsOfDirectory(atPath: fixture.downloads.path) == ["b-finish.bin"])
+        await coordinator.shutdown()
+    }
+
     @Test func restoresDownloadsAfterRestart() async throws {
         let fixture = Fixture(share: ["a.bin": randomData(400_000)])
         let first = fixture.makeCoordinator()
@@ -1297,5 +1350,48 @@ import os
         #expect(fixture.netdisk.deletes == [[valid.remoteDirectory]])
         #expect(coordinator.job(valid.id)?.isCleanedUp == true)
         #expect(invalid.allSatisfy { coordinator.job($0.id)?.isCleanedUp == false })
+    }
+}
+
+/// 首文件取消后仍挂起，用于准确控制移除与另一文件完成的交错顺序。
+private struct RemovalGateSource: DownloadSource {
+    private struct State {
+        var isOpen = false
+        var entered = false
+        var cancelled = false
+        var waiter: CheckedContinuation<Void, Never>?
+    }
+    let base: FileServerSource
+    private let state = OSAllocatedUnfairLock(initialState: State())
+    init(base: FileServerSource) { self.base = base }
+    var hasEntered: Bool { state.withLock { $0.entered } }
+    var wasCancelled: Bool { state.withLock { $0.cancelled } }
+
+    func open() {
+        let waiter = state.withLock { value in
+            value.isOpen = true
+            defer { value.waiter = nil }
+            return value.waiter
+        }
+        waiter?.resume()
+    }
+
+    func resolve(_ request: DownloadRequest) async throws -> ResolvedURL {
+        let context = try JSONDecoder().decode(DownloadContext.self, from: request.context)
+        if context.reference.identifier.hasSuffix("/a-blocked.bin") {
+            state.withLock { $0.entered = true }
+            await withTaskCancellationHandler {
+                await withCheckedContinuation { continuation in
+                    let isOpen = state.withLock { value in
+                        if !value.isOpen { value.waiter = continuation }
+                        return value.isOpen
+                    }
+                    if isOpen { continuation.resume() }
+                }
+            } onCancel: {
+                state.withLock { $0.cancelled = true }
+            }
+        }
+        return try await base.resolve(request)
     }
 }

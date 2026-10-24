@@ -386,10 +386,14 @@ public final class JobCoordinator {
         await serially(id) {}
         lanes[id] = nil
         // 转存可能在结束前写入了文件列表，所以重新读取任务。
-        guard let job = job(id) else { return [] }
-        for file in job.files {
-            await engine.cancel(id: file.id)
+        guard let pending = job(id) else { return [] }
+        for file in pending.files {
+            if let completedURL = await engine.cancel(id: file.id) {
+                recordCompletion(of: file.id, at: completedURL)
+            }
         }
+        // 取消收尾期间仍可能完成其他文件；合并引擎确认路径后再决定本地文件范围。
+        guard let job = job(id) else { return [] }
         var failed: [URL] = []
         if trashingFiles {
             // 已完成的任务已经交回了下载目录的访问权限，重新取得。取不到时移动失败，如实返回。
