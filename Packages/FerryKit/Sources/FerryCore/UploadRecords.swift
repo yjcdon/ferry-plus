@@ -167,6 +167,8 @@ public struct UploadFile: Codable, Sendable, Equatable, Identifiable {
     public let id: UUID
     public let jobID: UUID
     public var relativePath: String
+    /// 同名策略选定的远端名称；恢复不得重新选名而产生另一份文件。
+    public var remoteName: String?
     public var isDirectory: Bool
     public var source: UploadLocalSource
     public var phase: UploadPhase
@@ -192,6 +194,11 @@ public struct UploadFile: Codable, Sendable, Equatable, Identifiable {
     public func validate(account: AccountKey? = nil) throws {
         guard LocalPath.isSafe(relativePath), source.url.isFileURL, source.size >= 0 else {
             throw UploadRecordError.invalid("上传源路径或大小无效")
+        }
+        if let remoteName {
+            guard LocalPath.isSafe(remoteName), !remoteName.contains("/") else {
+                throw UploadRecordError.invalid("上传远端名称无效")
+            }
         }
         try expectation?.validate()
         if let expectation, expectation.size != source.size { throw UploadRecordError.invalid("源大小与校验基准不一致") }

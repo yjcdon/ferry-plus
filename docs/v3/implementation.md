@@ -122,3 +122,13 @@ DownloadEngine 增加可选共享预算参数，默认保持原有请求行为�
 现有 DownloadEngineTests 新增 6 项预算接入用例，连同此前用例共 52 项通过：`env FERRY_MACOS_SDK=macosx bash Scripts/test-packages.sh --configuration release --filter DownloadEngineTests`。覆盖小范围偏移、未注入时兼容、取消在途／等待连接、取消额度等待、限速及非 Range 流式兼容。日志 `.build/v3-budget-download-tests.log`。
 
 明确边界：非 Range 或未知长度来源目前只共享连接许可，尚不执行字节限速；上传／回读／下载在正式 App 中共用同一实例及设置仍需继续接入，V3-T12 不据此标为完整完成。
+
+## 持久上传编排与账号环境
+
+`UploadCoordinator` 是上传状态的唯一执行写入方，维护有限批次队列、优先级、暂停收尾、原会话续传、合并意图、完整回读和独立校验记录。扫描清单完成前没有云端写入；同名保留两份的远端名称先保存。暂停与取消等待旧 worker 收尾，未决提交保留检查点并提供只查询的核对操作，不盲目重提。任务移除只操作本地记录与自身授权；不需要登录也能移除没有未决提交的本地记录。
+
+`UploadEnvironment` 提供账号绑定的目录、创建、准确对象解析、提交查询与授权清理。百度回读先匹配 path、fs_id 和大小；夸克按预分配 fid 查询合并结果。敏感授权通过应用 Keychain 桥接在完成／移除后清理。上传任务保存 `remoteName`，恢复时不重新选名。
+
+14 项隔离验证通过，覆盖嵌套与空目录、零文件、独立摘要、暂停继续、跳过／保留两份、安全覆盖阻断、合并响应丢失、核对后不重复合并、本地源移走后回读、取消后核对与移除、资源归零。证据 `.build/coordinator-validation/result.txt`。完整 26.5 SDK Release App 构建和验签通过：`.build/v3-upload-ui-build.log`。
+
+仍待完成的能力：安全覆盖、服务端过期／分片查询、自动有限分片重试及真实异常恢复验收；当前分片失败保留检查点供重试。真实网盘命名冲突的原子行为另行验证，离线同名用例不等同于服务端并发保证。
