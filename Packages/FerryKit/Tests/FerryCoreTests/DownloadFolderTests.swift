@@ -133,7 +133,7 @@ import Testing
         #expect(access.opened == [fixture.downloads.path])
         #expect(access.closed.isEmpty)
 
-        await coordinator.remove(job.id)
+        try await coordinator.remove(job.id)
         fixture.server.setStalled(false)
         #expect(access.closed == [fixture.downloads.path])
     }

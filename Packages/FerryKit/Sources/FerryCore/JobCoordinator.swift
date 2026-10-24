@@ -1,4 +1,5 @@
 import DownloadKit
+import CryptoKit
 import Foundation
 import Observation
 import os
@@ -68,6 +69,7 @@ public final class JobCoordinator {
     public private(set) var isStarted = false
     /// 正在移除的任务。移除完成前它们仍在 `jobs` 中，但不再接受操作。
     public private(set) var removingJobs: Set<Job.ID> = []
+    @ObservationIgnored public var onIntegrityRecordsChanged: (() -> Void)?
     @ObservationIgnored public var onJobCompleted: ((Job) -> Void)?
     @ObservationIgnored public var onRunningChanged: ((Bool) -> Void)?
     @ObservationIgnored private var runningFileIDs: Set<String> = []
@@ -75,6 +77,7 @@ public final class JobCoordinator {
     @ObservationIgnored var willEnqueue: (@MainActor (JobFile) async -> Void)?
 
     @ObservationIgnored private let engine: DownloadEngine
+    @ObservationIgnored private let integrityStore: IntegrityStore
     @ObservationIgnored private let store: JobStore
     @ObservationIgnored private let baseConfiguration: DownloadConfiguration
     @ObservationIgnored private let folderAccess: any DownloadFolderAccess
@@ -98,6 +101,7 @@ public final class JobCoordinator {
     @ObservationIgnored var saveDelay: Duration = .seconds(1)
     @ObservationIgnored private var pendingSave: Task<Void, Never>?
     @ObservationIgnored private var eventTask: Task<Void, Never>?
+    @ObservationIgnored private var removalWaiters: [CheckedContinuation<Void, Never>] = []
     @ObservationIgnored private var isShuttingDown = false
     /// 完成状态写入任务列表后，要从引擎取消的文件下载。
     @ObservationIgnored private var cancelAfterSave: [String] = []
@@ -120,9 +124,10 @@ public final class JobCoordinator {
     public init(engine: DownloadEngine, store: JobStore, settings: FerrySettings, downloadFolder: DownloadFolder,
                 folderAccess: any DownloadFolderAccess = SecurityScopedFolderAccess(),
                 trashItem: @escaping @Sendable (URL) throws -> Void = { try FileManager.default.trashItem(at: $0, resultingItemURL: nil) },
-                baseConfiguration: DownloadConfiguration = DownloadConfiguration()) {
+                baseConfiguration: DownloadConfiguration = DownloadConfiguration(), integrityStore: IntegrityStore? = nil) {
         self.engine = engine
         self.store = store
+        self.integrityStore = integrityStore ?? IntegrityStore(directory: store.fileURL.deletingLastPathComponent().appendingPathComponent("Integrity", isDirectory: true))
         self.settings = settings
         self.downloadFolder = downloadFolder
         self.folderAccess = folderAccess
@@ -429,6 +434,9 @@ public final class JobCoordinator {
         running.forEach { $0.cancel() }
         for task in running { await task.value }
         tasks = [:]
+        if !removingJobs.isEmpty {
+            await withCheckedContinuation { removalWaiters.append($0) }
+        }
         await engine.shutdown()
         for snapshot in await engine.snapshots() {
             if case .completed(let url) = snapshot.state {
@@ -563,11 +571,19 @@ public final class JobCoordinator {
     /// 否则它们留在本地。
     /// - Returns: 没能移到废纸篓的文件或目录。
     @discardableResult
-    public func remove(_ id: Job.ID, trashingFiles: Bool = false, cleanupConfirmed: Bool? = nil) async -> [URL] {
+    public func remove(_ id: Job.ID, trashingFiles: Bool = false, cleanupConfirmed: Bool? = nil,
+                       integrityDisposition: DownloadIntegrityDisposition = .preserve) async throws -> [URL] {
         await waitUntilStarted()
-        guard job(id) != nil, !removingJobs.contains(id) else { return [] }
+        guard job(id) != nil, !isShuttingDown, !removingJobs.contains(id) else { throw CancellationError() }
         removingJobs.insert(id)
-        defer { removingJobs.remove(id) }
+        defer {
+            removingJobs.remove(id)
+            if removingJobs.isEmpty {
+                let waiters = removalWaiters
+                removalWaiters = []
+                for waiter in waiters { waiter.resume() }
+            }
+        }
         let verifications = localVerifications.values.filter { $0.jobID == id }.map(\.task)
         verifications.forEach { $0.cancel() }
         for verification in verifications { _ = try? await verification.value }
@@ -580,29 +596,55 @@ public final class JobCoordinator {
         lanes[id] = nil
         // 转存可能在结束前写入了文件列表，所以重新读取任务。
         guard let pending = job(id) else { return [] }
+        update(id) {
+            if $0.phase == .downloading { $0.isPaused = true }
+            if $0.phase == .transferring {
+                $0.phase = .failed(.transfer)
+                $0.error = "移除尚未完成，任务已停止；已记录的转存意图保留。"
+            }
+        }
+        // 先只暂停并等候 checkpoint，不删除部分内容；归档失败仍可从原偏移继续。
         for file in pending.files {
-            if let completedURL = await engine.cancel(id: file.id) {
-                recordCompletion(of: file.id, at: completedURL)
+            await engine.pause(id: file.id)
+            if let snapshot = await engine.snapshot(id: file.id) {
+                if case .completed(let url) = snapshot.state { recordCompletion(of: file.id, at: url, evidence: snapshot) }
+                setSnapshot(file.id, snapshot)
             }
         }
         // 取消收尾期间仍可能完成其他文件；合并引擎确认路径后再决定本地文件范围。
-        guard let job = job(id) else { return [] }
-        var failed: [URL] = []
-        if trashingFiles {
-            // 已完成的任务已经交回了下载目录的访问权限，重新取得。取不到时移动失败，如实返回。
-            _ = try? folderURL(for: id)
-            let trashItem = trashItem
-            failed = await Task.detached { JobFileTrash.trash(job, using: trashItem) }.value
-        }
-        jobs.removeAll { $0.id == id }
+        guard let job = job(id) else { throw CancellationError() }
+        // 删除本地文件前先取得独立权限并按真实完成位置映射；书签移动不能误删旧目录里的同名文件。
+        let trashScope = trashingFiles ? try folderAccess.open(job.downloadFolder ?? downloadFolder) : nil
+        defer { if let trashScope { folderAccess.close(trashScope) } }
+        let trashJob = try trashScope.map { try remappedTrashJob(job, recorded: (job.downloadFolder ?? downloadFolder).url, resolved: $0.url) }
+        // 保存取消收尾确认的新完成位置，再独立归档；写失败不能先删除记录或移动原件。
+        try persistRequired()
+        try await archiveIntegrity(of: job, disposition: integrityDisposition)
+        try Task.checkCancellation()
+        guard !isShuttingDown else { throw CancellationError() }
+        // 先成功保存“已移除”再提交破坏性清理；保存失败仍有完整分片和明确暂停的任务。
+        guard let originalIndex = jobs.firstIndex(where: { $0.id == id }) else { throw CancellationError() }
+        jobs.remove(at: originalIndex)
         invalidateIndex()
+        do { try persistRequired() }
+        catch {
+            jobs.insert(job, at: min(originalIndex, jobs.count))
+            invalidateIndex()
+            throw error
+        }
+        // 从这里开始完成已提交的本地清理。shutdown 等待 removingJobs，不会先退出再删文件。
+        for file in job.files { await engine.cancel(id: file.id) }
+        var failed: [URL] = []
+        if let trashJob {
+            let trashItem = trashItem
+            failed = await Task.detached { JobFileTrash.trash(trashJob, using: trashItem) }.value
+        }
         jobActivities[id] = nil
         // 引擎事件流可能尚未消费 removed，返回前同步清除快照与实际运行标记。
         for file in job.files {
             setSnapshot(file.id, nil)
             fileActivities[file.id] = nil
         }
-        save()
         closeFolder(of: id)
         let verifiedForAutomaticCleanup = !job.files.isEmpty && job.files.allSatisfy { $0.integrityStatus == .verified && $0.integrityExpectation != nil }
         let shouldCleanup = cleanupConfirmed ?? (settings.cleanupAfterDownload(for: job.provider) && verifiedForAutomaticCleanup)
@@ -616,6 +658,98 @@ public final class JobCoordinator {
             }
         }
         return failed
+    }
+
+    /// 保留服务端下载后的实际重命名位置，只把记录根目录下的相对分量映射到书签当前根目录。
+    private func remappedTrashJob(_ job: Job, recorded: URL, resolved: URL) throws -> Job {
+        let base = recorded.standardizedFileURL.pathComponents
+        var mapped = job
+        mapped.downloadFolder = DownloadFolder(url: resolved)
+        for index in mapped.files.indices {
+            guard let localURL = mapped.files[index].localURL else { continue }
+            let parts = localURL.standardizedFileURL.pathComponents
+            guard parts.count > base.count, zip(base, parts).allSatisfy({ $0 == $1 }),
+                  let url = LocalPath.destination(for: parts.dropFirst(base.count).joined(separator: "/"), in: resolved) else {
+                throw UploadRecordError.invalid("本地完成文件不在记录的下载目录内，已保留任务和文件。")
+            }
+            mapped.files[index].localURL = url
+        }
+        return mapped
+    }
+
+    /// 移除前需用户导出的不可独立关联依据。按任务生成一份，绝不按当前登录账号补造旧归属。
+    public func removalIntegrityManifest(_ id: UUID) throws -> IntegrityManifest? {
+        guard let job = job(id) else { throw CancellationError() }
+        var entries: [IntegrityManifestEntry] = []
+        for file in job.files where file.integrityExpectation != nil {
+            guard try archivedIntegrityRecord(file, job: job) == nil, let basis = file.integrityExpectation else { continue }
+            guard entries.count < IntegrityManifest.maximumEntries else { throw UploadRecordError.invalid("此任务的校验清单超过10000项，请保留任务或明确放弃无法归档的依据。") }
+            entries.append(try IntegrityManifestEntry(relativePath: file.relativePath, size: file.size, algorithm: basis.algorithm, digest: basis.digest))
+        }
+        guard !entries.isEmpty else { return nil }
+        let manifest = try IntegrityManifest(entries: entries)
+        _ = try manifest.encoded()
+        return manifest
+    }
+
+    /// 仅真实完成且通过比对的精确对象可成为历史候选。旧 raw MD5 与未知账号不升级成校验结果。
+    private func archivedIntegrityRecord(_ file: JobFile, job: Job) throws -> IntegrityRecord? {
+        guard file.localURL != nil, file.integrityStatus == .verified,
+              let basis = file.integrityExpectation, let time = file.integrityVerifiedAt,
+              let account = job.accountKey, !account.accountID.isEmpty,
+              let reference = file.remoteReference, account.provider == reference.provider,
+              basis.reference == reference, basis.size == file.size else { return nil }
+        switch reference {
+        case .baidu(let path, let fsID):
+            guard fsID > 0, path.hasPrefix("/"), LocalPath.isSafe(String(path.dropFirst())) else { return nil }
+        case .quark(let fid):
+            guard !fid.isEmpty, fid != "0", !fid.contains("/"), !fid.contains(where: { $0.isWhitespace || $0 == "\0" }) else { return nil }
+        }
+        try basis.validate()
+        // 独立命名空间+长度分隔，重试得到同一个ID，不与上传记录的随机ID复用。
+        let key = "FerryPlus.DownloadIntegrity.v1|\(job.id.uuidString)|\(file.id.utf8.count):\(file.id)"
+        var bytes = Array(SHA256.hash(data: Data(key.utf8)).prefix(16))
+        bytes[6] = (bytes[6] & 0x0f) | 0x80
+        bytes[8] = (bytes[8] & 0x3f) | 0x80
+        let id = UUID(uuid: (bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7], bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]))
+        let record = IntegrityRecord(id: id, account: account, reference: reference, remoteVersion: basis.remoteVersion,
+                                     expectation: basis, actualDigest: basis.digest, status: .verified, verifiedAt: time)
+        try record.validate()
+        return record
+    }
+
+    /// 稳定ID逐项原子归档，不逐项重写任务清单。任何失败均保留任务，且不先移动本地文件。
+    private func archiveIntegrity(of job: Job, disposition: DownloadIntegrityDisposition) async throws {
+        if case .discardUnarchivable = disposition {
+            // 明确放弃只针对不能归档的依据；已知的已验证记录仍然保存。
+        } else if let current = try removalIntegrityManifest(job.id) {
+            guard case .exportedManifest(let exported) = disposition else {
+                throw UploadRecordError.invalid("此任务还有不能自动关联的校验依据。请先导出校验清单，或明确放弃这些依据后再移除。")
+            }
+            // 导出集可以包含期间已完成而可自动归档的项目，但不得漏掉或改写当前仍需保留的依据。
+            let saved = Dictionary(uniqueKeysWithValues: exported.entries.map { (LocalPath.key($0.relativePath), $0) })
+            guard current.entries.allSatisfy({ entry in
+                guard let other = saved[LocalPath.key(entry.relativePath)] else { return false }
+                return other.size == entry.size && other.algorithm == entry.algorithm && other.digest == entry.digest
+            }) else { throw UploadRecordError.invalid("校验依据已发生变化，请重新导出清单后移除。") }
+        }
+        var changed = false
+        do {
+            for file in job.files {
+                try Task.checkCancellation()
+                guard !isShuttingDown else { throw CancellationError() }
+                if let record = try archivedIntegrityRecord(file, job: job) {
+                    try await integrityStore.save(record)
+                    changed = true
+                    try Task.checkCancellation()
+                    guard !isShuttingDown else { throw CancellationError() }
+                }
+            }
+        } catch {
+            if changed { onIntegrityRecordsChanged?() }
+            throw error
+        }
+        if changed { onIntegrityRecordsChanged?() }
     }
 
     public func progress(of job: Job) -> JobProgress {

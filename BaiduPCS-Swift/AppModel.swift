@@ -149,7 +149,8 @@ final class AppModel {
         self.engine = engine
         downloadDirectory = Self.defaultDownloadDirectory
         coordinator = JobCoordinator(engine: engine, store: JobStore(fileURL: jobsFile),
-                                     settings: settings, downloadFolder: DownloadFolder(url: Self.defaultDownloadDirectory))
+                                     settings: settings, downloadFolder: DownloadFolder(url: Self.defaultDownloadDirectory), integrityStore: integrityStore)
+        coordinator.onIntegrityRecordsChanged = { [weak self] in self?.integrityRecordsRevision += 1 }
         checkedSource.connect(coordinator)
         coordinator.onJobCompleted = { [weak self] job in self?.notifyCompletion(of: job) }
         #if DEBUG
@@ -944,11 +945,12 @@ final class AppModel {
         jobs.contains { canOperate(on: $0) && $0.files.contains(where: \.isCompleted) }
     }
 
-    func remove(_ job: Job, trashingFiles: Bool = false, cleanupConfirmed: Bool? = nil) {
-        Task {
-            let failed = await coordinator.remove(job.id, trashingFiles: trashingFiles, cleanupConfirmed: cleanupConfirmed)
-            untrashedItems += failed
-        }
+    /// 主窗口等待实际移除结果；归档失败保持任务并将错误交回显示。
+    func remove(_ job: Job, trashingFiles: Bool = false, cleanupConfirmed: Bool? = nil,
+                integrityDisposition: DownloadIntegrityDisposition = .preserve) async throws {
+        let failed = try await coordinator.remove(job.id, trashingFiles: trashingFiles, cleanupConfirmed: cleanupConfirmed,
+                                                  integrityDisposition: integrityDisposition)
+        untrashedItems += failed
     }
 
     // MARK: - 通知

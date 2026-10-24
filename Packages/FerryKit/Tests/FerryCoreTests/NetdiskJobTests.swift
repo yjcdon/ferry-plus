@@ -130,19 +130,19 @@ import Testing
         try await waitUntil("running") {
             coordinator.job(running.id)?.files.contains { coordinator.downloads[$0.id]?.state == .running } ?? false
         }
-        await coordinator.remove(running.id)
+        try await coordinator.remove(running.id)
         fixture.server.setStalled(false)
 
         // 准备失败后移除。
         fixture.netdisk.failNextList()
         let failed = coordinator.addNetdiskJob(entries: [entry("/资料/2024/报告", directory: true)], account: Fixture.account)
         try await coordinator.waitForPhase(.failed(.transfer), of: failed.id)
-        await coordinator.remove(failed.id)
+        try await coordinator.remove(failed.id)
 
         // 完成后移除，并把下载的文件移到废纸篓。
         let completed = coordinator.addNetdiskJob(entries: [entry("/资料/2024", directory: true)], account: Fixture.account)
         try await coordinator.waitForPhase(.completed, of: completed.id)
-        let untrashed = await coordinator.remove(completed.id, trashingFiles: true)
+        let untrashed = try await coordinator.remove(completed.id, trashingFiles: true)
 
         #expect(untrashed.isEmpty)
         #expect(coordinator.jobs.isEmpty)
@@ -165,7 +165,7 @@ import Testing
             coordinator.job(job.id)?.error == CoordinatorError.otherAccount.errorDescription
         }
         #expect(coordinator.job(job.id)?.phase == .failed(.transfer))
-        await coordinator.remove(job.id)
+        try await coordinator.remove(job.id)
         #expect(fixture.netdisk.operations == [.list("/资料/2024/报告")])
     }
 
@@ -312,7 +312,7 @@ import Testing
         await coordinator.start()
         let remotePaths = fixture.netdisk.remotePaths()
 
-        let failedLocalItems = await coordinator.remove(saved.id, cleanupConfirmed: true)
+        let failedLocalItems = try await coordinator.remove(saved.id, cleanupConfirmed: true)
 
         #expect(failedLocalItems.isEmpty)
         #expect(coordinator.job(saved.id) == nil)

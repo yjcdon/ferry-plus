@@ -171,7 +171,7 @@ public actor IntegrityStore {
         return matches
     }
 
-    /// 版本未知时只提供原始上传摘要的候选，不自动认定它仍是远端当前版本。
+    /// 提供已验证的 SHA-256／MD5 校验基准；版本未知时不自动认定它仍是远端当前版本。
     /// 界面须让用户确认具体基准；不得按同名文件或另一账号的记录匹配。
     public func candidates(account: AccountKey, reference: RemoteReference, size: Int64) throws -> [IntegrityRecord] {
         guard !account.accountID.isEmpty, account.provider == reference.provider, size >= 0 else {
@@ -184,8 +184,7 @@ public actor IntegrityStore {
             let record: IntegrityRecord = try UploadDiskRecord.read(at: url)
             try record.validate()
             if record.account == account, record.reference == reference, record.status == .verified,
-               let expectation = record.expectation, expectation.algorithm == .sha256,
-               expectation.origin == .localOriginal, expectation.size == size {
+               let expectation = record.expectation, expectation.size == size {
                 result.append(record)
             }
         }

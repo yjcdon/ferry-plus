@@ -1126,7 +1126,7 @@ import os
         }
         let big = try #require(coordinator.job(job.id)?.files.first { $0.relativePath == "big.bin" })
 
-        await coordinator.remove(job.id, cleanupConfirmed: true)
+        try await coordinator.remove(job.id, cleanupConfirmed: true)
         fixture.server.setStalled(false)
 
         #expect(coordinator.jobs.isEmpty)
@@ -1151,7 +1151,7 @@ import os
 
         let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
         try await coordinator.waitForPhase(.completed, of: job.id)
-        let failed = await coordinator.remove(job.id, trashingFiles: true)
+        let failed = try await coordinator.remove(job.id, trashingFiles: true)
 
         #expect(failed.isEmpty)
         #expect(coordinator.jobs.isEmpty)
@@ -1189,7 +1189,7 @@ import os
             source.hasEntered && job.files[1...].allSatisfy { (coordinator.downloads[$0.id]?.receivedBytes ?? 0) > 0 }
         }
         let jobID = job.id
-        let removal = Task { await coordinator.remove(jobID, trashingFiles: true, cleanupConfirmed: false) }
+        let removal = Task { try await coordinator.remove(jobID, trashingFiles: true, cleanupConfirmed: false) }
         try await waitUntil("first file cancellation to hold removal") { source.wasCancelled }
         fixture.server.setStalling(["/c-partial.bin"])
         try await waitUntil("second file to finish while removal is waiting") {
@@ -1199,7 +1199,7 @@ import os
         #expect(completedURL.lastPathComponent == "b-finish (1).bin")
         #expect(coordinator.job(jobID)?.files[2].localURL == nil)
         source.open()
-        #expect(await removal.value == [])
+        #expect(try await removal.value == [])
         #expect(coordinator.jobs.isEmpty)
         #expect(try Data(contentsOf: existing) == unrelated)
         #expect(!FileManager.default.fileExists(atPath: completedURL.path))
@@ -1594,11 +1594,11 @@ import os
             await coordinator.retry(job.id)
             try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
             #expect(coordinator.job(job.id)?.error == TransferCheckError.missingJobDirectory.errorDescription)
-            await coordinator.remove(job.id, cleanupConfirmed: true)
+            try await coordinator.remove(job.id, cleanupConfirmed: true)
         }
         #expect(fixture.netdisk.operations.isEmpty)
 
-        await coordinator.remove(valid.id, cleanupConfirmed: true)
+        try await coordinator.remove(valid.id, cleanupConfirmed: true)
         #expect(fixture.netdisk.deletes == [[valid.remoteDirectory]])
     }
 

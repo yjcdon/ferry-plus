@@ -436,3 +436,10 @@ public struct TransferManifestEntry: Codable, Sendable, Hashable {
         self.size = size
     }
 }
+
+/// 移除任务不隐式丢弃已记录的摘要；导出成功和主动放弃由主窗口明确传入。
+public enum DownloadIntegrityDisposition: Sendable {
+    case preserve
+    case exportedManifest(IntegrityManifest)
+    case discardUnarchivable
+}

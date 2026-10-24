@@ -297,7 +297,7 @@ private struct IntegrityRecordSettingsSection: View {
         } header: {
             Text("内容校验")
         } footer: {
-            Text("校验记录独立保存原始摘要与回读结果。清理后，后续下载需要重新提供校验依据。")
+            Text("校验记录独立保存摘要、来源和当时校验结果。清理后，后续下载需要重新提供校验依据。")
                 .foregroundStyle(.secondary)
         }
         .task(id: model.integrityRecordsRevision) { await reloadInventory() }

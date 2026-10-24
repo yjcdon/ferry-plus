@@ -18,6 +18,26 @@ struct MainView: View {
     @State private var uploadDetail: UploadDetailRequest?
     @State private var revealedUploadID: UUID?
     @State private var localVerification: LocalVerificationRequest?
+    @State private var downloadRemovalQueue: [DownloadRemovalRequest] = []
+    @State private var downloadRemovalErrors: [String] = []
+    @State private var manualIntegrityRemoval: ManualIntegrityRemoval?
+    @State private var removalManifestDocument: IntegrityManifestDocument?
+    @State private var exportsRemovalManifest = false
+    @State private var showsIntegrityRemovalConfirmation = false
+    @State private var isRemovingDownloads = false
+
+    private struct DownloadRemovalRequest: Identifiable {
+        let job: Job
+        let removal: JobRemoval
+        let cleanup: Bool?
+        var id: UUID { job.id }
+    }
+    private struct ManualIntegrityRemoval {
+        let request: DownloadRemovalRequest
+        let manifest: IntegrityManifest?
+        let preparationError: String?
+    }
+
 
     private struct LocalVerificationRequest: Identifiable {
         let jobID: UUID
@@ -134,6 +154,38 @@ struct MainView: View {
             CompletedFileVerificationSheet(jobID: request.jobID, file: request.file)
         }
         .sheet(item: $uploadDetail) { detail in UploadFilesView(jobID: detail.id, title: detail.title) }
+        .confirmationDialog("保留校验依据", isPresented: $showsIntegrityRemovalConfirmation, presenting: manualIntegrityRemoval) { pending in
+            if let manifest = pending.manifest {
+                Button("导出清单并移除…") {
+                    do {
+                        removalManifestDocument = try IntegrityManifestDocument(manifest: manifest)
+                        exportsRemovalManifest = true
+                    } catch { operationError = error.localizedDescription }
+                }
+            }
+            Button("放弃依据并移除", role: .destructive) {
+                manualIntegrityRemoval = nil
+                Task { await removeDownload(pending.request, disposition: .discardUnarchivable); await drainDownloadRemovals() }
+            }
+            Button("取消", role: .cancel) { cancelDownloadRemoval() }
+        } message: { pending in
+            Text(pending.preparationError ?? "“\(pending.request.job.title)”中部分摘要尚未通过校验，或缺少准确账号及云端对象关联。导出清单后可用于以后的下载；已验证且关联明确的记录会自动保留。")
+        }
+        .onChange(of: showsIntegrityRemovalConfirmation) { _, presented in
+            if !presented, manualIntegrityRemoval != nil, !exportsRemovalManifest { cancelDownloadRemoval() }
+        }
+        .fileExporter(isPresented: $exportsRemovalManifest, document: removalManifestDocument,
+                      contentTypes: [.json], defaultFilename: manualIntegrityRemoval.map { "下载校验-\($0.request.id.uuidString).json" } ?? "下载校验.json", onCompletion: { result in
+            guard let pending = manualIntegrityRemoval, let manifest = pending.manifest else { return }
+            manualIntegrityRemoval = nil
+            switch result {
+            case .success:
+                Task { await removeDownload(pending.request, disposition: .exportedManifest(manifest)); await drainDownloadRemovals() }
+            case .failure(let error):
+                cancelDownloadRemoval()
+                if (error as NSError).code != NSUserCancelledError { operationError = error.localizedDescription }
+            }
+        }, onCancellation: cancelDownloadRemoval)
         .alert("有些文件没有移到废纸篓", isPresented: Binding(
             get: { !model.untrashedItems.isEmpty }, set: { if !$0 { model.untrashedItems = [] } }
         ), presenting: model.untrashedItems) { items in
@@ -209,7 +261,7 @@ struct MainView: View {
     }
 
     private func requestRemoval(_ ids: [TransferTaskID], _ removal: JobRemoval) {
-        guard uploadCommand == nil else { return }
+        guard uploadCommand == nil, downloadRemovalQueue.isEmpty, !isRemovingDownloads else { return }
         let wanted = Set(ids)
         let targets = visibleItems.filter { wanted.contains($0.id) }
         let downloads = targets.compactMap { item -> Job? in
@@ -234,12 +286,65 @@ struct MainView: View {
     /// 固定本次远端清理选择；确认后再次与当前可见范围相交，避免筛选改变扩大删除范围。
     private func remove(_ pending: PendingTransferRemoval) {
         let visible = Set(visibleItems.map(\.id))
-        for job in pending.downloads where visible.contains(.init(direction: .download, id: job.id)) {
-            selection.remove(.init(direction: .download, id: job.id))
-            model.remove(job, trashingFiles: pending.removal == .trashingFiles, cleanupConfirmed: pending.cleanup[job.id])
-        }
+        downloadRemovalQueue = pending.downloads.filter { visible.contains(.init(direction: .download, id: $0.id)) }
+            .map { .init(job: $0, removal: pending.removal, cleanup: pending.cleanup[$0.id]) }
+        downloadRemovalErrors = []
+        if !downloadRemovalQueue.isEmpty { Task { await drainDownloadRemovals() } }
         let uploads = pending.uploads.filter { visible.contains(.init(direction: .upload, id: $0.id)) }
         if !uploads.isEmpty { uploadCommand = .init(action: .remove, jobs: uploads) }
+    }
+
+    /// 一批任务逐个保存依据；每个任务单独清单，避免不同任务的同名路径误合并。
+    private func drainDownloadRemovals() async {
+        guard !isRemovingDownloads, manualIntegrityRemoval == nil else { return }
+        isRemovingDownloads = true
+        defer { isRemovingDownloads = false }
+        while let request = downloadRemovalQueue.first {
+            guard visibleItems.contains(where: { $0.id == .init(direction: .download, id: request.id) }),
+                  model.coordinator.jobs.contains(where: { $0.id == request.id }) else {
+                downloadRemovalQueue.removeFirst()
+                continue
+            }
+            do {
+                if let manifest = try model.coordinator.removalIntegrityManifest(request.id) {
+                    manualIntegrityRemoval = .init(request: request, manifest: manifest, preparationError: nil)
+                    showsIntegrityRemovalConfirmation = true
+                    return
+                }
+            } catch {
+                manualIntegrityRemoval = .init(request: request, manifest: nil,
+                    preparationError: "无法导出此任务的校验清单：" + error.localizedDescription + " 任务将保留；也可明确放弃不能归档的依据后移除。")
+                showsIntegrityRemovalConfirmation = true
+                return
+            }
+            await removeDownload(request, disposition: .preserve)
+        }
+        if !downloadRemovalErrors.isEmpty {
+            operationError = downloadRemovalErrors.joined(separator: "\n")
+            downloadRemovalErrors = []
+        }
+    }
+
+    /// 真正删除前由 Core 重新核对清单与归档；失败保留列表选择，不把空废纸篓失败数组当作成功。
+    private func removeDownload(_ request: DownloadRemovalRequest, disposition: DownloadIntegrityDisposition) async {
+        guard visibleItems.contains(where: { $0.id == .init(direction: .download, id: request.id) }) else {
+            if downloadRemovalQueue.first?.id == request.id { downloadRemovalQueue.removeFirst() }
+            return
+        }
+        do {
+            try await model.remove(request.job, trashingFiles: request.removal == .trashingFiles,
+                                   cleanupConfirmed: request.cleanup, integrityDisposition: disposition)
+            selection.remove(.init(direction: .download, id: request.id))
+        } catch {
+            downloadRemovalErrors.append(request.job.title + "：" + error.localizedDescription)
+        }
+        if downloadRemovalQueue.first?.id == request.id { downloadRemovalQueue.removeFirst() }
+    }
+
+    private func cancelDownloadRemoval() {
+        manualIntegrityRemoval = nil
+        downloadRemovalQueue = []
+        removalManifestDocument = nil
     }
 
     /// 独立上传 actor 操作按当前范围路由，确认／错误状态由主窗口持有，菜单关闭不丢失。

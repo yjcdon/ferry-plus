@@ -69,7 +69,7 @@ struct NetdiskDownloadView: View {
         case none, manual, history, manifest
         var id: Self { self }
         var title: String {
-            switch self { case .none: "不指定"; case .manual: "输入摘要"; case .history: "历史上传记录"; case .manifest: "JSON 清单" }
+            switch self { case .none: "不指定"; case .manual: "输入摘要"; case .history: "历史校验记录"; case .manifest: "JSON 清单" }
         }
     }
     private struct CandidateRequest: Hashable {
@@ -79,6 +79,7 @@ struct NetdiskDownloadView: View {
         let session: ObjectIdentifier
         let generation: Int
         let reload: Int
+        let integrityRevision: Int
     }
     private struct ImportRequest: Identifiable {
         let id = UUID()
@@ -192,7 +193,8 @@ struct NetdiskDownloadView: View {
     private var candidateRequest: CandidateRequest? {
         guard mode == .history, let file = singleFile, let account = treeAccount, let session = treeSession,
               model.accountKey(for: provider) == account, sessionIdentity == session else { return nil }
-        return .init(account: account, reference: file.reference, size: file.size, session: session, generation: generation, reload: candidateGeneration)
+        return .init(account: account, reference: file.reference, size: file.size, session: session, generation: generation, reload: candidateGeneration,
+                     integrityRevision: model.integrityRecordsRevision)
     }
 
     private var header: some View {
@@ -359,19 +361,21 @@ struct NetdiskDownloadView: View {
     }
 
     @ViewBuilder private var historyInput: some View {
-        Text("历史上传记录仅作为候选。请明确选择期望版本；不能据此认定云端内容仍未变化。")
+        Text("历史校验记录仅作为候选。请明确选择期望版本；不能据此认定云端内容仍未变化。")
             .font(.caption).foregroundStyle(.secondary)
         if isLoadingCandidates { ProgressView("正在读取候选…").controlSize(.small) }
         else if let candidateError {
             errorLabel(candidateError)
             Button("重新读取候选") { candidateGeneration += 1 }
-        } else if candidates.isEmpty { Text("没有与账号、文件身份及大小匹配的已验证上传记录。").font(.caption).foregroundStyle(.secondary) }
+        } else if candidates.isEmpty { Text("没有与账号、文件身份及大小匹配的已验证校验记录。").font(.caption).foregroundStyle(.secondary) }
         else {
             Picker("历史版本", selection: $candidateID) {
                 Text("请选择期望版本").tag(UUID?.none)
                 ForEach(candidates) { record in
-                    Text("\(record.verifiedAt?.formatted(date: .abbreviated, time: .shortened) ?? "未知时间") · \(record.expectation?.digest.prefix(12) ?? "")…")
-                        .tag(Optional(record.id))
+                    if let expectation = record.expectation {
+                        Text("\(record.verifiedAt?.formatted(date: .abbreviated, time: .shortened) ?? "未知时间") · \(expectation.algorithm == .sha256 ? "SHA-256" : "MD5") · \(expectation.origin.displayName) · \(expectation.digest.prefix(12))…")
+                            .tag(Optional(record.id))
+                    }
                 }
             }
             if let selected = candidates.first(where: { $0.id == candidateID }), let expectation = selected.expectation {
@@ -491,7 +495,7 @@ struct NetdiskDownloadView: View {
                 choice = .manual(algorithm, value)
             case .history:
                 guard let candidateID, let record = candidates.first(where: { $0.id == candidateID }) else {
-                    throw UploadRecordError.invalid("请明确选择要比较的历史上传版本")
+                    throw UploadRecordError.invalid("请明确选择要比较的历史校验基准")
                 }
                 choice = .history(record)
             case .manifest:
@@ -520,11 +524,13 @@ struct NetdiskDownloadView: View {
                                                            size: file.size, reference: file.reference)
                 bindings = [try DownloadIntegrityBinding(account: request.account, reference: file.reference, expectation: expectation)]
             case .history(let record):
+                try record.validate()
                 guard request.entries.count == 1, let file = request.entries.first, !file.isDirectory,
                       record.account == request.account, record.reference == file.reference, record.status == .verified,
-                      let original = record.expectation, original.algorithm == .sha256, original.origin == .localOriginal,
-                      original.size == file.size else { throw UploadRecordError.invalid("历史校验记录与当前选择不匹配") }
-                let expectation = try IntegrityExpectation(algorithm: .sha256, digest: original.digest, origin: .userProvided,
+                      let original = record.expectation, original.size == file.size else {
+                    throw UploadRecordError.invalid("历史校验记录与当前选择不匹配")
+                }
+                let expectation = try IntegrityExpectation(algorithm: original.algorithm, digest: original.digest, origin: .userProvided,
                     size: file.size, reference: file.reference, remoteVersion: record.remoteVersion)
                 bindings = [try DownloadIntegrityBinding(account: request.account, reference: file.reference, expectation: expectation)]
             case .manifest(let manifest):

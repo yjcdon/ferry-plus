@@ -3,6 +3,17 @@ import FerryCore
 import Foundation
 import UniformTypeIdentifiers
 
+extension IntegrityOrigin {
+    /// 历史候选展示原始校验依据的来源，不能把用户指定值描述成上传原件。
+    var displayName: String {
+        switch self {
+        case .localOriginal: "本地原始文件"
+        case .remoteOriginal: "网盘原始摘要"
+        case .userProvided: "用户指定摘要"
+        }
+    }
+}
+
 extension Int64 {
     var byteCount: String { formatted(.byteCount(style: .file)) }
 }

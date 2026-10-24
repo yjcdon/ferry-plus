@@ -118,7 +118,7 @@ public struct IntegrityExpectation: Codable, Sendable, Hashable {
     }
 }
 
-/// 独立保存校验结果；移除上传任务不会删除原始摘要关联。
+/// 独立保存校验结果；移除任务不会删除原始摘要关联。
 public struct IntegrityRecord: Codable, Sendable, Hashable, Identifiable {
     public let id: UUID
     public let account: AccountKey

@@ -24,7 +24,7 @@ import Testing
         coordinator.netdisks[.baidu] = fixture.netdisk.withAccount(2)
         #expect(coordinator.job(first.id).map(coordinator.belongsToOtherAccount) == true)
         let operations = fixture.netdisk.operations.count
-        await coordinator.remove(second.id)
+        try await coordinator.remove(second.id)
         fixture.server.setStalled(false)
         try await coordinator.waitForPhase(.completed, of: first.id)
 

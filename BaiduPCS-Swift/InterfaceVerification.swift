@@ -67,7 +67,7 @@ extension AppModel {
                     }
                     if result.downloadedBytes == nil, result.problem == nil { result.problem = "样例任务等待超时，进度已保留" }
                     // 验证使用自己的任务，不留测试记录混入用户列表；源文件从未写入或删除。
-                    _ = await coordinator.remove(job.id, cleanupConfirmed: false)
+                    _ = try await coordinator.remove(job.id, cleanupConfirmed: false)
                 } else { result.problem = "已读取目录，限定范围内没有可验证的小文件" }
             } catch { result.problem = error.localizedDescription }
             report.results.append(result)

@@ -538,3 +538,11 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 36 项实际 Core 与界面规则离线验证通过，覆盖已知摘要、MD5、零字节、同大小内容变化、旧 MD5 冲突、可信依据保护、错误摘要更正、重启和重试零网络、目录／符号链接拒绝、取消／移除／退出收尾、读取时变化和两阶段保存失败。证据 `.build/completed-local-integrity/{report.md,result.log}`。独立 SwiftUI 校验窗口类型检查、完整 307 项既有测试和最终 Release App 构建／固定签名校验通过（`.build/v3-completed-local-integrity-tests.log`、`.build/v3-completed-local-integrity-app-build.log`）。按完整路径启动新 App 后，Computer Use 再次确认 Mac 锁屏，实际 GUI 尚未验收，不以探针代替。
 
 新增本地校验器另做独立资源测量：4 MiB 与 512 MiB 专用本地样本的读取耗时为 0.016／1.744 秒，峰值 RSS 分别为 10,911,744／10,895,360 字节（均约 10.9 MB）；双摘要与系统独立工具一致，长度及文件身份不变，测量进程均正常退出。使用同一正式源哈希、SDK26.5／arm64／macOS14 目标优化编译，未读真实用户文件。证据 `.build/local-reverification-memory-validation/report.md`。这是组件测量，不能代替最终 App 混合负载或完整无泄漏验收。
+
+## 移除下载任务独立保留校验依据
+
+已验证且准确关联账号、远端对象的下载摘要在移除前写入共享 IntegrityStore，稳定 ID 支持失败后重试，保留原算法、来源、时间及版本。未知关联或未验证依据通过每任务清单导出，或明确放弃；旧 raw MD5 不冒充验证通过。历史候选支持 SHA-256／MD5 及三类来源，用户明确选择后绑定，并通过现有 revision 刷新。
+
+移除改为可等待的抛错调用，主窗口成功后才清除选择。先暂停并等候检查点，归档和任务移除持久化成功后才清理分片；归档失败保留原偏移和字节。需要移动本地文件时，先取得独立目录权限，将实际下载位置映射到书签解析后的根目录，保留下载时重命名。退出等待已提交移除的清理结束。
+
+实际 Core 25 项离线检查及历史候选 55 项检查通过，覆盖两家、两种算法、三类来源、错误归属、稳定重试、清单变化、取消、归档失败保留分片、退出交错、书签移动和同名文件保护。证据 `.build/completed-local-integrity/archive-report.md`、`.build/download-history-candidate-validation/report.md`。完整既有 307 项测试通过（`.build/v3-download-retention-tests.log`），当前 Release App 构建及固定签名通过（`.build/v3-netdisk-delete-current-app-build.log`）。整套 App 源码另通过真实 SwiftUI SDK26.5 类型检查。Computer Use 当前仍返回 Mac 锁屏，清单保存窗口及最终界面操作尚未验收，T18 保持未完成。

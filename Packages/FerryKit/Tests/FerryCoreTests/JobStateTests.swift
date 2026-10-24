@@ -199,17 +199,17 @@ import Testing
         await coordinator.start()
         fixture.server.setStalled(true)
         var enqueued = 0
-        var removeTask: Task<Void, Never>?
+        var removeTask: Task<Void, Error>?
         coordinator.willEnqueue = { file in
             enqueued += 1
             guard enqueued == 3, let job = coordinator.jobs.first else { return }
-            removeTask = Task { await coordinator.remove(job.id) }
+            removeTask = Task { _ = try await coordinator.remove(job.id) }
             while !coordinator.removingJobs.contains(job.id) { await Task.yield() }
         }
 
         let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
         try await waitUntil("remove requested") { removeTask != nil }
-        await removeTask?.value
+        try await removeTask?.value
         fixture.server.setStalled(false)
 
         #expect(coordinator.jobs.isEmpty)
