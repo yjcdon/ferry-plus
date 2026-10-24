@@ -500,3 +500,9 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 恢复性能另用同一批 1000／5000 条元数据、独立进程前后测量。旧逐文件读取反复解码整批清单，耗时分别为 0.804／18.598 秒；改为每批一次读取权威清单、逐项校验归并后，为 0.145／0.718 秒，5000 项约快 25.9 倍。新两档峰值 RSS 为 13.53／14.07 MB，无正文文件读取、网络或 worker，正确汇总且原 manifest 字节、修改时间与 inode 均不变。证据 `.build/v3-metadata-resource-validation/report.md` 及 `after/`。这是隔离元数据恢复测量，不代替最终 App 混合负载和界面验收。
 
 同一最终源码 Release App 构建与固定签名校验通过（`.build/v3-aggregate-linear-app-build.log`），按完整路径启动进程 PID 69543；现存 19 批任务的汇总与暂停状态保持，原两条大任务确认位移未变。证据 `.build/v3-aggregate-linear-live-{before,after}.json`。Mac 仍锁屏，此处只证明启动与落盘状态，不补记 GUI 验收。
+
+## 上传新建目录在请求前核对确认范围
+
+修复确认新建后、异步任务执行前会话变化仍可能在旧父目录创建的窗口。创建前核对取消、父目录、账号与会话；请求尚未发出时直接停止，不显示“可能已创建”。已发请求的迟到成功或错误仍不更新新上下文。
+
+从实际方法提取的旧版红例证明旧会话仍会调用创建接口；修复后 11 项确定性检查通过，覆盖账号／会话／目录变化、已取消均零写入，正常恰一次，以及在途迟到结果隔离。证据 `.build/upload-directory-context-validation/{report.md,red-result.txt,green-result.txt}`。Release App 构建及固定签名校验通过（`.build/v3-startup-directory-context-app-build.log`）。本项不替代锁屏期间尚未重跑的实际拖入／换号界面验收。

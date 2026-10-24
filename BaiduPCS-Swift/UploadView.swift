@@ -503,6 +503,9 @@ struct UploadView: View {
     private func createDirectory(_ request: Creation) async {
         defer { creation = nil }
         do {
+            try Task.checkCancellation()
+            guard currentDirectory == request.parent, model.accountKey(for: request.account.provider) == request.account,
+                  sessionIdentity == request.session else { return }
             let entry = try await model.createUploadDirectory(name: request.name, parent: request.parent, account: request.account)
             try Task.checkCancellation()
             guard currentDirectory == request.parent, model.accountKey(for: request.account.provider) == request.account,
