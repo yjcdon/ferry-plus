@@ -76,6 +76,7 @@ struct NetdiskDownloadView: View {
             }
         } else if let tree {
             NetdiskBrowser(tree: tree, transferFolder: model.settings.transferFolder(for: provider ?? .baidu))
+                .id(ObjectIdentifier(tree))
         } else if let errorMessage {
             ContentUnavailableView {
                 Label("无法读取网盘", systemImage: "exclamationmark.triangle")
@@ -155,33 +156,40 @@ private struct NetdiskBrowser: View {
     let transferFolder: String
     @ScaledMetric private var dateWidth = 110
     @ScaledMetric private var sizeWidth = 72
+    @State private var retryAttempt = 0
 
     var body: some View {
         let root = tree.root
-        if let children = root.children {
-            if children.isEmpty {
-                ContentUnavailableView("网盘中没有文件", systemImage: "folder")
-            } else {
-                List {
-                    Section {
-                        ForEach(children) { node in
-                            FileTreeRow(node: node, tree: tree, isIncluded: false, badge: badge, columns: columns)
+        Group {
+            if let children = root.children {
+                if children.isEmpty {
+                    ContentUnavailableView("网盘中没有文件", systemImage: "folder")
+                } else {
+                    List {
+                        Section {
+                            ForEach(children) { node in
+                                FileTreeRow(node: node, tree: tree, isIncluded: false, badge: badge, columns: columns)
+                            }
+                        } header: {
+                            columnHeaders
                         }
-                    } header: {
-                        columnHeaders
                     }
                 }
+            } else if let error = root.loadError {
+                ContentUnavailableView {
+                    Label("无法读取网盘", systemImage: "exclamationmark.triangle")
+                } description: {
+                    Text(error)
+                } actions: {
+                    Button("重试") { retryAttempt += 1 }
+                }
+            } else {
+                ProgressView("正在读取网盘…")
             }
-        } else if let error = root.loadError {
-            ContentUnavailableView {
-                Label("无法读取网盘", systemImage: "exclamationmark.triangle")
-            } description: {
-                Text(error)
-            } actions: {
-                Button("重试") { Task { await tree.load(root) } }
-            }
-        } else {
-            ProgressView("正在读取网盘…")
+        }
+        .task(id: retryAttempt) {
+            guard retryAttempt > 0 else { return }
+            await tree.load(root)
         }
     }
 

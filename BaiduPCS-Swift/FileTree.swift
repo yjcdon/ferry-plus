@@ -21,6 +21,7 @@ final class FileNode<Entry: FileTreeEntry>: Identifiable {
     private(set) var isLoading = false
     private(set) var loadError: String?
     var isExpanded = false
+    @ObservationIgnored private var loadID: UUID?
 
     init(entry: Entry?) {
         self.entry = entry
@@ -32,19 +33,30 @@ final class FileNode<Entry: FileTreeEntry>: Identifiable {
     var id: Entry.ID? { entry?.id }
     var isDirectory: Bool { entry?.isDirectory ?? true }
 
-    /// 返回加载失败的错误。
-    func load(using list: (Entry?) async throws -> [Entry]) async -> (any Error)? {
-        guard children == nil, !isLoading else { return nil }
+    /// 只发布当前加载的结果；收起后立即重新展开时，旧请求的取消收尾不覆盖新请求。
+    /// 返回 true 表示本次发布了子项；已有结果、取消或被取代时返回 false，不触发首次全选。
+    func load(using list: (Entry?) async throws -> [Entry]) async throws -> Bool {
+        guard children == nil, !Task.isCancelled else { return false }
+        let id = UUID()
+        loadID = id
         isLoading = true
         loadError = nil
-        defer { isLoading = false }
+        defer {
+            if loadID == id {
+                loadID = nil
+                isLoading = false
+            }
+        }
         do {
             let entries = try await list(entry)
+            try Task.checkCancellation()
+            guard loadID == id else { return false }
             children = entries.map(FileNode.init(entry:))
-            return nil
+            return true
         } catch {
+            guard !Task.isCancelled, !(error is CancellationError), loadID == id else { return false }
             loadError = error.localizedDescription
-            return error
+            throw error
         }
     }
 }
@@ -79,11 +91,15 @@ final class FileTree<Entry: FileTreeEntry> {
     nonisolated deinit {}
 
     func load(_ node: FileNode<Entry>) async {
-        let isFirstLoad = node.children == nil
-        if let error = await node.load(using: list) {
+        do {
+            let loaded = try await node.load(using: list)
+            guard loaded, !Task.isCancelled else { return }
+            if node === root, initialSelection == .all {
+                setAllSelected(true)
+            }
+        } catch {
+            guard !Task.isCancelled else { return }
             onError(error)
-        } else if node === root, isFirstLoad, node.children != nil, initialSelection == .all {
-            setAllSelected(true)
         }
     }
 

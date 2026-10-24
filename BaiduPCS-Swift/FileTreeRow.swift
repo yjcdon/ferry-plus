@@ -26,6 +26,7 @@ struct FileTreeRow<Entry: FileTreeEntry, Badge: View, Columns: View>: View {
     @ViewBuilder let badge: (Entry) -> Badge
     /// 行尾的列。
     @ViewBuilder let columns: (Entry) -> Columns
+    @State private var loadAttempt = 0
 
     var body: some View {
         if node.isDirectory {
@@ -42,7 +43,7 @@ struct FileTreeRow<Entry: FileTreeEntry, Badge: View, Columns: View>: View {
                     HStack {
                         Label(error, systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.red)
-                        Button("重试") { Task { await tree.load(node) } }
+                        Button("重试") { loadAttempt += 1 }
                     }
                 } else {
                     HStack {
@@ -52,6 +53,11 @@ struct FileTreeRow<Entry: FileTreeEntry, Badge: View, Columns: View>: View {
                 }
             } label: {
                 label
+            }
+            // 收起、换树或关闭窗口时由 SwiftUI 取消正在执行的分页请求。
+            .task(id: node.isExpanded ? loadAttempt : nil) {
+                guard node.isExpanded else { return }
+                await tree.load(node)
             }
         } else {
             label
@@ -63,7 +69,6 @@ struct FileTreeRow<Entry: FileTreeEntry, Badge: View, Columns: View>: View {
             node.isExpanded
         } set: { expanded in
             node.isExpanded = expanded
-            if expanded { Task { await tree.load(node) } }
         }
     }
 

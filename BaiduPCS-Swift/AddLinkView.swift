@@ -96,6 +96,7 @@ struct AddLinkView: View {
     private var shareContent: some View {
         if let share {
             ShareBrowser(tree: share.tree)
+                .id(ObjectIdentifier(share.tree))
         } else if isOpening {
             ProgressView("正在打开分享…")
         } else if let errorMessage {
@@ -243,6 +244,7 @@ private struct OpenedShare {
 /// 分享的文件树：表头的全选和文件列表。
 private struct ShareBrowser: View {
     let tree: FileTree<RemoteEntry>
+    @State private var retryAttempt = 0
 
     var body: some View {
         VStack(spacing: 0) {
@@ -262,6 +264,10 @@ private struct ShareBrowser: View {
 
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .task(id: retryAttempt) {
+            guard retryAttempt > 0 else { return }
+            await tree.load(tree.root)
         }
     }
 
@@ -284,7 +290,7 @@ private struct ShareBrowser: View {
             } description: {
                 Text(error)
             } actions: {
-                Button("重试") { Task { await tree.load(root) } }
+                Button("重试") { retryAttempt += 1 }
             }
         } else {
             ProgressView("正在加载…")
