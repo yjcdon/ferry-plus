@@ -53,7 +53,7 @@ private struct FerryCommands: Commands {
             .keyboardShortcut("n")
             Button("从我的网盘下载…") {
                 openWindow(id: ContentView.windowID)
-                model.presentNetdiskDownload(provider: selection?.providerFilter)
+                model.requestNetdiskDownload()
             }
         }
         CommandMenu("任务") {

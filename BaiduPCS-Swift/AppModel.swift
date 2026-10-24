@@ -37,6 +37,8 @@ final class AppModel {
 
     var sheet: Sheet?
     var netdiskProvider: Provider?
+    /// 菜单只请求打开；默认来源由实际主窗口的局部筛选决定，窗口未创建时保留请求。
+    private(set) var hasPendingNetdiskDownloadRequest = false
     var lastAddedJobID: UUID?
     @ObservationIgnored var openQuarkLoginWindow: (() -> Void)?
 
@@ -416,6 +418,19 @@ final class AppModel {
 
     /// 来源由链接或文件窗口选择，入口不绑定百度登录。
     func presentAddLink() { present(.addLink) }
+
+    /// 从菜单打开主窗口后发起请求；已有添加窗口时沿用不替换当前内容的规则。
+    func requestNetdiskDownload() {
+        guard sheet == nil else { return }
+        hasPendingNetdiskDownloadRequest = true
+    }
+
+    /// 由主窗口挂载或请求变化时消费；已有 sheet 暂留请求，关闭后再使用该窗口的筛选。
+    func presentRequestedNetdiskDownload(provider: Provider?) {
+        guard hasPendingNetdiskDownloadRequest, sheet == nil else { return }
+        hasPendingNetdiskDownloadRequest = false
+        presentNetdiskDownload(provider: provider)
+    }
 
     func presentNetdiskDownload(provider: Provider? = nil) {
         guard sheet == nil else { return }

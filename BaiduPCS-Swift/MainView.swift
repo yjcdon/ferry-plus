@@ -80,6 +80,12 @@ struct MainView: View {
         #if DEBUG
         .task { await showDemoSelection() }
         #endif
+        .onChange(of: model.hasPendingNetdiskDownloadRequest, initial: true) { _, requested in
+            if requested { model.presentRequestedNetdiskDownload(provider: providerFilter) }
+        }
+        .onChange(of: model.sheet) { _, sheet in
+            if sheet == nil { model.presentRequestedNetdiskDownload(provider: providerFilter) }
+        }
         .focusedSceneValue(\.jobSelection, JobSelection(jobs: selectedJobs, visibleJobs: jobs, providerFilter: providerFilter, onRemove: requestRemoval))
         // 文本框优先处理自己的全选；其余主窗口响应只选择当前筛选列表。
         .onCommand(#selector(NSResponder.selectAll(_:))) {
