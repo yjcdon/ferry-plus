@@ -138,6 +138,27 @@ public actor IntegrityStore {
         return matches
     }
 
+    /// 版本未知时只提供原始上传摘要的候选，不自动认定它仍是远端当前版本。
+    /// 界面须让用户确认具体基准；不得按同名文件或另一账号的记录匹配。
+    public func candidates(account: AccountKey, reference: RemoteReference, size: Int64) throws -> [IntegrityRecord] {
+        guard !account.accountID.isEmpty, account.provider == reference.provider, size >= 0 else {
+            throw UploadRecordError.invalid("校验候选查询的账号、文件或大小无效")
+        }
+        guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
+        let urls = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        var result: [IntegrityRecord] = []
+        for url in urls where url.pathExtension == "json" {
+            let record: IntegrityRecord = try UploadDiskRecord.read(at: url)
+            try record.validate()
+            if record.account == account, record.reference == reference, record.status == .verified,
+               let expectation = record.expectation, expectation.algorithm == .sha256,
+               expectation.origin == .localOriginal, expectation.size == size {
+                result.append(record)
+            }
+        }
+        return result.sorted { ($0.verifiedAt ?? .distantPast) > ($1.verifiedAt ?? .distantPast) }
+    }
+
     /// 明确清理校验依据时才移入废纸篓，不随上传记录删除。
     public func moveToTrash(id: UUID) throws {
         try FileManager.default.trashItem(at: recordURL(id), resultingItemURL: nil)
