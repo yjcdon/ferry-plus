@@ -82,3 +82,9 @@ DownloadKit 新增 `TransferBudget`：可取消的 FIFO 连接许可、异常自
 使用当前 27.0 SDK 的包构建和测试通过，但 App 编译缺少 `SwiftUIMacros.StateMacro` 插件；未通过修改业务 State 属性规避。改用仓库既定的 26.5 SDK 执行 `env FERRY_BUILD_CONFIGURATION=release bash Scripts/build-app.sh`，完整 App 编译、固定证书签名和严格验签均通过。新 App 为 arm64，目录 7004 KiB；已安装 2.0 为 6052 KiB，本轮增长 952 KiB。
 
 通过 Computer Use 确认安装版没有任务后，正常退出旧进程 7026，再按构建产物完整路径启动新 App，PID 16456。主窗口正常显示零任务，账号菜单恢复百度和夸克原账号，各提供退出登录，没有要求重新登录或钥匙串密码。此次仅是基础改动后的启动／账号回归，不计为上传界面、拖动上传或完整 V3-T18 验收通过。日志：`.build/v3-app-build.log`（27.0 失败原因）、`v3-app-build-26.5.log`（成功）。
+
+## 有界云端范围读取
+
+DownloadKit 增加 `RangeReader`，默认每段 256 KiB、硬上限 1 MiB。先检查响应头中的状态、准确范围、完整大小及原始内容编码，再接收有界响应体；服务器忽略 Range 时立即拒绝，不接收整个大文件。零字节使用普通 GET 并确认响应体为空。共享连接和下载速率预算通过注入复用，代理和超时沿用调用方 URLSession。
+
+临时 URLProtocol 验证共 17 项通过，覆盖准确读取、忽略范围、错误范围／总长、压缩、短包／超长包、401／403／416、零字节、取消和连接释放。证据：`.build/range-reader-validation/result.txt`。该读取器已通过 26.5 SDK 的完整 Release App 构建与签名验证：`.build/v3-strategy-build.log`。目前是 V3-T08 的读取基础，完整摘要服务与正式任务接入继续实施。
