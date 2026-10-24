@@ -31,6 +31,8 @@ import Testing
         #expect(fixture.netdisk.operations.count == operations)
         let finished = try #require(coordinator.job(first.id))
         #expect(!finished.isCleanedUp)
+        // 没有内容基准时仍优先说明账号归属，不把另一个账号的问题掩盖为校验缺失。
+        #expect(finished.files.allSatisfy { $0.integrityStatus == .unavailable })
         #expect(finished.warning?.contains("另一个网盘账号") == true)
     }
 

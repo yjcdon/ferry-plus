@@ -264,6 +264,31 @@ import Testing
         #expect(RemotePath.parent(of: "/") == "/")
     }
 
+    @Test func legacyCompletedDownloadDoesNotInventIntegrityVerification() throws {
+        let legacy = #"{"id":"old-file","remotePath":"/old.bin","relativePath":"old.bin","size":3,"md5":"900150983cd24fb0d6963f7d28e17f72","localURL":"file:///tmp/old.bin"}"#
+        let file = try JSONDecoder().decode(JobFile.self, from: Data(legacy.utf8))
+        #expect(file.isCompleted)
+        #expect(file.integrityExpectation == nil)
+        #expect(file.integrityStatus == .unavailable)
+        #expect(file.integrityVerifiedAt == nil)
+        #expect(file.integrityDescription == "未验证源文件内容")
+        #expect(try JSONDecoder().decode(JobFile.self, from: JSONEncoder().encode(file)) == file)
+    }
+
+    @Test func downloadBindingRejectsDifferentRemoteIdentityAndAccountProvider() throws {
+        let reference = RemoteReference.baidu(path: "/one.bin", fsID: 1)
+        let expectation = try IntegrityExpectation(algorithm: .sha256, digest: String(repeating: "a", count: 64),
+            origin: .userProvided, size: 3, reference: reference)
+        #expect(throws: (any Error).self) {
+            try DownloadIntegrityBinding(account: AccountKey(provider: .baidu, accountID: "1"),
+                reference: .baidu(path: "/one.bin", fsID: 2), expectation: expectation)
+        }
+        #expect(throws: (any Error).self) {
+            try DownloadIntegrityBinding(account: AccountKey(provider: .quark, accountID: "1"),
+                reference: reference, expectation: expectation)
+        }
+    }
+
     @Test func settingsKeepOtherFieldsWhenOneIsInvalid() throws {
         let bookmark = Data([1, 2, 3])
         let json = """

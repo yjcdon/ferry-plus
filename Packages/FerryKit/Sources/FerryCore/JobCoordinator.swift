@@ -223,7 +223,7 @@ public final class JobCoordinator {
             }
             if case .completed(let url) = snapshot.state {
                 // 上次完成后、写入任务列表前应用退出了。
-                recordCompletion(of: snapshot.id, at: url)
+                recordCompletion(of: snapshot.id, at: url, evidence: snapshot)
                 finished.append(snapshot.id)
             } else {
                 setSnapshot(snapshot.id, snapshot)
@@ -271,7 +271,7 @@ public final class JobCoordinator {
         await engine.shutdown()
         for snapshot in await engine.snapshots() {
             if case .completed(let url) = snapshot.state {
-                recordCompletion(of: snapshot.id, at: url)
+                recordCompletion(of: snapshot.id, at: url, evidence: snapshot)
             }
         }
         save()
@@ -325,6 +325,29 @@ public final class JobCoordinator {
         return job
     }
 
+    /// 创建带用户确认摘要的新网盘下载；基准按账号、真实对象及大小绑定，不能按同名猜测。
+    @discardableResult
+    public func addNetdiskJob(entries: [RemoteEntry], account: AccountKey, downloadFolder: DownloadFolder? = nil,
+                              integrityBindings: [DownloadIntegrityBinding]) throws -> Job {
+        for binding in integrityBindings {
+            try binding.validate()
+            guard binding.account == account else { throw CoordinatorError.otherAccount }
+        }
+        guard Set(integrityBindings.map(\.reference)).count == integrityBindings.count else {
+            throw UploadRecordError.invalid("同一下载文件不能绑定多份内容基准")
+        }
+        var job = Job(netdiskEntries: entries)
+        job.downloadFolder = downloadFolder ?? self.downloadFolder
+        job.accountKey = account
+        job.accountName = accountNames[account.provider]
+        job.downloadIntegrityBindings = integrityBindings
+        jobs.insert(job, at: 0)
+        invalidateIndex()
+        save()
+        startTransfer(job.id)
+        return job
+    }
+
     public func pause(_ id: Job.ID) async {
         await waitUntilStarted()
         guard let job = activeJob(id), job.phase == .downloading, !job.isPaused else { return }
@@ -362,6 +385,9 @@ public final class JobCoordinator {
                 $0.phase = .downloading
                 $0.error = nil
                 $0.isPaused = false
+                for index in $0.files.indices where !$0.files[index].isCompleted && $0.files[index].integrityExpectation != nil {
+                    $0.files[index].integrityStatus = .pending
+                }
             }
             save()
             await serially(id) { await self.continueDownloads(id, resumingFailed: true) }
@@ -411,7 +437,9 @@ public final class JobCoordinator {
         }
         save()
         closeFolder(of: id)
-        if cleanupConfirmed ?? settings.cleanupAfterDownload(for: job.provider), job.hasJobDirectory, !job.isCleanedUp {
+        let verifiedForAutomaticCleanup = !job.files.isEmpty && job.files.allSatisfy { $0.integrityStatus == .verified && $0.integrityExpectation != nil }
+        let shouldCleanup = cleanupConfirmed ?? (settings.cleanupAfterDownload(for: job.provider) && verifiedForAutomaticCleanup)
+        if shouldCleanup, job.hasJobDirectory, !job.isCleanedUp {
             do {
                 guard job.transferProgress?.completed == true else { throw TransferCheckError.unconfirmedTransfer }
                 try await deleteJobDirectory(of: job, using: disk(for: job))
@@ -455,7 +483,7 @@ public final class JobCoordinator {
             // 先确认下载目录可以写入，再操作网盘。
             _ = try folderURL(for: id)
             let netdisk = try disk(for: job)
-            let files: [JobFile]
+            var files: [JobFile]
             var warning: String?
             switch job.source {
             case .share(let link, let password, let entries):
@@ -467,6 +495,18 @@ public final class JobCoordinator {
                 files = try Self.jobFiles(for: await netdisk.files(in: entries))
                 // 网盘的列表没有转存延迟，不用像分享任务那样再检查一次。
                 if files.isEmpty { warning = "勾选的目录中没有文件，不需要下载。" }
+            }
+            if let bindings = job.downloadIntegrityBindings {
+                for binding in bindings {
+                    try binding.validate()
+                    guard binding.account == job.accountKey,
+                          let index = files.firstIndex(where: { $0.remoteReference == binding.reference }),
+                          files[index].size == binding.expectation.size else {
+                        throw UploadRecordError.invalid("下载校验依据未匹配本次账号、文件或大小")
+                    }
+                    files[index].integrityExpectation = binding.expectation
+                    files[index].integrityStatus = .pending
+                }
             }
             try Task.checkCancellation()
             try checkCurrentAccount(job, expected: netdisk.account)
@@ -740,7 +780,8 @@ public final class JobCoordinator {
             expectedSize: file.size,
             context: try DownloadContext(account: account, reference: file.remoteReference ?? .baidu(path: file.remotePath, fsID: 0), size: file.size, md5: file.md5).encoded(),
             connections: settings.connections(for: job.provider),
-            expectedMD5: file.md5
+            expectedMD5: file.integrityExpectation?.algorithm == .md5 ? file.integrityExpectation?.digest : file.md5,
+            expectedSHA256: file.integrityExpectation?.algorithm == .sha256 ? file.integrityExpectation?.digest : nil
         ))
         if activeJob(id)?.isPaused ?? false {
             await engine.pause(id: file.id)
@@ -756,7 +797,7 @@ public final class JobCoordinator {
             guard let (jobIndex, _) = locate(snapshot.id) else { return }
             let jobID = jobs[jobIndex].id
             if case .completed(let url) = snapshot.state {
-                recordCompletion(of: snapshot.id, at: url)
+                recordCompletion(of: snapshot.id, at: url, evidence: snapshot)
                 // 完成状态写入任务列表后，引擎才删除这个文件下载的状态。
                 cancelAfterSave.append(snapshot.id)
                 scheduleSave()
@@ -775,12 +816,29 @@ public final class JobCoordinator {
         if wasRunning != !runningFileIDs.isEmpty { onRunningChanged?(!runningFileIDs.isEmpty) }
         changeFile(fileID) { downloads[fileID] = snapshot }
         fileActivities[fileID]?.snapshot = snapshot
+        if let snapshot, case .failed(.invalidResponse(let reason)) = snapshot.state,
+           reason == "文件 MD5 与远端校验值不一致，请重新添加任务" || reason == "文件 SHA-256 与预期校验值不一致，请重新添加任务",
+           let (jobIndex, fileIndex) = locate(fileID), jobs[jobIndex].files[fileIndex].integrityExpectation != nil {
+            changeFile(fileID) { jobs[jobIndex].files[fileIndex].integrityStatus = .mismatch }
+        }
     }
 
     /// 把引擎报告的最终路径记入任务。已经记入时不变。
-    private func recordCompletion(of fileID: String, at url: URL) {
+    private func recordCompletion(of fileID: String, at url: URL, evidence: DownloadSnapshot? = nil) {
         guard let (jobIndex, fileIndex) = locate(fileID), jobs[jobIndex].files[fileIndex].localURL == nil else { return }
-        changeFile(fileID) { jobs[jobIndex].files[fileIndex].localURL = url }
+        let expectation = jobs[jobIndex].files[fileIndex].integrityExpectation
+        let verified: Bool
+        if let expectation, let evidence, case .completed(let completedURL) = evidence.state, completedURL == url {
+            switch expectation.algorithm {
+            case .sha256: verified = evidence.expectedSHA256?.lowercased() == expectation.digest
+            case .md5: verified = evidence.expectedMD5?.lowercased() == expectation.digest
+            }
+        } else { verified = false }
+        changeFile(fileID) {
+            jobs[jobIndex].files[fileIndex].localURL = url
+            jobs[jobIndex].files[fileIndex].integrityStatus = verified ? .verified : .unavailable
+            jobs[jobIndex].files[fileIndex].integrityVerifiedAt = verified ? .now : nil
+        }
     }
 
     /// 修改文件下载在 `downloads` 中的状态或它的 `localURL` 时都经过这里：所在任务的计数先减去这个文件原来的部分，
@@ -863,7 +921,11 @@ public final class JobCoordinator {
             // 网盘任务没有转存的文件，不清理。
             if let job = activeJob(id), settings.cleanupAfterDownload(for: job.provider), job.hasJobDirectory, !job.isCleanedUp {
                 do {
+                    // 先核对当前账号归属；这是本地检查，不为其他账号发起任何远端请求。
                     let netdisk = try disk(for: job)
+                    guard !job.files.isEmpty, job.files.allSatisfy({ $0.integrityStatus == .verified && $0.integrityExpectation != nil }) else {
+                        throw UploadRecordError.invalid("没有全部文件的可信内容校验结果，已保留转存文件")
+                    }
                     try await deleteJobDirectory(of: job, using: netdisk)
                     update(id) { $0.isCleanedUp = true }
                 } catch {
@@ -956,6 +1018,9 @@ public final class JobCoordinator {
         update(id) {
             $0.phase = .failed(step)
             $0.error = Self.message(for: error)
+            if step == .download, $0.hasJobDirectory {
+                $0.warning = "下载未通过完整内容校验，已保留网盘中的转存文件。"
+            }
         }
         save()
     }

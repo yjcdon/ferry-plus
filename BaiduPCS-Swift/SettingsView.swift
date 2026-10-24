@@ -183,7 +183,7 @@ private struct NetdiskSettingsView: View {
             Section {
                 TextField("转存目录", text: $transferFolder, prompt: Text("/Ferry"))
                     .onSubmit(commitTransferFolders)
-                Toggle("下载后清理转存文件", isOn: $model.settings.cleanupAfterDownload)
+                Toggle("内容校验通过后清理转存文件", isOn: $model.settings.cleanupAfterDownload)
                 Picker("网盘会员", selection: concurrencyPreset) {
                     Text("非超级会员").tag(ConcurrencyPreset?.some(.regular))
                     Text("超级会员").tag(ConcurrencyPreset?.some(.svip))
@@ -208,7 +208,7 @@ private struct NetdiskSettingsView: View {
             Section {
                 TextField("转存目录", text: $quarkTransferFolder, prompt: Text("/Ferry Plus"))
                     .onSubmit(commitTransferFolders)
-                Toggle("下载后清理转存文件", isOn: $model.settings.quarkCleanupAfterDownload)
+                Toggle("内容校验通过后清理转存文件", isOn: $model.settings.quarkCleanupAfterDownload)
                 Stepper(value: $model.settings.quarkConnectionsPerFile, in: model.settings.allowedConnections) {
                     LabeledContent("每个文件的连接数", value: "\(model.settings.quarkConnectionsPerFile)")
                 }

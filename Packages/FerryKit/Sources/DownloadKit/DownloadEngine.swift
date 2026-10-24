@@ -413,7 +413,9 @@ public actor DownloadEngine {
             state: entry.state,
             totalBytes: record.totalBytes,
             receivedBytes: record.receivedBytes,
-            bytesPerSecond: entry.state == .running ? entry.meter.bytesPerSecond : 0
+            bytesPerSecond: entry.state == .running ? entry.meter.bytesPerSecond : 0,
+            expectedMD5: record.request.expectedMD5,
+            expectedSHA256: record.request.expectedSHA256
         )
     }
 

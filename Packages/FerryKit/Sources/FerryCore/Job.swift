@@ -68,6 +68,8 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
     public var transferProgress: TransferProgress?
     /// 提交转存前保存的所选文件清单；不含短期分享令牌，恢复时无需重新访问原分享。
     public var transferManifest: [TransferManifestEntry]?
+    /// 创建下载时由用户确认的精确内容基准，准备目录后按对象身份匹配。
+    public var downloadIntegrityBindings: [DownloadIntegrityBinding]?
     public var provider: Provider {
         switch source { case .share(let link, _, _): link.provider; case .netdisk(let entries): accountKey?.provider ?? entries.first?.reference.provider ?? .baidu }
     }
@@ -128,7 +130,7 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, title, source, link, password, entries, remoteDirectory, phase, files, isPaused, error, warning,
-             createdAt, isCleanedUp, downloadFolder, accountUK, accountKey, accountName, transferDirectory, transferProgress, transferManifest, version, provider
+             createdAt, isCleanedUp, downloadFolder, accountUK, accountKey, accountName, transferDirectory, transferProgress, transferManifest, downloadIntegrityBindings, version, provider
     }
 
     /// 缺少的字段用默认值，以后新增字段时，旧版本保存的任务列表仍能读取。
@@ -167,6 +169,14 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
         transferDirectory = try container.decodeIfPresent(TransferDirectory.self, forKey: .transferDirectory)
         transferProgress = try container.decodeIfPresent(TransferProgress.self, forKey: .transferProgress)
         transferManifest = try container.decodeIfPresent([TransferManifestEntry].self, forKey: .transferManifest)
+        downloadIntegrityBindings = try container.decodeIfPresent([DownloadIntegrityBinding].self, forKey: .downloadIntegrityBindings)
+        if let bindings = downloadIntegrityBindings {
+            for binding in bindings {
+                try binding.validate()
+                guard binding.account == accountKey else { throw UploadRecordError.invalid("下载校验记录属于另一个账号") }
+            }
+            guard Set(bindings.map(\.reference)).count == bindings.count else { throw UploadRecordError.invalid("下载文件的校验依据重复") }
+        }
         if let transferManifest {
             guard transferManifest.allSatisfy({ LocalPath.isSafe($0.relativePath) && $0.size >= 0 }),
                   Set(transferManifest.map(\.relativePath)).count == transferManifest.count else {
@@ -210,6 +220,7 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
         try container.encodeIfPresent(transferDirectory, forKey: .transferDirectory)
         try container.encodeIfPresent(transferProgress, forKey: .transferProgress)
         try container.encodeIfPresent(transferManifest, forKey: .transferManifest)
+        try container.encodeIfPresent(downloadIntegrityBindings, forKey: .downloadIntegrityBindings)
     }
 
     public static func shortID(_ id: UUID) -> String {
@@ -244,6 +255,10 @@ public struct JobFile: Codable, Sendable, Hashable, Identifiable {
     public var remotePath: String
     public var remoteReference: RemoteReference?
     public var md5: String?
+    /// 有明确来源的原始摘要；旧记录的 md5 字段不能自动升级为此依据。
+    public var integrityExpectation: IntegrityExpectation?
+    public var integrityStatus: IntegrityStatus = .unavailable
+    public var integrityVerifiedAt: Date?
     /// 相对于下载目录的路径。分享任务保留分享中的目录结构；网盘任务从勾选的条目开始，不含它在网盘中的上层目录。
     public var relativePath: String
     public var size: Int64
@@ -264,9 +279,32 @@ public struct JobFile: Codable, Sendable, Hashable, Identifiable {
         remotePath = try container.decode(String.self, forKey: .remotePath)
         remoteReference = try container.decodeIfPresent(RemoteReference.self, forKey: .remoteReference)
         md5 = try container.decodeIfPresent(String.self, forKey: .md5)
+        integrityExpectation = try container.decodeIfPresent(IntegrityExpectation.self, forKey: .integrityExpectation)
+        integrityStatus = try container.decodeIfPresent(IntegrityStatus.self, forKey: .integrityStatus) ?? .unavailable
+        integrityVerifiedAt = try container.decodeIfPresent(Date.self, forKey: .integrityVerifiedAt)
         relativePath = try container.decode(String.self, forKey: .relativePath)
         size = try container.decodeIfPresent(Int64.self, forKey: .size) ?? 0
         localURL = try container.decodeIfPresent(URL.self, forKey: .localURL)
+        try integrityExpectation?.validate()
+        if let expectation = integrityExpectation {
+            guard expectation.size == size, expectation.reference == remoteReference else {
+                throw UploadRecordError.invalid("下载文件与校验依据的身份或大小不一致")
+            }
+        }
+        if integrityStatus == .verified {
+            guard integrityExpectation != nil, localURL != nil, integrityVerifiedAt != nil else {
+                throw UploadRecordError.invalid("已校验下载缺少依据、完成位置或校验时间")
+            }
+        }
+    }
+
+    public var integrityDescription: String {
+        switch integrityStatus {
+        case .pending: "等待内容校验"
+        case .verified: "内容一致"
+        case .unavailable: "未验证源文件内容"
+        case .mismatch: "内容校验失败"
+        }
     }
 
     public var isCompleted: Bool { localURL != nil }

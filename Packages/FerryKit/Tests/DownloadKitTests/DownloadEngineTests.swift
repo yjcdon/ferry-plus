@@ -568,6 +568,9 @@ private let megabyte = 1 << 20
             #expect(try Data(contentsOf: request.temporaryURL) == data)
             #expect(try fixture.savedRecords().first?.completedURL == nil)
         }
+        let snapshot = try #require(await engine.snapshot(id: request.id))
+        #expect(snapshot.expectedSHA256 == request.expectedSHA256)
+        #expect(snapshot.expectedMD5 == request.expectedMD5)
         await engine.shutdown()
     }
 

@@ -144,13 +144,19 @@ public struct DownloadSnapshot: Sendable, Hashable {
     public var totalBytes: Int64?
     public var receivedBytes: Int64
     public var bytesPerSecond: Double
+    /// 引擎实际执行的校验基准；上层不能仅凭任务元数据补造已校验结果。
+    public var expectedMD5: String?
+    public var expectedSHA256: String?
 
-    public init(id: String, state: DownloadState, totalBytes: Int64?, receivedBytes: Int64, bytesPerSecond: Double) {
+    public init(id: String, state: DownloadState, totalBytes: Int64?, receivedBytes: Int64, bytesPerSecond: Double,
+                expectedMD5: String? = nil, expectedSHA256: String? = nil) {
         self.id = id
         self.state = state
         self.totalBytes = totalBytes
         self.receivedBytes = receivedBytes
         self.bytesPerSecond = bytesPerSecond
+        self.expectedMD5 = expectedMD5
+        self.expectedSHA256 = expectedSHA256
     }
 }
 

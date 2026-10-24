@@ -1,6 +1,7 @@
 import BaiduKit
 @testable import DownloadKit
 import Foundation
+import CryptoKit
 import Testing
 import QuarkKit
 import os
@@ -858,26 +859,127 @@ import os
         #expect(try fixture.store.load() == coordinator.jobs)
     }
 
-    @Test func cleanupDeletesJobDirectoryWhenEnabled() async throws {
-        let fixture = Fixture(share: ["a.bin": randomData(10_000)])
+    /// 预先保存明确原始 SHA-256，恢复后由真实下载引擎完成内容比对。
+    private func trustedTransferredJob(fixture: Fixture, bytes: Data) async throws -> Job {
+        var job = try await fixture.makeTransferredJob()
+        for index in job.files.indices {
+            let reference = RemoteReference.baidu(path: job.files[index].remotePath, fsID: 42)
+            job.files[index].remoteReference = reference
+            job.files[index].integrityExpectation = try IntegrityExpectation(algorithm: .sha256,
+                digest: SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined(),
+                origin: .userProvided, size: Int64(bytes.count), reference: reference)
+            job.files[index].integrityStatus = .pending
+        }
+        return job
+    }
+
+    @Test func cleanupRetainsUnverifiedShareEvenWhenEnabled() async throws {
+        let fixture = Fixture(share: ["unverified.bin": randomData(4096)])
         let coordinator = fixture.makeCoordinator(settings: FerrySettings(cleanupAfterDownload: true))
         await coordinator.start()
-
         let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
         try await coordinator.waitForPhase(.completed, of: job.id)
+        let finished = try #require(coordinator.job(job.id))
+        #expect(finished.files.allSatisfy { $0.integrityStatus == .unavailable })
+        #expect(finished.warning?.contains("可信内容校验") == true)
+        #expect(!finished.isCleanedUp)
+        #expect(fixture.netdisk.deletes.isEmpty)
+        await coordinator.shutdown()
+    }
 
+    @Test(arguments: [IntegrityAlgorithm.sha256, .md5])
+    func userConfirmedExactBindingIsVerifiedByDownloadEngine(algorithm: IntegrityAlgorithm) async throws {
+        let data = randomData(4096)
+        let fixture = Fixture(disk: ["/bound.bin": data])
+        let reference = RemoteReference.baidu(path: "/bound.bin", fsID: 42)
+        let entry = RemoteEntry(reference: reference, name: "bound.bin", isDirectory: false, size: Int64(data.count))
+        let digest = algorithm == .sha256 ? SHA256.hash(data: data).map { String(format:"%02x",$0) }.joined()
+            : Insecure.MD5.hash(data: data).map { String(format:"%02x",$0) }.joined()
+        let expectation = try IntegrityExpectation(algorithm: algorithm, digest: digest,
+            origin: .userProvided, size: Int64(data.count), reference: reference)
+        let binding = try DownloadIntegrityBinding(account: Fixture.account, reference: reference, expectation: expectation)
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+        let job = try coordinator.addNetdiskJob(entries: [entry], account: Fixture.account, integrityBindings: [binding])
+        try await coordinator.waitForPhase(.completed, of: job.id)
+        let file = try #require(coordinator.job(job.id)?.files.first)
+        #expect(file.integrityStatus == .verified)
+        #expect(file.integrityVerifiedAt != nil)
+        #expect(file.integrityExpectation == expectation)
+        #expect(fixture.contents("bound.bin") == data)
+        await coordinator.shutdown()
+    }
+
+    @Test func incorrectSHA256FailsAndRetainsSource() async throws {
+        let data = randomData(4096)
+        let fixture = Fixture(disk: ["/bad-sha.bin": data])
+        let reference = RemoteReference.baidu(path: "/bad-sha.bin", fsID: 43)
+        let entry = RemoteEntry(reference: reference, name: "bad-sha.bin", isDirectory: false, size: Int64(data.count))
+        let expectation = try IntegrityExpectation(algorithm: .sha256, digest: String(repeating: "0", count: 64),
+            origin: .userProvided, size: Int64(data.count), reference: reference)
+        let binding = try DownloadIntegrityBinding(account: Fixture.account, reference: reference, expectation: expectation)
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+        let job = try coordinator.addNetdiskJob(entries: [entry], account: Fixture.account, integrityBindings: [binding])
+        try await coordinator.waitForPhase(.failed(.download), of: job.id)
+        #expect(coordinator.job(job.id)?.files.first?.integrityStatus == .mismatch)
+        #expect(coordinator.job(job.id)?.files.first?.localURL == nil)
+        #expect(fixture.netdisk.data(at: "/bad-sha.bin") == data)
+        #expect(fixture.netdisk.deletes.isEmpty)
+        await coordinator.shutdown()
+    }
+
+    @Test func restoredCompletedEngineWithoutExpectedDigestIsNotVerified() async throws {
+        let data = randomData(4096)
+        let fixture = Fixture(disk: ["/legacy.bin": data])
+        let reference = RemoteReference.baidu(path: "/legacy.bin", fsID: 44)
+        let entry = RemoteEntry(reference: reference, name: "legacy.bin", isDirectory: false, size: Int64(data.count))
+        var job = Job(netdiskEntries: [entry]); job.accountKey = Fixture.account; job.phase = .downloading
+        let location = fixture.downloads.appendingPathComponent("legacy.bin")
+        try data.write(to: location)
+        var file = JobFile(remotePath: "/legacy.bin", relativePath: "legacy.bin", size: Int64(data.count))
+        file.remoteReference = reference
+        file.integrityExpectation = try IntegrityExpectation(algorithm: .sha256,
+            digest: SHA256.hash(data: data).map { String(format:"%02x",$0) }.joined(),
+            origin: .userProvided, size: Int64(data.count), reference: reference)
+        file.integrityStatus = .pending; job.files = [file]
+        try fixture.store.save([job])
+        let context = DownloadContext(account: Fixture.account, reference: reference, size: Int64(data.count))
+        var record = DownloadRecord(request: DownloadRequest(id: file.id, destination: location,
+            expectedSize: Int64(data.count), context: try context.encoded()))
+        record.completedURL = location
+        try StateStore(directory: fixture.stateDirectory).save(record)
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+        try await coordinator.waitForPhase(.completed, of: job.id)
+        #expect(coordinator.job(job.id)?.files.first?.integrityStatus == .unavailable)
+        #expect(coordinator.job(job.id)?.files.first?.integrityVerifiedAt == nil)
+        await coordinator.shutdown()
+    }
+
+    @Test func cleanupDeletesJobDirectoryWhenEnabled() async throws {
+        let bytes = randomData(10_000)
+        let fixture = Fixture(share: ["a.bin": bytes])
+        let job = try await trustedTransferredJob(fixture: fixture, bytes: bytes)
+        try fixture.store.save([job])
+        let coordinator = fixture.makeCoordinator(settings: FerrySettings(cleanupAfterDownload: true))
+        await coordinator.start()
+        try await coordinator.waitForPhase(.completed, of: job.id)
+
+        #expect(coordinator.job(job.id)?.files.first?.integrityStatus == .verified)
         #expect(coordinator.job(job.id)?.isCleanedUp == true)
         #expect(fixture.netdisk.operations.last == .delete([job.remoteDirectory]))
         #expect(fixture.netdisk.remotePaths().isEmpty)
     }
 
     @Test func cleanupFailureOnlyWarns() async throws {
-        let fixture = Fixture(share: ["a.bin": randomData(10_000)])
+        let bytes = randomData(10_000)
+        let fixture = Fixture(share: ["a.bin": bytes])
+        let job = try await trustedTransferredJob(fixture: fixture, bytes: bytes)
+        try fixture.store.save([job])
+        fixture.netdisk.failNextDelete()
         let coordinator = fixture.makeCoordinator(settings: FerrySettings(cleanupAfterDownload: true))
         await coordinator.start()
-        fixture.netdisk.failNextDelete()
-
-        let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
         try await coordinator.waitForPhase(.completed, of: job.id)
 
         let finished = try #require(coordinator.job(job.id))
@@ -1024,7 +1126,7 @@ import os
         }
         let big = try #require(coordinator.job(job.id)?.files.first { $0.relativePath == "big.bin" })
 
-        await coordinator.remove(job.id)
+        await coordinator.remove(job.id, cleanupConfirmed: true)
         fixture.server.setStalled(false)
 
         #expect(coordinator.jobs.isEmpty)
@@ -1492,11 +1594,11 @@ import os
             await coordinator.retry(job.id)
             try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
             #expect(coordinator.job(job.id)?.error == TransferCheckError.missingJobDirectory.errorDescription)
-            await coordinator.remove(job.id)
+            await coordinator.remove(job.id, cleanupConfirmed: true)
         }
         #expect(fixture.netdisk.operations.isEmpty)
 
-        await coordinator.remove(valid.id)
+        await coordinator.remove(valid.id, cleanupConfirmed: true)
         #expect(fixture.netdisk.deletes == [[valid.remoteDirectory]])
     }
 
@@ -1511,11 +1613,12 @@ import os
 
         await coordinator.retry(job.id)
         try await coordinator.waitForPhase(.completed, of: job.id)
-        // 已确认的转存重用目录，只在下载完成后清理一次。
-        #expect(fixture.netdisk.deletes == [[job.remoteDirectory]])
+        // 已确认的转存重用目录；没有原始内容基准时，下载完成也保留源文件。
+        #expect(fixture.netdisk.deletes.isEmpty)
+        #expect(coordinator.job(job.id)?.warning?.contains("可信内容校验") == true)
     }
 
-    @Test func cleanupDeletesOnlyValidJobDirectory() async throws {
+    @Test func cleanupPreservesHistoricalCompletedFilesWithoutIntegrityProof() async throws {
         let fixture = Fixture()
         let invalid = try Self.invalidJobDirectories.map {
             try savedShareJob(remoteDirectory: $0, phase: .downloading, fixture: fixture)
@@ -1528,8 +1631,9 @@ import os
         for job in invalid + [valid] {
             try await coordinator.waitForPhase(.completed, of: job.id)
         }
-        #expect(fixture.netdisk.deletes == [[valid.remoteDirectory]])
-        #expect(coordinator.job(valid.id)?.isCleanedUp == true)
+        #expect(fixture.netdisk.deletes.isEmpty)
+        #expect(coordinator.job(valid.id)?.isCleanedUp == false)
+        #expect(coordinator.job(valid.id)?.files.first?.integrityStatus == .unavailable)
         #expect(invalid.allSatisfy { coordinator.job($0.id)?.isCleanedUp == false })
     }
 }
