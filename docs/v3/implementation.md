@@ -226,3 +226,5 @@ Computer Use 在进程 28205 通过正式窗口上传专用目录 `FerryPlus-V3-
 上传指纹和下载最终摘要循环均改为每轮同步读取、全部摘要更新后立即释放 autoreleasepool，取消检查仍在每轮执行。相同 2 GiB+1 样本独立前后对比：SHA-256 和 103 个分片基准全部正确，最大 RSS 从 2162999296 字节降为 9158656 字节；耗时分别 15.21 秒和 14.72 秒。证据 `.build/source-memory-validation/before-result.txt`、`before-resources.txt`、`after-result.txt`、`after-resources.txt`。原有已知摘要、空文件、分片边界、扫描、源变化和取消检查仍通过。
 
 真实 FileTransfer.run→finalize 对 2 GiB+1 文件同时核对 MD5／SHA-256，峰值 RSS 14532608 字节，证据 `.build/finalize-memory-validation/result.txt`、`resources.txt`。重新构建 App 成功，日志 `.build/v3-memory-fix-app-build.log`；进程 29684 恢复原夸克暂停状态，并为百度重新准备同一大文件，资源采样未再出现整文件量级内存增长，证据 `.build/ui-large-validation/app-29684-resources.jsonl`。大文件完整上传和回读仍在继续，不能提前标为验收完成。
+
+传输设置实测发现限速输入内层 TextField 把占位标题 `0` 也作为行标签展示，导致两个零。隐藏内层标签，保留外层上传／下载限速标题及输入框，避免重复显示。并发设置通过实际 Stepper 从 1 调到 2，并行验证结束后恢复默认 1。

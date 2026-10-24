@@ -129,6 +129,7 @@ private struct TransferRateField: View {
         LabeledContent(title) {
             HStack(spacing: 6) {
                 TextField("0", value: kibibytesPerSecond, format: .number.grouping(.never))
+                    .labelsHidden()
                     .multilineTextAlignment(.trailing)
                     .frame(width: 100)
                     .accessibilityLabel(title)
