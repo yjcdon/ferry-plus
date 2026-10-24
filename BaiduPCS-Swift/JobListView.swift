@@ -13,6 +13,7 @@ struct JobListView: View {
     /// 请求移除任务。调用方决定是否先确认。
     let onRemove: ([Job], JobRemoval) -> Void
     @Environment(AppModel.self) private var model
+    @FocusState private var isListFocused: Bool
 
     var body: some View {
         if jobs.isEmpty {
@@ -38,6 +39,9 @@ struct JobListView: View {
             List(jobs, selection: $selection) { job in
                 JobRow(job: job)
             }
+            .focused($isListFocused)
+            // 点选任务时接管键盘焦点；搜索导致的选择变化不应抢走文本焦点。
+            .simultaneousGesture(TapGesture().onEnded { isListFocused = true })
             // 右键点在选中的任务上时作用于全部选中的任务，否则只作用于点到的任务。
             .contextMenu(forSelectionType: Job.ID.self) { ids in
                 JobActionsMenu(jobs: jobs.filter { ids.contains($0.id) }, onRemove: onRemove)

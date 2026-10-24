@@ -81,6 +81,10 @@ struct MainView: View {
         .task { await showDemoSelection() }
         #endif
         .focusedSceneValue(\.jobSelection, JobSelection(jobs: selectedJobs, visibleJobs: jobs, providerFilter: providerFilter, onRemove: requestRemoval))
+        // 文本框优先处理自己的全选；其余主窗口响应只选择当前筛选列表。
+        .onCommand(#selector(NSResponder.selectAll(_:))) {
+            selection = Set(jobs.map(\.id))
+        }
         .onChange(of: jobs.map(\.id)) { _, ids in selection.formIntersection(ids) }
         .onChange(of: model.lastAddedJobID) { _, id in
             guard let id, let job = model.coordinator.jobs.first(where: { $0.id == id }) else { return }

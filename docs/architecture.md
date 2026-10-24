@@ -103,7 +103,7 @@ SidebarView 顶部使用“全部网盘／百度网盘／夸克网盘”下拉�
 | --- | --- | --- |
 | PauseResumeAllButton | MainView 传入 visibleJobs | 沿用暂停优先、其次继续的按钮逻辑；按实际可执行目标数生成提示，无目标禁用 |
 | FerryCommands 列表级操作 | 通过主任务窗口的 focusedSceneValue 取得当前列表上下文 | 菜单用“暂停当前列表／继续当前列表”文案；与工具栏共用候选任务判断，无活动主任务窗口时禁用 |
-| 详情、选中项菜单及快捷键 | selection 与 visibleJobs 的交集 | 复用 JobSelection 和 JobActionsMenu；全选仅覆盖 visibleJobs |
+| 详情、选中项菜单及快捷键 | selection 与 visibleJobs 的交集 | 复用 JobSelection 和 JobActionsMenu；主窗口处理原生全选命令，仅覆盖 visibleJobs；点选列表转移键盘焦点，文本框保留文字全选 |
 | 右键菜单 | 右键已选中行时使用当前可见选中项；未选中行时只使用该行 | 确定目标后使用相同动作规则，避免旧选择影响另一行 |
 | 移除确认 | 发起时的任务 ID、移除方式、按网盘的任务数及远端目录清理计划 | 对话框固定目标和清理选择；按各家设置分别说明将清理的目录数，确认后复核任务、账号及目录身份，不因筛选或设置变化扩大范围 |
 
