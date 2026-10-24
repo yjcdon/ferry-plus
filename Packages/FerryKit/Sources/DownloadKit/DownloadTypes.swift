@@ -13,14 +13,27 @@ public struct DownloadRequest: Codable, Sendable, Hashable {
     /// 来源设置的单文件连接数，缺失时沿用引擎默认值。
     public var connections: Int?
     public var expectedMD5: String?
+    /// 有明确原始内容依据时提供；完整落盘后比对，不以本地单独计算摘要冒充校验。
+    public var expectedSHA256: String?
 
-    public init(id: String, destination: URL, expectedSize: Int64? = nil, context: Data = Data(), connections: Int? = nil, expectedMD5: String? = nil) {
+    public init(id: String, destination: URL, expectedSize: Int64? = nil, context: Data = Data(), connections: Int? = nil, expectedMD5: String? = nil, expectedSHA256: String? = nil) {
         self.id = id
         self.destination = destination
         self.expectedSize = expectedSize
         self.context = context
         self.connections = connections
         self.expectedMD5 = expectedMD5
+        self.expectedSHA256 = expectedSHA256
+    }
+
+    /// 在队列和恢复边界校验摘要格式，拒绝无法用于比较的期望值。
+    func validateIntegrity() throws {
+        for (digest, length) in [(expectedMD5, 32), (expectedSHA256, 64)] {
+            guard let digest else { continue }
+            guard digest.utf8.count == length, digest.utf8.allSatisfy({
+                (48...57).contains($0) || (65...70).contains($0) || (97...102).contains($0)
+            }) else { throw DownloadFailure.invalidResponse("下载内容校验值格式无效") }
+        }
     }
 }
 

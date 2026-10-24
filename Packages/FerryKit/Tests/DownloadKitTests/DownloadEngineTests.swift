@@ -430,6 +430,51 @@ private let megabyte = 1 << 20
         await engine.shutdown()
     }
 
+    /// SHA-256 和 MD5 共用一次落盘读取；任一依据不符都不能发布正式文件。
+    @Test(arguments: [true, false])
+    func verifiesSHA256BeforePublishing(_ matches: Bool) async throws {
+        let fixture = Fixture()
+        let data = fixture.addFile("sha256.bin", size: megabyte)
+        var request = fixture.request("sha256.bin")
+        let expected = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        request.expectedSHA256 = matches ? expected.uppercased() : (expected.first == "0" ? "1" : "0") + String(expected.dropFirst())
+        request.expectedMD5 = Insecure.MD5.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        let engine = fixture.makeEngine()
+        try await engine.enqueue(request)
+        if matches {
+            let destination = try await engine.waitForCompletion(of: request.id)
+            #expect(try Data(contentsOf: destination) == data)
+        } else {
+            try await waitUntil("SHA-256 verification to fail") {
+                if case .failed = await engine.snapshot(id: request.id)?.state { return true }
+                return false
+            }
+            #expect(await engine.snapshot(id: request.id)?.state == .failed(.invalidResponse("文件 SHA-256 与预期校验值不一致，请重新添加任务")))
+            #expect(!FileManager.default.fileExists(atPath: request.destination.path))
+            #expect(try Data(contentsOf: request.temporaryURL) == data)
+            #expect(try fixture.savedRecords().first?.completedURL == nil)
+        }
+        await engine.shutdown()
+    }
+
+    /// 错误的校验值在发网络请求或写检查点之前拒绝。
+    @Test func rejectsMalformedSHA256BeforeEnqueue() async throws {
+        let fixture = Fixture()
+        _ = fixture.addFile("invalid.bin", size: 4)
+        var request = fixture.request("invalid.bin")
+        request.expectedSHA256 = "not-a-sha256"
+        let engine = fixture.makeEngine()
+        do {
+            try await engine.enqueue(request)
+            Issue.record("Malformed SHA-256 was accepted")
+        } catch {
+            #expect(error as? DownloadFailure == .invalidResponse("下载内容校验值格式无效"))
+        }
+        #expect(fixture.server.log.isEmpty)
+        #expect(try fixture.savedRecords().isEmpty)
+        await engine.shutdown()
+    }
+
     @Test(arguments: [
         URLError.Code.serverCertificateUntrusted, .serverCertificateHasBadDate, .serverCertificateNotYetValid,
         .serverCertificateHasUnknownRoot, .clientCertificateRejected, .secureConnectionFailed,

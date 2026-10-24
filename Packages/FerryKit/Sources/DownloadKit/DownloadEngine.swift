@@ -110,6 +110,7 @@ public actor DownloadEngine {
     @discardableResult
     public func restore(contexts: [String: Data] = [:], pausedIDs: Set<String> = [], connections: [String: Int] = [:]) throws -> [DownloadSnapshot] {
         let records = try store.loadAll().sorted { $0.createdAt < $1.createdAt }
+        for record in records { try record.request.validateIntegrity() }
         var restored: [DownloadSnapshot] = []
         for var record in records where entries[record.request.id] == nil && !cancellingIDs.contains(record.request.id) {
             if let context = contexts[record.request.id], context != record.request.context {
@@ -137,6 +138,7 @@ public actor DownloadEngine {
     /// 加入队列。已有同一 id 的下载（包括已完成或取消收尾中的）时不做任何事。
     public func enqueue(_ request: DownloadRequest) throws {
         guard entries[request.id] == nil, !cancellingIDs.contains(request.id) else { return }
+        try request.validateIntegrity()
         var request = request
         if let connections = connectionOverrides[request.id] { request.connections = connections }
         let record = DownloadRecord(request: request)

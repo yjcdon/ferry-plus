@@ -175,17 +175,27 @@ struct FileTransfer: Sendable {
             }
             throw FetchError.invalidResponse("file size \(size ?? 0) does not match \(expected)")
         }
-        if let expectedMD5 = current.request.expectedMD5 {
+        if current.request.expectedMD5 != nil || current.request.expectedSHA256 != nil {
             let handle = try FileHandle(forReadingFrom: temporaryURL)
             defer { try? handle.close() }
-            var hash = Insecure.MD5()
+            var md5 = Insecure.MD5()
+            var sha256 = SHA256()
             while let chunk = try handle.read(upToCount: 1024 * 1024), !chunk.isEmpty {
                 try Task.checkCancellation()
-                hash.update(data: chunk)
+                if current.request.expectedMD5 != nil { md5.update(data: chunk) }
+                if current.request.expectedSHA256 != nil { sha256.update(data: chunk) }
             }
-            let actual = hash.finalize().map { String(format: "%02x", $0) }.joined()
-            guard actual.caseInsensitiveCompare(expectedMD5) == .orderedSame else {
-                throw FetchError.invalidResponse("文件 MD5 与远端校验值不一致，请重新添加任务")
+            if let expected = current.request.expectedMD5 {
+                let actual = md5.finalize().map { String(format: "%02x", $0) }.joined()
+                guard actual.caseInsensitiveCompare(expected) == .orderedSame else {
+                    throw FetchError.invalidResponse("文件 MD5 与远端校验值不一致，请重新添加任务")
+                }
+            }
+            if let expected = current.request.expectedSHA256 {
+                let actual = sha256.finalize().map { String(format: "%02x", $0) }.joined()
+                guard actual.caseInsensitiveCompare(expected) == .orderedSame else {
+                    throw FetchError.invalidResponse("文件 SHA-256 与预期校验值不一致，请重新添加任务")
+                }
             }
         }
         do {

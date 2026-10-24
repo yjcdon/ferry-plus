@@ -39,3 +39,11 @@
 2026-10-24 18:32（Asia/Shanghai），固定签名探针直接调用正式接口：新随机 4096 字节实际单片发送、OSS 合并、finish、准确 FID 查询与完整回读 SHA-256／逐字节比对通过；零字节走服务端确认的秒传，再按准确 FID 回读空内容，比对通过。专用目录移入回收站并确认消失。证据：`.build/v3-protocol-probe/quark-final.jsonl`。初次失败保留的专用目录也已核对身份并清理，见 `cleanup-initial.jsonl`。
 
 服务端列片、跨进程续传、非空秒传、安全发布与大文件仍待验证；不将基础接口成功计为 V3-T01／V3-T05 全量完成。此前每轮失败和修正日志保留在 `.build/v3-protocol-probe/`，不进入发布包。
+
+## 下载端 SHA-256 落盘校验
+
+DownloadRequest 新增可选 `expectedSHA256`，保留旧 MD5 参数及旧格式解码兼容。有两种摘要时一次流式读取临时文件同时核对；摘要不符时保留临时内容，不移动为正式文件、不保存完成回执。队列加入与恢复边界校验期望摘要格式，错误值不会先触发网络传输。
+
+沿用已有 DownloadEngineTests，增加 SHA-256 正确／错误内容和无效格式的用例，没有新增测试类。命令 `env FERRY_MACOS_SDK=macosx bash Scripts/test-packages.sh --configuration release --filter DownloadEngineTests` 通过：46 个测试，包含原有暂停恢复、身份变化、MD5 失败、取消和预算调整，以及本次 SHA-256 验证。证据：`.build/v3-download-tests.log`。
+
+目前提供引擎能力，原始摘要关联、结果状态展示、清单导入导出及分享清理门槛仍需 V3-T11／V3-T14 接入；不能把所有现有云端下载宣称为已有可信 SHA-256 基准。
