@@ -69,6 +69,8 @@ public struct UploadEngine: Sendable {
             confirmed[receipt.index] = receipt
             confirmedBytes += receipt.length
         }
+        // 有持久回执才核对原服务端会话；网络失败或缺片不得继续按旧进度跳过。
+        if !receipts.isEmpty { try await destination.validateResumedParts(prepared, receipts: receipts) }
         if let onProgress {
             try await onProgress(.init(confirmedBytes: confirmedBytes, totalBytes: prepared.source.identity.size,
                 confirmedPartCount: confirmed.count, pendingPartCount: pending.count))

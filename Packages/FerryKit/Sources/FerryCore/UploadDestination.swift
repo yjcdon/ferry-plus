@@ -19,6 +19,8 @@ public protocol UploadDestination: Sendable {
     /// 仅补完准备后的哈希协商；不声称查询或验证服务端已保留分片。
     func finishPreparation(_ prepared: PreparedUpload,
                            onPrepared: @Sendable (PreparedUpload) async throws -> Void) async throws -> PreparedUpload
+    /// 恢复时核对已保存回执；支持列片的策略须确认原会话仍保留这些准确分片。
+    func validateResumedParts(_ prepared: PreparedUpload, receipts: [UploadPartReceipt]) async throws
     func uploadPart(_ data: Data, index: Int, expectedSHA256: String,
                     prepared: PreparedUpload) async throws -> UploadPartReceipt
     /// 调用前由编排层保存合并意图；抛错可能表示结果未知，禁止据此无条件重新提交。
@@ -28,6 +30,9 @@ public protocol UploadDestination: Sendable {
 }
 
 extension UploadDestination {
+    /// 未提供服务端列片合同的策略沿用本地回执，不宣称远端分片已重新查询。
+    public func validateResumedParts(_ prepared: PreparedUpload, receipts: [UploadPartReceipt]) async throws { }
+
     /// 仅结构化传输错误和 HTTP 暂态可重试；业务码、凭据、摘要、配额和签名错误保持失败。
     public func shouldRetryPart(after error: any Error) -> Bool {
         let transportCode: URLError.Code?
@@ -360,6 +365,45 @@ public struct QuarkUploadDestination: UploadDestination {
             secretReference: prepared.secretReference, source: prepared.source)
         try await onPrepared(final)
         return final
+    }
+
+    /// 只有持久回执的原会话才查询；远端缺片或 ETag 改变立即失败，不用列表认领未记录的成功片。
+    public func validateResumedParts(_ prepared: PreparedUpload, receipts: [UploadPartReceipt]) async throws {
+        guard !receipts.isEmpty else { return }
+        try prepared.validate()
+        guard prepared.account == account else { throw UploadDestinationError.otherAccount }
+        guard prepared.isReadyForTransfer, !prepared.isInstant, !prepared.requiresRechunking else {
+            throw UploadDestinationError.invalidPreparation
+        }
+        let session = try nativeSession(prepared)
+        var local: [Int: QuarkUploadPartReceipt] = [:]
+        let pending = Set(prepared.pendingParts)
+        for receipt in receipts {
+            guard pending.contains(receipt.index), local[receipt.index] == nil else {
+                throw UploadDestinationError.invalidReceipt
+            }
+            let native = try PreparedUpload.decodedReceipt(receipt, as: QuarkUploadPartReceipt.self)
+            let baselineSHA = session.size == 0 ? PreparedUpload.emptySHA256 : prepared.source.chunks[receipt.index].sha256
+            let baselineMD5 = session.size == 0 ? PreparedUpload.emptyMD5 : prepared.source.chunks[receipt.index].md5
+            guard native.uploadID == session.uploadID, native.number == receipt.index + 1,
+                  Int64(native.size) == receipt.length, receipt.offset == Int64(receipt.index) * prepared.partSize,
+                  receipt.length == min(prepared.partSize, session.size - receipt.offset), receipt.sourceSHA256 == baselineSHA,
+                  Self.partETag(native.etag) == baselineMD5 else { throw UploadDestinationError.invalidReceipt }
+            local[receipt.index] = native
+        }
+        let remote = try await client.listUploadParts(session: session, authorization: authorization(prepared))
+        let listed = Dictionary(uniqueKeysWithValues: remote.map { ($0.number - 1, $0) })
+        for (index, receipt) in local {
+            guard let actual = listed[index], actual.uploadID == receipt.uploadID, actual.size == receipt.size,
+                  Self.partETag(actual.etag) == Self.partETag(receipt.etag) else {
+                throw UploadDestinationError.invalidReceipt
+            }
+        }
+    }
+
+    private static func partETag(_ value: String) -> String {
+        let text = value.hasPrefix("\"") && value.hasSuffix("\"") ? String(value.dropFirst().dropLast()) : value
+        return text.lowercased()
     }
 
     /// 只发送已与源分块 SHA-256 匹配的同一份字节；原生层转换为 OSS 的一基片号。

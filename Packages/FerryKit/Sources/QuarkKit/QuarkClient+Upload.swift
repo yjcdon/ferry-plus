@@ -153,6 +153,35 @@ extension QuarkClient {
         return QuarkUploadPartReceipt(uploadID: upload.uploadID, number: number, size: data.count, etag: etag)
     }
 
+    /// 分页读取原会话已保留的分片；精确核对 Key/uploadID，不把列表 ETag 当成本地内容基准。
+    /// 网关 alias 与返回的实际 Bucket 可能不同，实际 Bucket 必须在所有页保持一致。
+    public func listUploadParts(session upload: QuarkUploadSession,
+                                authorization: QuarkUploadAuthorizationContext) async throws -> [QuarkUploadPartReceipt] {
+        let signedQuery = [("uploadId", upload.uploadID)]
+        var marker = 0
+        var actualBucket: String?
+        var receipts: [QuarkUploadPartReceipt] = []
+        // 每页必须前进至少一个合法片号，最多 partCount+1 页，记录最多 10,000 片。
+        for _ in 0...upload.partCount {
+            try Task.checkCancellation()
+            var query = signedQuery + [("max-parts", "1000")]
+            if marker > 0 { query.append(("part-number-marker", String(marker))) }
+            let (data, response) = try await storageRequest(upload, authorization: authorization, method: "GET",
+                contentType: "", query: query, body: Data(), signedQuery: signedQuery)
+            if String(decoding: data.prefix(4096), as: UTF8.self).contains("<Error>") {
+                throw Self.storageError(status: response.statusCode, data: data, requestID: response.value(forHTTPHeaderField: "x-oss-request-id"))
+            }
+            let page = try QuarkUploadPartsPage(data: data, session: upload, marker: marker)
+            guard actualBucket == nil || actualBucket == page.bucket else { throw QuarkError.invalidResponse }
+            actualBucket = page.bucket
+            receipts.append(contentsOf: page.receipts)
+            guard receipts.count <= upload.partCount else { throw QuarkError.invalidResponse }
+            if !page.isTruncated { return receipts }
+            marker = page.nextMarker
+        }
+        throw QuarkError.invalidResponse
+    }
+
     /// 按精确片号、长度和上传身份合并；成功后仍需调用 finishUpload 并核对云端文件。
     public func completeUploadParts(session upload: QuarkUploadSession, authorization: QuarkUploadAuthorizationContext,
                                     receipts: [QuarkUploadPartReceipt]) async throws {
@@ -190,13 +219,13 @@ extension QuarkClient {
 
     private func storageRequest(_ upload: QuarkUploadSession, authorization: QuarkUploadAuthorizationContext,
                                 method: String, contentType: String, query: [(String, String)], body: Data,
-                                callback: String? = nil) async throws -> (Data, HTTPURLResponse) {
+                                callback: String? = nil, signedQuery: [(String, String)]? = nil) async throws -> (Data, HTTPURLResponse) {
         try Task.checkCancellation()
         guard !revoked.withLock({ $0 }) else { throw CancellationError() }
         let date = Self.storageDate()
         let contentMD5 = method == "POST" ? Data(Insecure.MD5.hash(data: body)).base64EncodedString() : ""
         let userAgent = "aliyun-sdk-js/6.6.1 Chrome 98.0.4758.80 on Windows 10 64-bit"
-        let canonicalQuery = query.map { "\($0.0)=\($0.1)" }.joined(separator: "&")
+        let canonicalQuery = (signedQuery ?? query).map { "\($0.0)=\($0.1)" }.joined(separator: "&")
         let callbackHeader = callback.map { "x-oss-callback:\($0)\n" } ?? ""
         let authMeta = "\(method)\n\(contentMD5)\n\(contentType)\n\(date)\n\(callbackHeader)x-oss-date:\(date)\nx-oss-user-agent:\(userAgent)\n/\(upload.bucket)/\(upload.objectKey)?\(canonicalQuery)"
         let auth: UploadEnvelope<AuthData> = try await uploadCall("/file/upload/auth", body: [
