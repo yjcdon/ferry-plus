@@ -89,7 +89,7 @@ final class AppModel {
             .flatMap { try? JSONDecoder().decode(FerrySettings.self, from: $0) } ?? FerrySettings()
         #if DEBUG
         if DemoData.isEnabled { settings = FerrySettings() }
-        if ProcessInfo.processInfo.arguments.contains("--verify-drive-interfaces") { settings.detectsCopiedLinks = false }
+        if Self.isDriveVerification { settings.detectsCopiedLinks = false }
         #endif
         let proxyPassword = ProxyPasswordStore.load()
         let proxy = ActiveProxy(settings.proxy, password: proxyPassword)
@@ -101,7 +101,7 @@ final class AppModel {
             stateDirectory = DemoData.directory.appendingPathComponent("Downloads", isDirectory: true)
             jobsFile = DemoData.directory.appendingPathComponent("jobs.json")
         }
-        if ProcessInfo.processInfo.arguments.contains("--verify-drive-interfaces") {
+        if Self.isDriveVerification {
             let directory = URL(filePath: FileManager.default.currentDirectoryPath)
                 .appendingPathComponent(".build/verification-session-\(UUID().uuidString)", isDirectory: true)
             stateDirectory = directory.appendingPathComponent("Downloads", isDirectory: true)
@@ -124,7 +124,7 @@ final class AppModel {
         checkedSource.connect(coordinator)
         coordinator.onJobCompleted = { [weak self] job in self?.notifyCompletion(of: job) }
         #if DEBUG
-        if ProcessInfo.processInfo.arguments.contains("--verify-drive-interfaces") { coordinator.onJobCompleted = nil }
+        if Self.isDriveVerification { coordinator.onJobCompleted = nil }
         #endif
         coordinator.onRunningChanged = { [weak self] active in self?.downloadActivity.setActive(active) }
         resolveDownloadDirectory()
@@ -140,6 +140,41 @@ final class AppModel {
             apply(makeClient(credential: login.credential), credential: login.credential, account: login.account)
         }
     }
+
+    #if DEBUG
+    /// 两类接口验证都使用独立任务空间，不能恢复或修改主应用的真实任务列表。
+    private static var isDriveVerification: Bool {
+        ProcessInfo.processInfo.arguments.contains("--verify-drive-interfaces") ||
+            ProcessInfo.processInfo.arguments.contains("--verify-drive-resume")
+    }
+
+    /// 用同一来源路由和代理创建隔离的正式下载栈；验证护栏只改变传输边界，不替换账号或下载内容。
+    func makeResumeVerificationStack(directory: URL, disk: any Netdisk, lowerOffset: Int64,
+                                     totalSize: Int64) -> (JobCoordinator, RangeVerificationGate) {
+        var settings = self.settings
+        settings.maxConcurrentFiles = 1
+        settings.connectionsPerFile = 1
+        settings.quarkConnectionsPerFile = 1
+        settings.cleanupAfterDownload = false
+        settings.quarkCleanupAfterDownload = false
+        let configuration = DownloadConfiguration(maxConcurrentFiles: 1, segmentsPerFile: 1,
+            segmentSize: .fixed(RangeVerificationGate.window), maxRetries: 0,
+            progressInterval: .milliseconds(100), checkpointInterval: .seconds(60))
+        let network = Self.applying(activeProxy, to: DownloadEngine.defaultSessionConfiguration())
+        let gate = RangeVerificationGate(lowerOffset: lowerOffset, totalSize: totalSize, configuration: network)
+        let guardedNetwork = network.copy() as! URLSessionConfiguration
+        guardedNetwork.protocolClasses = [RangeVerificationProtocol.self]
+        let checkedSource = AccountCheckedSource(source)
+        let engine = DownloadEngine(stateDirectory: directory.appendingPathComponent("Downloads", isDirectory: true),
+                                    source: checkedSource, configuration: configuration, sessionConfiguration: guardedNetwork)
+        let coordinator = JobCoordinator(engine: engine, store: JobStore(fileURL: directory.appendingPathComponent("jobs.json")),
+            settings: settings, downloadFolder: DownloadFolder(url: directory.appendingPathComponent("Files", isDirectory: true)),
+            baseConfiguration: configuration)
+        coordinator.netdisks[disk.account.provider] = disk
+        checkedSource.connect(coordinator)
+        return (coordinator, gate)
+    }
+    #endif
 
     // MARK: - 生命周期
 

@@ -6,6 +6,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--verify-drive-resume") {
+            NSApp.setActivationPolicy(.prohibited)
+            NSApp.windows.forEach { $0.orderOut(nil) }
+            Task {
+                let report = await model.verifyBoundedResume()
+                do {
+                    let encoder = JSONEncoder()
+                    encoder.outputFormatting = [.sortedKeys]
+                    FileHandle.standardOutput.write(try encoder.encode(report) + Data([10]))
+                    await model.shutdown()
+                    exit(report.results.allSatisfy { $0.state == "verified" } ? 0 : 1)
+                } catch {
+                    FileHandle.standardError.write(Data("无法生成有界续传验证结果。\n".utf8))
+                    await model.shutdown()
+                    exit(1)
+                }
+            }
+            return
+        }
         if ProcessInfo.processInfo.arguments.contains("--verify-quark-capacity") {
             NSApp.setActivationPolicy(.prohibited)
             NSApp.windows.forEach { $0.orderOut(nil) }
