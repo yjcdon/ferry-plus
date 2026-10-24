@@ -30,6 +30,7 @@ public actor UploadCoordinator {
     private var integrity: IntegrityService
     private let secrets: (any UploadSecretStorage)?
     private var maximumConcurrentJobs: Int
+    private var maximumConcurrentParts: Int
     private let environment: @Sendable (AccountKey) async throws -> UploadEnvironment
     private let onBatchFinished: (@Sendable (UploadJob) async -> Void)?
     private var jobs: [UUID: UploadJob] = [:]
@@ -48,12 +49,15 @@ public actor UploadCoordinator {
 
     public init(store: UploadStore, integrityStore: IntegrityStore, budget: TransferBudget,
                 integrity: IntegrityService, secrets: (any UploadSecretStorage)? = nil, maximumConcurrentJobs: Int = 1,
+                maximumConcurrentParts: Int = 1,
                 onBatchFinished: (@Sendable (UploadJob) async -> Void)? = nil,
                 environment: @escaping @Sendable (AccountKey) async throws -> UploadEnvironment) throws {
         guard (1...4).contains(maximumConcurrentJobs) else { throw UploadRecordError.invalid("同时上传批次数必须为 1～4") }
+        guard (1...4).contains(maximumConcurrentParts) else { throw UploadRecordError.invalid("单文件上传并发数必须为 1～4") }
         self.store = store; self.integrityStore = integrityStore; self.budget = budget; self.integrity = integrity
         self.secrets = secrets
-        self.maximumConcurrentJobs = maximumConcurrentJobs; self.environment = environment
+        self.maximumConcurrentJobs = maximumConcurrentJobs; self.maximumConcurrentParts = maximumConcurrentParts
+        self.environment = environment
         self.onBatchFinished = onBatchFinished
     }
 
@@ -364,6 +368,12 @@ public actor UploadCoordinator {
         maximumConcurrentJobs = count; schedule()
     }
 
+    /// 新值只影响下次创建的文件执行器，不中断当前文件已经在途的分片。
+    public func updateMaximumConcurrentParts(_ count: Int) throws {
+        guard (1...4).contains(count) else { throw UploadRecordError.invalid("单文件上传并发数必须为 1～4") }
+        maximumConcurrentParts = count
+    }
+
     /// 正常退出等待 worker 写完最后回执；不把运行任务改成手动暂停。
     public func shutdown() async {
         closed = true
@@ -571,7 +581,8 @@ public actor UploadCoordinator {
         } else {
             file.phase = .uploading; try await saveFile(file)
             let fileID = file.id
-            let receipts = try await UploadEngine(destination: env.destination, budget: budget).upload(localURL: localURL, prepared: prepared, receipts: file.parts,
+            let receipts = try await UploadEngine(destination: env.destination, budget: budget,
+                maximumConcurrentParts: maximumConcurrentParts).upload(localURL: localURL, prepared: prepared, receipts: file.parts,
                 onReceipt: { [weak self] receipt in
                     guard let self else { throw CancellationError() }
                     try await self.received(receipt, fileID: fileID, jobID: jobID)

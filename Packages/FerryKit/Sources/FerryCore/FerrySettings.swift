@@ -12,6 +12,8 @@ public struct FerrySettings: Codable, Sendable, Hashable {
     public var connectionsPerFile: Int
     /// 同时执行的上传批次数；每批次内部文件按上传调度处理。
     public var maxConcurrentUploads: Int
+    /// 每个上传文件的分片并发；每增加一路会增加一片内容缓冲。
+    public var uploadPartsPerFile: Int
     /// 每秒上传字节数，0 表示不限速。
     public var uploadBytesPerSecond: Int64
     /// 每秒下载字节数，0 表示不限速；上传后的校验回读也使用此额度。
@@ -26,13 +28,14 @@ public struct FerrySettings: Codable, Sendable, Hashable {
     public init(downloadDirectoryBookmark: Data? = nil, transferFolder: String = "/Ferry", cleanupAfterDownload: Bool = true,
                 maxConcurrentFiles: Int = 1, connectionsPerFile: Int = 1, proxy: ProxySettings = ProxySettings(),
                 detectsCopiedLinks: Bool = true, maxConcurrentUploads: Int = 1,
-                uploadBytesPerSecond: Int64 = 0, downloadBytesPerSecond: Int64 = 0) {
+                uploadBytesPerSecond: Int64 = 0, downloadBytesPerSecond: Int64 = 0, uploadPartsPerFile: Int = 1) {
         self.downloadDirectoryBookmark = downloadDirectoryBookmark
         self.transferFolder = transferFolder
         self.cleanupAfterDownload = cleanupAfterDownload
         self.maxConcurrentFiles = maxConcurrentFiles
         self.connectionsPerFile = connectionsPerFile
         self.maxConcurrentUploads = maxConcurrentUploads.clamped(to: Self.concurrentUploadsRange)
+        self.uploadPartsPerFile = uploadPartsPerFile.clamped(to: Self.uploadPartsRange)
         self.uploadBytesPerSecond = max(0, uploadBytesPerSecond)
         self.downloadBytesPerSecond = max(0, downloadBytesPerSecond)
         self.proxy = proxy
@@ -52,6 +55,7 @@ public struct FerrySettings: Codable, Sendable, Hashable {
         maxConcurrentFiles = value(.maxConcurrentFiles) ?? defaults.maxConcurrentFiles
         connectionsPerFile = value(.connectionsPerFile) ?? defaults.connectionsPerFile
         maxConcurrentUploads = value(.maxConcurrentUploads) ?? defaults.maxConcurrentUploads
+        uploadPartsPerFile = value(.uploadPartsPerFile) ?? defaults.uploadPartsPerFile
         uploadBytesPerSecond = value(.uploadBytesPerSecond) ?? defaults.uploadBytesPerSecond
         downloadBytesPerSecond = value(.downloadBytesPerSecond) ?? defaults.downloadBytesPerSecond
         quarkTransferFolder = value(.quarkTransferFolder) ?? defaults.quarkTransferFolder
@@ -64,6 +68,7 @@ public struct FerrySettings: Codable, Sendable, Hashable {
 
     public static let concurrentFilesRange = 1...10
     public static let concurrentUploadsRange = 1...4
+    public static let uploadPartsRange = 1...4
     public static let connectionsRange = 1...16
     /// 同时下载文件数乘以每个文件的连接数的上限。
     public static let totalConnectionsLimit = 20
@@ -84,6 +89,7 @@ public struct FerrySettings: Codable, Sendable, Hashable {
         connectionsPerFile = connectionsPerFile.clamped(to: allowedConnections)
         quarkConnectionsPerFile = quarkConnectionsPerFile.clamped(to: allowedConnections)
         maxConcurrentUploads = maxConcurrentUploads.clamped(to: Self.concurrentUploadsRange)
+        uploadPartsPerFile = uploadPartsPerFile.clamped(to: Self.uploadPartsRange)
         uploadBytesPerSecond = max(0, uploadBytesPerSecond)
         downloadBytesPerSecond = max(0, downloadBytesPerSecond)
     }

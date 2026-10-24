@@ -86,8 +86,11 @@ private struct TransferSettingsView: View {
                 Stepper(value: $model.settings.maxConcurrentUploads, in: FerrySettings.concurrentUploadsRange) {
                     LabeledContent("同时上传任务数", value: "\(model.settings.maxConcurrentUploads)")
                 }
+                Stepper(value: $model.settings.uploadPartsPerFile, in: FerrySettings.uploadPartsRange) {
+                    LabeledContent("每个上传文件的并发分片", value: "\(model.settings.uploadPartsPerFile)")
+                }
             } footer: {
-                Text("并发设置适用于百度和夸克。上传任务按添加的文件批次计算。")
+                Text("并发设置适用于百度和夸克。提高分片并发会增加内存占用，默认 1 路。")
                     .foregroundStyle(.secondary)
             }
 

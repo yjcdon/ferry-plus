@@ -449,6 +449,7 @@ final class AppModel {
                 try await transferBudget.update(maximumConnections: FerrySettings.totalConnectionsLimit,
                     uploadBytesPerSecond: settings.uploadBytesPerSecond, downloadBytesPerSecond: settings.downloadBytesPerSecond)
                 try await uploadCoordinator?.updateMaximumConcurrentJobs(settings.maxConcurrentUploads)
+                try await uploadCoordinator?.updateMaximumConcurrentParts(settings.uploadPartsPerFile)
             } catch { uploadProblem = error.localizedDescription }
         }
         updateProxy()
@@ -647,7 +648,7 @@ final class AppModel {
             let integrity = try IntegrityService(reader: RangeReader(session: session, budget: transferBudget))
             let uploads = try UploadCoordinator(store: UploadStore(), integrityStore: IntegrityStore(),
                 budget: transferBudget, integrity: integrity, secrets: KeychainUploadSecretStorage(),
-                maximumConcurrentJobs: settings.maxConcurrentUploads,
+                maximumConcurrentJobs: settings.maxConcurrentUploads, maximumConcurrentParts: settings.uploadPartsPerFile,
                 onBatchFinished: { [weak self] job in await self?.notifyUploadCompletion(of: job) },
                 environment: { [weak self] key in
                     guard let self else { throw CancellationError() }

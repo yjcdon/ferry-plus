@@ -4,7 +4,13 @@ import DownloadKit
 
 public enum UploadEngineError: Error, LocalizedError, Sendable {
     case invalidRetryConfiguration
-    public var errorDescription: String? { "分片额外重试次数必须为 0～5，等待时间必须为 0～10 秒" }
+    case invalidPartConcurrency
+    public var errorDescription: String? {
+        switch self {
+        case .invalidRetryConfiguration: "分片额外重试次数必须为 0～5，等待时间必须为 0～10 秒"
+        case .invalidPartConcurrency: "每个上传文件的并发分片数必须为 1～4"
+        }
+    }
 }
 
 /// 只统计服务端已确认且已持久化的逻辑字节；重复执行和分片重试不会重复累加。
@@ -15,22 +21,25 @@ public struct UploadEngineProgress: Sendable, Equatable {
     public let pendingPartCount: Int
 }
 
-/// 单文件顺序执行器。准备、分块重算、合并和回读由上层阶段调度负责。
-/// 仅保留一个服务端分片的内容缓冲；不持有计时任务、队列或完整文件副本。
+/// 单文件有界并发执行器。准备、分块重算、合并和回读由上层阶段调度负责。
+/// 每路最多保留一个分片缓冲，回执由父任务串行保存；不持有完整文件副本。
 public struct UploadEngine: Sendable {
     private let destination: any UploadDestination
     private let budget: TransferBudget
     private let maximumPartRetries: Int
     private let partRetryDelay: Duration
+    private let maximumConcurrentParts: Int
 
     public init(destination: any UploadDestination, budget: TransferBudget, maximumPartRetries: Int = 2,
-                partRetryDelay: Duration = .milliseconds(300)) throws {
+                partRetryDelay: Duration = .milliseconds(300), maximumConcurrentParts: Int = 1) throws {
         guard (0...5).contains(maximumPartRetries), (.zero ... .seconds(10)).contains(partRetryDelay) else {
             throw UploadEngineError.invalidRetryConfiguration
         }
+        guard (1...4).contains(maximumConcurrentParts) else { throw UploadEngineError.invalidPartConcurrency }
         self.destination = destination; self.budget = budget
         self.maximumPartRetries = maximumPartRetries
         self.partRetryDelay = partRetryDelay
+        self.maximumConcurrentParts = maximumConcurrentParts
     }
 
     /// 只发送本会话待发且没有持久回执的分片；每个确认回执必须先成功保存才推进。
@@ -71,31 +80,61 @@ public struct UploadEngine: Sendable {
         defer { Darwin.close(descriptor) }
         let sourceIdentity = prepared.source.identity
         try verify(descriptor: descriptor, url: localURL, expected: sourceIdentity)
-        for index in missing {
+        let failure = await withTaskGroup(of: Result<UploadPartReceipt, any Error>.self) { group in
+            var next = 0
+            var firstError: (any Error)?
+            // 初始窗口和后续补位都只分配任务；额度等待阶段不占分片内容缓冲。
+            for _ in 0..<min(maximumConcurrentParts, missing.count) {
+                let index = missing[next]; next += 1
+                group.addTask { await partResult(index: index, descriptor: descriptor, url: localURL, prepared: prepared) }
+            }
+            while let result = await group.next() {
+                switch result {
+                case .success(let receipt):
+                    do {
+                        // 即使其他分片失败或用户取消，也优先保存已经取得的成功回执。
+                        // 只能由父任务逐个调用，避免并发读改写文件聚合和回执数组。
+                        try await onReceipt(receipt)
+                        confirmed[receipt.index] = receipt
+                        confirmedBytes += receipt.length
+                        if firstError == nil, let onProgress {
+                            try await onProgress(.init(confirmedBytes: confirmedBytes, totalBytes: prepared.source.identity.size,
+                                confirmedPartCount: confirmed.count, pendingPartCount: pending.count))
+                        }
+                        try verify(descriptor: descriptor, url: localURL, expected: sourceIdentity)
+                    } catch { if firstError == nil { firstError = error } }
+                case .failure(let error):
+                    if firstError == nil { firstError = error }
+                }
+                if Task.isCancelled, firstError == nil { firstError = CancellationError() }
+                if firstError != nil { group.cancelAll() }
+                else if next < missing.count {
+                    let index = missing[next]; next += 1
+                    group.addTask { await partResult(index: index, descriptor: descriptor, url: localURL, prepared: prepared) }
+                }
+            }
+            // Result 任务组收齐所有在途结果再抛错；描述符直到子任务全部退出后才关闭。
+            return firstError
+        }
+        if let failure { throw failure }
+        try Task.checkCancellation()
+        return confirmed.values.sorted { $0.index < $1.index }
+    }
+
+    /// 每路先领取速率额度，再以线程安全 pread 读取自己的分片；只返回小回执，不保留内容缓冲。
+    private func partResult(index: Int, descriptor: Int32, url: URL, prepared: PreparedUpload) async -> Result<UploadPartReceipt, any Error> {
+        do {
             try Task.checkCancellation()
             let count = Int(length(of: index, prepared: prepared))
-            // 先等速率额度再占内容缓冲，等待限速期间不占连接许可。
             try await budget.consume(count, direction: .upload)
-            try verify(descriptor: descriptor, url: localURL, expected: sourceIdentity)
-            let bytes = try read(descriptor: descriptor, offset: Int64(index) * prepared.partSize,
-                                 count: count, url: localURL)
-            try verify(descriptor: descriptor, url: localURL, expected: sourceIdentity)
-            let expectedSHA256 = sha256(of: index, prepared: prepared)
-            let receipt = try await send(bytes, index: index, expectedSHA256: expectedSHA256, prepared: prepared,
-                                         descriptor: descriptor, url: localURL)
+            try verify(descriptor: descriptor, url: url, expected: prepared.source.identity)
+            let bytes = try read(descriptor: descriptor, offset: Int64(index) * prepared.partSize, count: count, url: url)
+            try verify(descriptor: descriptor, url: url, expected: prepared.source.identity)
+            let receipt = try await send(bytes, index: index, expectedSHA256: sha256(of: index, prepared: prepared),
+                                         prepared: prepared, descriptor: descriptor, url: url)
             try check(receipt, index: index, prepared: prepared)
-            // 收到确认后优先保存，不在此边界先检查取消而丢掉已确认回执。
-            try await onReceipt(receipt)
-            confirmed[index] = receipt
-            confirmedBytes += receipt.length
-            if let onProgress {
-                try await onProgress(.init(confirmedBytes: confirmedBytes, totalBytes: prepared.source.identity.size,
-                    confirmedPartCount: confirmed.count, pendingPartCount: pending.count))
-            }
-            try Task.checkCancellation()
-            try verify(descriptor: descriptor, url: localURL, expected: sourceIdentity)
-        }
-        return confirmed.values.sorted { $0.index < $1.index }
+            return .success(receipt)
+        } catch { return .failure(error) }
     }
 
     /// 首次额度在读取缓冲前领取；重试重新计入发送流量，始终发送同一份已核对字节。

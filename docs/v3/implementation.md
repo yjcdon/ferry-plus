@@ -268,3 +268,10 @@ Computer Use 在进程 28205 通过正式窗口上传专用目录 `FerryPlus-V3-
 Release 全套 307 项通过，日志 `.build/v3-verification-progress-tests.log`。7 项慢速范围回读检查通过初始零进度、单调有界、暂停收尾清理、恢复从零实际请求及最终记录，证据 `.build/upload-verification-progress/result.txt`。新 App 构建与签名通过 `.build/v3-verification-progress-app-build.log`，重开后两家账号保持登录、两条大文件任务保持手动暂停。限速设置实际窗口每行只显示一个数值，默认上传并发仍为 1。
 
 文件体发送版完成两家短上传及完整回读后，空闲 CPU 0.0%，sample 物理占用 99.0 MiB、峰值 153.3 MiB，证据 `.build/ui-spool-validation/idle-sample.txt`。该采样不代替长期负载泄漏验收。
+
+
+## 可配置的文件内分片并发
+
+每文件上传分片默认 1 路，可配置 1～4 路，与批次并发独立。源读取使用各路独立缓冲和 pread，先等速率额度再读内容；共享连接总预算不变。父任务串行保存回执，失败或取消后取消并收齐在途结果，已返回的成功回执优先保存，再退出。设置更新只作用于后续创建的文件执行器。
+
+正式包及 307 项测试通过 `.build/v3-directories-duplicates-concurrency-tests.log`。实际模块链接的隔离探针通过 1／4 路窗口、回执串行、逻辑字节单调、首错误及保存失败、取消后收尾和预算全部归零；证据 `.build/upload-concurrency-validation/result.txt`。旧设置缺字段、坏字段、范围归一化及编码往返验证通过。4 路 20 MiB 分片约占 80 MiB 原始缓冲，协议／系统开销及同时批次数另计，默认维持低占用。
