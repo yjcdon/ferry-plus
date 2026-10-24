@@ -1,6 +1,6 @@
+import AppKit
 import FerryCore
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// 新任务的“保存到”菜单。默认是设置中的下载目录。用“其他…”选择的目录只用于这个任务，不修改设置。
 ///
@@ -35,11 +35,8 @@ struct DownloadFolderPicker: View {
         .pickerStyle(.menu)
         .fixedSize()
         .help((selection ?? model.currentFolder).url.path(percentEncoded: false))
-        .fileImporter(isPresented: $isChoosingFolder, allowedContentTypes: [.folder]) { result in
-            if case .success(let url) = result {
-                chooseFolder(url)
-            }
-        }
+        .directoryPicker(isPresented: $isChoosingFolder, directory: (selection ?? model.currentFolder).url,
+                         onChoose: chooseFolder)
     }
 
     private var destination: Binding<Destination> {
@@ -72,6 +69,53 @@ struct DownloadFolderPicker: View {
             } catch {
                 self.error = "无法取得“\(url.lastPathComponent)”的访问权限：\(error.localizedDescription)"
             }
+        }
+    }
+}
+
+extension View {
+    /// Mac 目录选择明确使用 NSOpenPanel 的目录模式，不按文件内容类型过滤目录。
+    func directoryPicker(isPresented: Binding<Bool>, directory: URL,
+                         onChoose: @escaping (URL) -> Void) -> some View {
+        modifier(DirectoryPicker(isPresented: isPresented, directory: directory, onChoose: onChoose))
+    }
+}
+
+/// 任务和全局设置共用目录面板；取消不改变原选择，确认后交给调用方创建 bookmark。
+private struct DirectoryPicker: ViewModifier {
+    @Binding var isPresented: Bool
+    let directory: URL
+    let onChoose: (URL) -> Void
+    @State private var panel: NSOpenPanel?
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: isPresented) { _, presented in
+                if presented { present() } else { panel?.cancel(nil) }
+            }
+            .onDisappear {
+                panel?.cancel(nil)
+                panel = nil
+                isPresented = false
+            }
+    }
+
+    /// 仅接受用户确认的一个目录；NSOpenPanel 保证 URL 来自本次目录选择。
+    private func present() {
+        guard panel == nil else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.directoryURL = directory
+        panel.prompt = "选择"
+        self.panel = panel
+        panel.begin { [weak panel] response in
+            let selected = response == .OK ? panel?.url : nil
+            self.panel = nil
+            isPresented = false
+            if let selected { onChoose(selected) }
         }
     }
 }

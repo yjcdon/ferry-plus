@@ -1,7 +1,6 @@
 import BaiduKit
 import FerryCore
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// 设置窗口：下载、网盘、网络和账号四个标签页。
 struct SettingsView: View {
@@ -97,11 +96,8 @@ private struct DownloadSettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .fileImporter(isPresented: $isChoosingDirectory, allowedContentTypes: [.folder]) { result in
-            if case .success(let url) = result {
-                model.chooseDownloadDirectory(url)
-            }
-        }
+        .directoryPicker(isPresented: $isChoosingDirectory, directory: model.downloadDirectory,
+                         onChoose: model.chooseDownloadDirectory)
     }
 }
 
