@@ -458,3 +458,11 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 只读实测发现，现有 Cookie `/1/clouddrive/task` 可按原上传 task_id 查询：自有未合并小会话返回进行中，自有曾完整校验后回收的任务返回已完成；两者核对同一 task_id、类型为上传，但回执不含准确 FID。正式下载解析对未合并的预分配 FID、已完成后回收 FID、随机未分配 FID 都返回 HTTP 404，故不能据此证明“从未提交”并自动重新上传。
 
 官方 1.0.25 OAuth SDK 另有 `/open/v1/file/list_uploaded_parts`，明确处理 finish_status=2 与 FID，恢复时对结构化 43006 清 taskID 重启。它要求 OAuth access_token，当前 Cookie／OSS 路径没有等价合同；也未证明该码排除曾完成后记录过期，不能直接转换为自动新建会话的许可。证据 `.build/t10-quark-authoritative-status/{report.md,primary-excerpts.json,read-only-comparison.jsonl}`。本轮两次只读探针退出成功，不改任务、网盘或凭据；V3-T10 自动过期重建仍未完成。
+
+## 实际代理传输与运行中切换
+
+独立程序使用正式 `ProxySettings` 的 SOCKS5 配置，统一应用到两家客户端、DownloadEngine 和 IntegrityService 的 RangeReader。受控本地隧道沿用本机既有系统代理出口，仅透传加密 TCP，不解密 TLS、不记录请求头、认证或签名 URL。两家上传、正式下载、完整回读共六路均经过代理，SHA 校验通过，连接、字节等待与定时器收尾归零。
+
+切换专项中，两家正式 UploadCoordinator 批次均已保存原会话且正在上传；两个下载各已确认 32 KiB。等待全部上传／下载 worker 停稳、取消并收尾独立回读，再替换客户端、下载 Session 和校验服务，从代理 A 切换到 B。下载位移不变，两家原上传会话哈希不变、用户暂停标记未改变；同一任务恢复后全部完成并通过 SHA，B 的连接日志确认实际使用新路由。两个新根目录及初次错误书签 fixture 的根目录均准确核对后回收，全部隧道和探针进程已退出。
+
+证据 `.build/v3-proxy-validation/{report.md,result.json,source-and-link-inputs.json}`。源码基线为 `938976f` 构建的正式模块；未操作 App 设置、原任务或全局网络配置。它证明实际网络与正式生命周期 API，设置界面快速切换、物理睡眠和新下载格式变更后的验收仍分别保留。
