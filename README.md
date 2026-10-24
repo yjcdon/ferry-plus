@@ -28,7 +28,7 @@ Ferry Plus 基于 [Ferry](https://github.com/yiquncode/BaiduPCS-Swift)，使用 
 
 从 [Releases](https://github.com/yjcdon/ferry-plus/releases) 下载已发布的 `Ferry-Plus-<版本>-arm64.zip`，解压后把 `Ferry Plus.app` 拖到“应用程序”文件夹。每个版本同时提供 SHA-256 校验文件。
 
-Ferry Plus 没有经过 Apple 公证。第一次打开时，如果 macOS 阻止运行，打开“系统设置 → 隐私与安全性”，在“安全性”中点击“仍要打开”。重新构建或更新后，系统可能要求再次允许访问钥匙串中的凭据。
+Ferry Plus 没有经过 Apple 公证。第一次打开时，如果 macOS 阻止运行，打开“系统设置 → 隐私与安全性”，在“安全性”中点击“仍要打开”。首次访问保存的凭据或切换签名身份时，系统可能要求允许访问钥匙串。
 
 ## 本机构建
 
@@ -40,6 +40,8 @@ open ".build/Ferry Plus.app"
 ```
 
 脚本输出可直接运行的 `.app`。SDK 可通过 `FERRY_MACOS_SDK` 指定，具体构建和登录验证记录见 [登录说明](docs/login.md)。
+
+本机构建自动复用唯一有效的代码签名证书，保持重建后的钥匙串授权。存在多个证书时，通过 `FERRY_CODESIGN_IDENTITY` 指定证书名称或 SHA-1；无证书时使用临时签名并提示重建授权限制，也可显式指定 `-` 使用临时签名。无需把本机证书信息写入仓库。
 
 本机构建与 Release 工作流均生成非沙盒 App，使用相同的应用标识及用户数据目录，保持登录、设置和任务存储位置一致。
 

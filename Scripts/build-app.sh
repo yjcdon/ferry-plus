@@ -6,6 +6,23 @@ repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 package_dir="$repo_dir/Packages/FerryKit"
 build_dir="$repo_dir/.build"
 app_dir="$build_dir/Ferry Plus.app"
+# 固定证书生成稳定的程序身份，钥匙串授权才能跨重建复用。
+signing_identity="${FERRY_CODESIGN_IDENTITY:-auto}"
+if [ "$signing_identity" = auto ]; then
+    identities="$(security find-identity -v -p codesigning | awk '/^[[:space:]]*[0-9]+\)/ { print $2 }')"
+    identity_count="$(printf '%s\n' "$identities" | awk 'NF { count++ } END { print count+0 }')"
+    case "$identity_count" in
+        1) signing_identity="$identities" ;;
+        0)
+            signing_identity=-
+            printf '%s\n' '没有可用签名证书，使用临时签名；重新构建后钥匙串可能再次要求授权。' >&2
+            ;;
+        *)
+            printf '%s\n' '存在多个签名证书，请通过 FERRY_CODESIGN_IDENTITY 指定要复用的证书。' >&2
+            exit 1
+            ;;
+    esac
+fi
 # 本项目本机使用 Command Line Tools + 26.5 SDK；完整 Xcode 环境可显式指定其他 SDK。
 sdk_dir="$(xcrun --sdk "${FERRY_MACOS_SDK:-macosx26.5}" --show-sdk-path)"
 
@@ -56,7 +73,7 @@ for entry in "16:16x16" "32:16x16@2x" "32:32x32" "64:32x32@2x" \
     cp "$icon_source/icon_${entry%%:*}.png" "$iconset_dir/icon_${entry#*:}.png"
 done
 iconutil -c icns "$iconset_dir" -o "$app_dir/Contents/Resources/AppIcon.icns"
-codesign --force --sign - --identifier io.github.yjcdon.FerryPlus \
+codesign --force --sign "$signing_identity" --timestamp=none --identifier io.github.yjcdon.FerryPlus \
     --entitlements "$repo_dir/BaiduPCS-Swift/BaiduPCS-Swift.entitlements" "$app_dir"
 codesign --verify --strict "$app_dir"
 printf '%s\n' "$app_dir"
