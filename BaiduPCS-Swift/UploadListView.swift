@@ -41,7 +41,7 @@ struct UploadRow: View {
     let job: UploadJob
     let onLocateDuplicate: (UUID) -> Void
     let onResumeDuplicate: () -> Void
-    @State private var isShowingDetails = false
+    let onInspect: () -> Void
     var body: some View {
         HStack(spacing: 12) {
             Image(systemName: "arrow.up.doc").font(.title2).foregroundStyle(.secondary).frame(width: 28)
@@ -68,8 +68,14 @@ struct UploadRow: View {
                     Spacer(minLength: 0)
                 }
                 .font(.caption).foregroundStyle(.secondary)
-                Text("完成 \(job.completedCount) · 失败 \(job.failedCount) · 跳过 \(job.skippedCount)")
-                    .font(.caption).foregroundStyle(.secondary)
+                HStack {
+                    Text("完成 \(job.completedCount) · 失败 \(job.failedCount) · 跳过 \(job.skippedCount)")
+                    Spacer(minLength: 0)
+                    if let metrics = job.stageMetrics {
+                        Text(stageDescription(metrics)).lineLimit(1)
+                            .help("当前文件：\(metrics.relativePath)。均速按本轮新增确认字节与经过时间计算。")
+                    }
+                }.font(.caption).foregroundStyle(.secondary)
                 if let originalID = job.duplicateOfJobID {
                     VStack(alignment: .leading, spacing: 4) {
                         Label("已有相同内容的上传，当前任务已暂停", systemImage: "doc.on.doc")
@@ -87,14 +93,20 @@ struct UploadRow: View {
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
-            Button("明细") { isShowingDetails = true }
+            Button("明细", action: onInspect)
                 .buttonStyle(.borderless)
         }
         .padding(.vertical, 5)
-        .sheet(isPresented: $isShowingDetails) {
-            UploadFilesView(jobID: job.id, title: job.title)
-        }
     }
+    /// 显示当前文件本轮的有效均速及估算，不把重试流量当成上传完成速度。
+    private func stageDescription(_ metrics: UploadStageMetrics) -> String {
+        let phase = metrics.phase == .verifying ? "回读均速" : "上传均速"
+        let rate = ByteCountFormatter.string(fromByteCount: Int64(metrics.averageBytesPerSecond.rounded()), countStyle: .file)
+        let remaining = Duration.seconds(metrics.estimatedRemainingSeconds).formatted(
+            .units(allowed: [.hours, .minutes, .seconds], width: .abbreviated, maximumUnitCount: 2))
+        return "\(phase) \(rate)/s · 预计 \(remaining)"
+    }
+
 }
 
 /// 每页最多 100 项；响应代次校验与 .task 取消共同阻止翻页后的迟到内容覆盖。

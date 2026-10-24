@@ -278,6 +278,23 @@ public struct UploadSelection: Codable, Sendable, Hashable {
     }
 }
 
+/// 当前文件当前阶段的平均有效速率，不包含恢复前的确认字节或网络重传流量。
+/// 仅用于运行时快照；不是可恢复检查点。
+public struct UploadStageMetrics: Sendable, Hashable {
+    public let fileID: UUID
+    public let relativePath: String
+    public let phase: UploadPhase
+    public let averageBytesPerSecond: Double
+    public let estimatedRemainingSeconds: Double
+
+    public init(fileID: UUID, relativePath: String, phase: UploadPhase,
+                averageBytesPerSecond: Double, estimatedRemainingSeconds: Double) {
+        self.fileID = fileID; self.relativePath = relativePath; self.phase = phase
+        self.averageBytesPerSecond = averageBytesPerSecond
+        self.estimatedRemainingSeconds = estimatedRemainingSeconds
+    }
+}
+
 /// 本轮完整回读的实时投影；不是可恢复摘要状态，暂停或取消后从零重新计算。
 public struct UploadVerificationProgress: Sendable, Hashable {
     public let fileID: UUID
@@ -323,6 +340,8 @@ public struct UploadJob: Codable, Sendable, Hashable, Identifiable {
     public let createdAt: Date
     /// 仅由 coordinator 合并进列表快照，明确不写入检查点。
     public var verificationProgress: UploadVerificationProgress? = nil
+    /// 当前执行轮次的均速／预计剩余时间，明确不写入检查点。
+    public var stageMetrics: UploadStageMetrics? = nil
 
     private enum CodingKeys: String, CodingKey {
         case id, account, accountName, title, destination, conflictPolicy, priority, isPaused, cancellationRequested

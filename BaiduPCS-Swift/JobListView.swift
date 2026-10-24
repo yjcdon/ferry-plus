@@ -29,12 +29,18 @@ struct TransferListView: View {
                 }
             } else { ContentUnavailableView(category.emptyTitle, systemImage: category.systemImage) }
         } else {
-            List(items, selection: $selection) { item in
-                switch item {
-                case .download(let job): JobRow(job: job)
-                case .upload(let job):
-                    UploadRow(job: job, onLocateDuplicate: onLocateUpload,
-                              onResumeDuplicate: { scope.onAction(.resume, [item.id]) })
+            List(selection: $selection) {
+                ForEach(items, id: \.rowLayoutID) { item in
+                    Group {
+                        switch item {
+                        case .download(let job): JobRow(job: job)
+                        case .upload(let job):
+                            UploadRow(job: job, onLocateDuplicate: onLocateUpload,
+                                      onResumeDuplicate: { scope.onAction(.resume, [item.id]) },
+                                      onInspect: { scope.onInspect([item.id]) })
+                        }
+                    }
+                    .tag(item.id)
                 }
             }
             .focused($isListFocused)
@@ -51,6 +57,15 @@ struct TransferListView: View {
     }
 }
 
+/// 原生 List 会缓存行高；只有内容结构变化时重建展示行，选中与命令仍使用稳定任务身份。
+fileprivate struct TransferRowLayoutID: Hashable {
+    let task: TransferTaskID
+    var hasVerification = false
+    var hasMetrics = false
+    var hasDuplicate = false
+    var error: String?
+}
+
 /// 只读投影，不复制任何传输执行状态；相同 UUID 在两个方向也具有不同身份。
 enum TransferListItem: Identifiable {
     case download(Job)
@@ -59,6 +74,14 @@ enum TransferListItem: Identifiable {
         switch self {
         case .download(let job): .init(direction: .download, id: job.id)
         case .upload(let job): .init(direction: .upload, id: job.id)
+        }
+    }
+    fileprivate var rowLayoutID: TransferRowLayoutID {
+        switch self {
+        case .download: .init(task: id)
+        case .upload(let job):
+            .init(task: id, hasVerification: job.verificationProgress != nil,
+                  hasMetrics: job.stageMetrics != nil, hasDuplicate: job.duplicateOfJobID != nil, error: job.error)
         }
     }
     var createdAt: Date {

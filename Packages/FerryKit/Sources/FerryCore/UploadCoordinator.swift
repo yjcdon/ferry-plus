@@ -37,6 +37,16 @@ public actor UploadCoordinator {
     private var workers: [UUID: Worker] = [:]
     /// 每个批次最多一个当前回读文件，只用于快照展示，不保存或恢复增量摘要。
     private var verificationProgress: [UUID: UploadVerificationProgress] = [:]
+    private struct StageSample {
+        let fileID: UUID
+        let relativePath: String
+        let phase: UploadPhase
+        let startedAt: ContinuousClock.Instant
+        let initialBytes: Int64
+        var currentBytes: Int64
+        let totalBytes: Int64
+    }
+    private var stageSamples: [UUID: StageSample] = [:]
     /// 单文件重新定位的完整复核及持久化任务，同样纳入睡眠／退出收尾和资源活动。
     private var relocations: [UUID: Task<Void, Error>] = [:]
     private var observers: [UUID: AsyncStream<[UploadJob]>.Continuation] = [:]
@@ -99,6 +109,7 @@ public actor UploadCoordinator {
         jobs.values.sorted { $0.createdAt < $1.createdAt }.map { job in
             var snapshot = job
             snapshot.verificationProgress = verificationProgress[job.id]
+            snapshot.stageMetrics = stageMetrics(for: job)
             return snapshot
         }
     }
@@ -458,6 +469,7 @@ public actor UploadCoordinator {
             }
         }
         if workers[id]?.token == token { workers[id] = nil }
+        stageSamples[id] = nil
         emit(); schedule()
         publishActivity()
         // 先移除当前 worker，通知回调重入 pause/suspend/shutdown 才不会等待自身。
@@ -711,13 +723,21 @@ public actor UploadCoordinator {
             file.remoteReference = reference; file.phase = .verifying; try await saveFile(file)
         } else {
             file.phase = .uploading; try await saveFile(file)
-            let fileID = file.id
-            let receipts = try await UploadEngine(destination: env.destination, budget: budget,
-                maximumConcurrentParts: maximumConcurrentParts).upload(localURL: localURL, prepared: prepared, receipts: file.parts,
-                onReceipt: { [weak self] receipt in
-                    guard let self else { throw CancellationError() }
-                    try await self.received(receipt, fileID: fileID, jobID: jobID)
-                })
+            let fileID = file.id, relativePath = file.relativePath
+            let receipts: [UploadPartReceipt]
+            do {
+                defer { stageSamples[jobID] = nil; emit() }
+                receipts = try await UploadEngine(destination: env.destination, budget: budget,
+                    maximumConcurrentParts: maximumConcurrentParts).upload(localURL: localURL, prepared: prepared, receipts: file.parts,
+                    onReceipt: { [weak self] receipt in
+                        guard let self else { throw CancellationError() }
+                        try await self.received(receipt, fileID: fileID, jobID: jobID)
+                    }, onProgress: { [weak self] progress in
+                        guard let self else { throw CancellationError() }
+                        try await self.updateStage(jobID: jobID, fileID: fileID, relativePath: relativePath,
+                            phase: .uploading, bytes: progress.confirmedBytes, total: progress.totalBytes)
+                    })
+            }
             file = try await store.loadFile(id: file.id, in: jobs[jobID]!)
             try Task.checkCancellation()
             let commit = UploadCommit(kind: .merge)
@@ -820,8 +840,10 @@ public actor UploadCoordinator {
         let size = file.source.size
         let jobID = file.jobID, fileID = file.id
         verificationProgress[jobID] = .init(fileID: fileID, relativePath: file.relativePath, verifiedBytes: 0, totalBytes: size)
+        stageSamples[jobID] = .init(fileID: fileID, relativePath: file.relativePath, phase: .verifying,
+            startedAt: .now, initialBytes: 0, currentBytes: 0, totalBytes: size)
         emit()
-        defer { verificationProgress[jobID] = nil; emit() }
+        defer { verificationProgress[jobID] = nil; stageSamples[jobID] = nil; emit() }
         let record = try await integrity.verify(account: env.destination.account, reference: reference,
             expectedSHA256: expectation.digest, size: size, remoteVersion: expectation.remoteVersion, uploadFileID: file.id,
             resolve: { try await env.resolve(reference, size) },
@@ -920,7 +942,37 @@ public actor UploadCoordinator {
         }
         verificationProgress[jobID] = .init(fileID: fileID, relativePath: current.relativePath,
                                            verifiedBytes: bytes, totalBytes: total)
+        try updateStage(jobID: jobID, fileID: fileID, relativePath: current.relativePath,
+                        phase: .verifying, bytes: bytes, total: total)
+    }
+
+    /// 入口进度只允许本轮单调推进；首帧保存恢复基线，之后只更新运行时样本并发布快照。
+    private func updateStage(jobID: UUID, fileID: UUID, relativePath: String, phase: UploadPhase,
+                             bytes: Int64, total: Int64) throws {
+        guard bytes >= 0, bytes <= total else { throw UploadRecordError.invalid("传输阶段进度无效") }
+        if var sample = stageSamples[jobID] {
+            guard sample.fileID == fileID, sample.phase == phase, sample.totalBytes == total,
+                  bytes >= sample.currentBytes else { throw UploadRecordError.invalid("传输阶段进度发生倒退") }
+            sample.currentBytes = bytes; stageSamples[jobID] = sample
+        } else {
+            stageSamples[jobID] = .init(fileID: fileID, relativePath: relativePath, phase: phase,
+                startedAt: .now, initialBytes: bytes, currentBytes: bytes, totalBytes: total)
+        }
         emit()
+    }
+
+    /// 均速按当前文件本轮已确认的新增逻辑字节／真实经过时间计算，无轮询、无网络瞬时速度冒充。
+    private func stageMetrics(for job: UploadJob) -> UploadStageMetrics? {
+        guard !job.isPaused, !job.cancellationRequested, !job.phase.isTerminal,
+              let sample = stageSamples[job.id], sample.phase == job.phase,
+              sample.currentBytes > sample.initialBytes, sample.currentBytes < sample.totalBytes else { return nil }
+        let duration = sample.startedAt.duration(to: .now).components
+        let elapsed = Double(duration.seconds) + Double(duration.attoseconds) / 1e18
+        guard elapsed >= 0.1 else { return nil }
+        let speed = Double(sample.currentBytes - sample.initialBytes) / elapsed
+        return .init(fileID: sample.fileID, relativePath: sample.relativePath, phase: sample.phase,
+                     averageBytesPerSecond: speed,
+                     estimatedRemainingSeconds: Double(sample.totalBytes - sample.currentBytes) / speed)
     }
 
     private func persistJob(_ id: UUID) async throws {
