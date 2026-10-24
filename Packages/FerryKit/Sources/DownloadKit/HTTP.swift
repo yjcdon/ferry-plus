@@ -8,6 +8,7 @@ enum FetchError: Error {
     case invalidResponse(String)
     /// 服务器对 Range 请求返回了整个文件。
     case rangeIgnored
+    case streamBufferExceeded
     /// `permanent` 为 true 时，下载源抛出的是 `PermanentDownloadSourceError`，重试也不会成功。
     case resolve(String, permanent: Bool)
     case disk(String)
@@ -22,7 +23,7 @@ enum FetchError: Error {
 
     var isRetryable: Bool {
         switch self {
-        case .disk, .rangeIgnored: false
+        case .disk, .rangeIgnored, .streamBufferExceeded: false
         case .resolve(_, let permanent): !permanent
         default: true
         }
@@ -56,6 +57,7 @@ enum FetchError: Error {
         case .http(let status, let body): .httpStatus(status, message: body)
         case .invalidResponse(let reason): .invalidResponse(reason)
         case .rangeIgnored: .invalidResponse("server ignored the Range header")
+        case .streamBufferExceeded: .invalidResponse("下载接收缓存超过 8 MiB，已停止请求以保持内存有界")
         case .resolve(let reason, _): .resolveFailed(reason)
         case .disk(let reason): .fileSystem(reason)
         }
@@ -98,6 +100,7 @@ final class DataTaskRunner: NSObject, URLSessionDataDelegate, Sendable {
     typealias DataHandler = @Sendable (Data) throws -> Void
 
     private static let errorBodyLimit = 4096
+    private static let streamBufferLimit = 8 * 1024 * 1024
 
     private struct State {
         var continuation: CheckedContinuation<HTTPURLResponse, any Error>?
@@ -107,19 +110,25 @@ final class DataTaskRunner: NSObject, URLSessionDataDelegate, Sendable {
         var stoppedAfterResponse = false
         var completed = false
         var completionError: (any Error)?
+        var buffered: [Data] = []
+        var bufferedBytes = 0
+        var suspended = false
+        var consumer: Task<Void, Never>?
     }
 
     private let headers: [String: String]
     private let host: String?
     private let onResponse: ResponseHandler
     private let onData: DataHandler
+    private let streamByteBudget: TransferBudget?
     private let state = OSAllocatedUnfairLock(initialState: State())
 
-    private init(request: URLRequest, onResponse: @escaping ResponseHandler, onData: @escaping DataHandler) {
+    private init(request: URLRequest, streamByteBudget: TransferBudget?, onResponse: @escaping ResponseHandler, onData: @escaping DataHandler) {
         headers = request.allHTTPHeaderFields ?? [:]
         host = request.url?.host()?.lowercased()
         self.onResponse = onResponse
         self.onData = onData
+        self.streamByteBudget = streamByteBudget
     }
 
     @discardableResult
@@ -127,27 +136,37 @@ final class DataTaskRunner: NSObject, URLSessionDataDelegate, Sendable {
         _ request: URLRequest,
         session: URLSession,
         transferBudget: TransferBudget? = nil,
+        streamByteBudget: TransferBudget? = nil,
         onResponse: @escaping ResponseHandler = { _ in true },
         onData: @escaping DataHandler = { _ in }
     ) async throws -> HTTPURLResponse {
         if let transferBudget {
             return try await transferBudget.withPermit {
-                try await runRequest(request, session: session, onResponse: onResponse, onData: onData)
+                try await runRequest(request, session: session, streamByteBudget: streamByteBudget, onResponse: onResponse, onData: onData)
             }
         }
-        return try await runRequest(request, session: session, onResponse: onResponse, onData: onData)
+        return try await runRequest(request, session: session, streamByteBudget: streamByteBudget, onResponse: onResponse, onData: onData)
     }
 
     /// 每个真实 HTTP 请求持有一份连接许可；取消及错误均在请求终止后归还。
     private static func runRequest(
         _ request: URLRequest,
         session: URLSession,
+        streamByteBudget: TransferBudget?,
         onResponse: @escaping ResponseHandler,
         onData: @escaping DataHandler
     ) async throws -> HTTPURLResponse {
         try Task.checkCancellation()
-        let runner = DataTaskRunner(request: request, onResponse: onResponse, onData: onData)
-        let task = session.dataTask(with: request)
+        let runner = DataTaskRunner(request: request, streamByteBudget: streamByteBudget, onResponse: onResponse, onData: onData)
+        let activeSession: URLSession
+        if streamByteBudget != nil {
+            let configuration = session.configuration
+            // 实测暂停仍会耗尽 resource 总时限；慢流只由连接／无数据超时与用户取消约束。
+            configuration.timeoutIntervalForResource = .greatestFiniteMagnitude
+            activeSession = URLSession(configuration: configuration, delegate: session.delegate, delegateQueue: nil)
+        } else { activeSession = session }
+        defer { if streamByteBudget != nil { activeSession.invalidateAndCancel() } }
+        let task = activeSession.dataTask(with: request)
         task.delegate = runner
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
@@ -157,6 +176,7 @@ final class DataTaskRunner: NSObject, URLSessionDataDelegate, Sendable {
                 task.resume()
             }
         } onCancel: {
+            runner.cancelConsumer()
             task.cancel()
         }
     }
@@ -221,6 +241,10 @@ final class DataTaskRunner: NSObject, URLSessionDataDelegate, Sendable {
         case .stop:
             dataTask.cancel()
         case .deliver:
+            if streamByteBudget != nil {
+                enqueue(data, task: dataTask)
+                return
+            }
             do {
                 try onData(data)
             } catch {
@@ -234,14 +258,76 @@ final class DataTaskRunner: NSObject, URLSessionDataDelegate, Sendable {
         state.withLock {
             $0.completed = true
             $0.completionError = error
+            // 网络失败撤销预算等待时，不让 consumer 的 CancellationError 掩盖原始传输原因。
+            if let error, $0.consumer != nil, $0.error == nil { $0.error = FetchError(error) }
         }
+        if error != nil { cancelConsumer() }
         resumeIfCompleted()
     }
+
+    /// 暂停真实任务施加网络背压；暂停途中仍可能有已收回调，所有块共享固定上限。
+    private func enqueue(_ data: Data, task: URLSessionDataTask) {
+        let shouldCancel = state.withLock { value -> Bool in
+            guard !value.completed, value.error == nil else { return false }
+            guard data.count <= Self.streamBufferLimit - value.bufferedBytes else {
+                value.error = FetchError.streamBufferExceeded
+                return true
+            }
+            value.buffered.append(data); value.bufferedBytes += data.count
+            if !value.suspended { task.suspend(); value.suspended = true }
+            if value.consumer == nil {
+                value.consumer = Task { [weak self] in await self?.consume(task: task) }
+            }
+            return false
+        }
+        if shouldCancel { cancelConsumer(); task.cancel() }
+    }
+
+    /// 每个请求只有一个消费任务；一次最多 32 KiB 领取额度并同步落盘，EOF 必须等待全部块排空。
+    private func consume(task: URLSessionDataTask) async {
+        guard let streamByteBudget else { return }
+        do {
+            while true {
+                try Task.checkCancellation()
+                let next = state.withLock { value -> (Data?, Bool) in
+                    if !value.buffered.isEmpty { return (value.buffered.removeFirst(), false) }
+                    value.consumer = nil
+                    let resume = value.suspended && !value.completed && value.error == nil
+                    value.suspended = false
+                    return (nil, resume)
+                }
+                guard let data = next.0 else {
+                    if next.1 { task.resume() }
+                    resumeIfCompleted()
+                    return
+                }
+                var offset = 0
+                while offset < data.count {
+                    try Task.checkCancellation()
+                    let length = min(32 * 1024, data.count - offset)
+                    try await streamByteBudget.consume(length, direction: .download)
+                    try Task.checkCancellation()
+                    try autoreleasepool { try onData(data.subdata(in: offset..<(offset + length))) }
+                    offset += length
+                }
+                state.withLock { $0.bufferedBytes -= data.count }
+            }
+        } catch {
+            state.withLock {
+                if $0.error == nil { $0.error = error }
+                $0.buffered.removeAll(); $0.bufferedBytes = 0; $0.consumer = nil
+            }
+            task.cancel()
+            resumeIfCompleted()
+        }
+    }
+
+    private func cancelConsumer() { state.withLock { $0.consumer?.cancel() } }
 
     /// 完成与 continuation 注册无论谁先发生，结果都只交付一次。
     private func resumeIfCompleted() {
         let completed = state.withLock { state -> State? in
-            guard state.completed else { return nil }
+            guard state.completed, state.consumer == nil else { return nil }
             defer { state.continuation = nil }
             return state
         }

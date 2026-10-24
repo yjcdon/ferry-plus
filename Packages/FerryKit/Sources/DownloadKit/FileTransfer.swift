@@ -234,7 +234,7 @@ struct FileTransfer: Sendable {
     }
 
     /// 已知长度的 Range 请求按 256 KiB 消费共享预算，不增加响应缓冲或 delegate 队列。
-    /// 不支持 Range 或长度未知时保持原流式能力，只共享连接许可，不声称支持速率限制。
+    /// 不支持 Range 或长度未知时由有界流式消费按实际字节等待预算。
     private func fetch(_ index: Int, link: ResolvedURL) async throws {
         if let transferBudget, record.value.acceptsRanges != false, let end = record.segment(index).end {
             while record.segment(index).offset < end {
@@ -245,12 +245,13 @@ struct FileTransfer: Sendable {
                 try await fetchRequest(index, link: link, requestedEnd: start + length)
             }
         } else {
-            try await fetchRequest(index, link: link)
+            try await fetchRequest(index, link: link, streamByteBudget: transferBudget)
         }
     }
 
     /// 同步流式写入一个已获得字节预算的范围；只在实际请求期间取得连接许可。
-    private func fetchRequest(_ index: Int, link: ResolvedURL, requestedEnd: Int64? = nil) async throws {
+    private func fetchRequest(_ index: Int, link: ResolvedURL, requestedEnd: Int64? = nil,
+                              streamByteBudget: TransferBudget? = nil) async throws {
         let usesRange = record.value.acceptsRanges != false
         if !usesRange {
             record.update { $0.segments![index].received = 0 }
@@ -262,7 +263,8 @@ struct FileTransfer: Sendable {
         defer { try? handle.close() }
 
         let range = usesRange ? "bytes=\(segment.offset)-\(segment.end.map { String($0 - 1) } ?? "")" : nil
-        try await DataTaskRunner.run(makeRequest(link, range: range), session: session, transferBudget: transferBudget) { response in
+        try await DataTaskRunner.run(makeRequest(link, range: range), session: session, transferBudget: transferBudget,
+                                     streamByteBudget: streamByteBudget) { response in
             try Self.validate(response, for: segment, usesRange: usesRange, totalBytes: totalBytes)
             let tag = response.value(forHTTPHeaderField: "ETag")
             let modified = response.value(forHTTPHeaderField: "Last-Modified")

@@ -121,7 +121,7 @@ DownloadEngine 增加可选共享预算参数，默认保持原有请求行为�
 
 现有 DownloadEngineTests 新增 6 项预算接入用例，连同此前用例共 52 项通过：`env FERRY_MACOS_SDK=macosx bash Scripts/test-packages.sh --configuration release --filter DownloadEngineTests`。覆盖小范围偏移、未注入时兼容、取消在途／等待连接、取消额度等待、限速及非 Range 流式兼容。日志 `.build/v3-budget-download-tests.log`。
 
-明确边界：非 Range 或未知长度来源目前只共享连接许可，尚不执行字节限速；上传／回读／下载在正式 App 中共用同一实例及设置仍需继续接入，V3-T12 不据此标为完整完成。
+本阶段仅完成已知 Range 的字节预算；非 Range／未知长度及 App 共享接线已在后续章节补齐。V3-T12 仍需实际混合负载验收，不仅凭这一阶段标为完整完成。
 
 ## 持久上传编排与账号环境
 
@@ -228,3 +228,15 @@ Computer Use 在进程 28205 通过正式窗口上传专用目录 `FerryPlus-V3-
 真实 FileTransfer.run→finalize 对 2 GiB+1 文件同时核对 MD5／SHA-256，峰值 RSS 14532608 字节，证据 `.build/finalize-memory-validation/result.txt`、`resources.txt`。重新构建 App 成功，日志 `.build/v3-memory-fix-app-build.log`；进程 29684 恢复原夸克暂停状态，并为百度重新准备同一大文件，资源采样未再出现整文件量级内存增长，证据 `.build/ui-large-validation/app-29684-resources.jsonl`。大文件完整上传和回读仍在继续，不能提前标为验收完成。
 
 传输设置实测发现限速输入内层 TextField 把占位标题 `0` 也作为行标签展示，导致两个零。隐藏内层标签，保留外层上传／下载限速标题及输入框，避免重复显示。并发设置通过实际 Stepper 从 1 调到 2，并行验证结束后恢复默认 1。
+
+## 非 Range 与未知长度的流式限速
+
+流式下载增加单消费任务和 8 MiB 总接收缓存上限，按 32 KiB 消费共享下载额度后同步落盘。暂停网络施加背压，EOF 等缓存排空，取消同时结束网络、消费和预算等待；已知 Range 保留原 256 KiB 预付额度，不重复计费。未注入预算继续原路径。
+
+真实本地 HTTP 证明，仅调用 URLSessionTask.suspend 仍会被资源总时限杀死。因此仅受限流式请求复制现有会话配置、移除资源固定总时限，保留代理和无数据超时，并在结束后释放会话。17 项本地 HTTP／兼容断言通过：4 MiB @1 MiB/s 约 4 秒；原资源时限 0.25 秒不误杀，明确 0.2 秒无数据时限仍抛 timeout；真实单回调最大 1359872 字节，队列峰值 3620864 字节。证据 `.build/nonrange-validation/result.txt`、`range-result.txt`、`resources.txt`。Release 全套 307 项通过：`.build/v3-relocation-nonrange-package-tests-pass.log`。
+
+## 单文件源重新定位
+
+上传明细为已有原始 SHA-256 的待上传失败文件提供重新选择本地文件入口。先停稳原 worker，再计算新文件完整 SHA-256、大小及已有协议摘要；全部一致后更新 URL、授权书签和文件身份，原会话、远端身份、密钥引用及已确认分片回执保持不变。运行时挂起和退出也等待重新定位操作收尾，不遗留后台哈希。
+
+8 项隔离检查通过，覆盖原源移走后同内容恢复、同大小异内容拒绝、原会话只补缺片、暂停意图和挂起收尾；证据 `.build/upload-relocation-validation/result.txt`。正式 Core 编译和全套 307 项包测试通过；界面先经 stub 类型检查，实际 App 操作待后续构建。目录整批映射尚未实现，支持逐文件处理；没有原始摘要的项目必须重新添加，云端校验阶段缺本地源可直接重试。

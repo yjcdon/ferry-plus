@@ -145,20 +145,28 @@ private let megabyte = 1 << 20
         await engine.shutdown()
     }
 
-    /// 非 Range 来源继续支持原始下载，仅共享连接，不把未实现的字节限速误用于整文件。
-    @Test func sharedBudgetNonRangeKeepsStreamingCompatibility() async throws {
+    /// 非 Range 流按共享速率等待，EOF 后排空缓冲再完成并归还连接与限速等待。
+    @Test func sharedBudgetNonRangeLimitsBytesAndDrainsEOF() async throws {
         let fixture = Fixture()
         let data = fixture.addFile("no-range.bin", size: 128 * kilobyte)
         fixture.server.setSupportsRanges(false)
-        let budget = try TransferBudget(maximumConnections: 1, downloadBytesPerSecond: 1)
+        let budget = try TransferBudget(maximumConnections: 1, downloadBytesPerSecond: 128 * 1024)
         let engine = DownloadEngine(stateDirectory: fixture.stateDirectory, source: fixture.source,
             configuration: .test(connections: 1), session: fixture.session, transferBudget: budget)
+        let clock = ContinuousClock()
+        let start = clock.now
         try await engine.enqueue(fixture.request("no-range.bin", knownSize: false))
         _ = try await engine.waitForCompletion(of: "no-range.bin")
+        #expect(start.duration(to: clock.now) >= .milliseconds(700))
         #expect(fixture.contents("no-range.bin") == data)
+        #expect(await engine.snapshot(id: "no-range.bin")?.totalBytes == Int64(data.count))
         #expect(fixture.server.log.count == 2)
         #expect(fixture.server.log.last?.headers["Range"] == nil)
-        #expect(await budget.snapshot().activeConnections == 0)
+        let state = await budget.snapshot()
+        #expect(state.activeConnections == 0)
+        #expect(state.waitingConnections == 0)
+        #expect(state.waitingDownloadBuffers == 0)
+        #expect(state.activeRateTimers == 0)
         await engine.shutdown()
     }
 
