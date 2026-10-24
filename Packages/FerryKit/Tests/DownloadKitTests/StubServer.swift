@@ -34,6 +34,7 @@ final class StubServer: Sendable {
 
     private struct State {
         var files: [String: Data] = [:]
+        var responseHeaders: [String: [String: String]] = [:]
         var supportsRanges = true
         var expiredTokens: Set<String> = []
         var stallRule: (@Sendable (LoggedRequest) -> Int?)?
@@ -54,6 +55,7 @@ final class StubServer: Sendable {
 
     func addAlias(_ host: String) { StubProtocol.register(self, host: host) }
     func setFile(_ path: String, _ data: Data) { state.withLock { $0.files[path] = data } }
+    func setResponseHeaders(_ headers: [String: String], for path: String) { state.withLock { $0.responseHeaders[path] = headers } }
     func setSupportsRanges(_ value: Bool) { state.withLock { $0.supportsRanges = value } }
     func expire(token: String) { state.withLock { _ = $0.expiredTokens.insert(token) } }
     /// 每个请求发送这么多字节后停住，直到设为 nil 或请求被取消。
@@ -81,7 +83,7 @@ final class StubServer: Sendable {
         let path = url.path
         // startLoading 的后台工作可能在 stopLoading 之后才获得执行机会。
         // 取消检查和日志准入必须是同一个短临界区，避免 clearLog 后混入旧请求。
-        guard let (index, rule, file, supportsRanges, isExpired) = connection.ifLoading({
+        guard let (index, rule, file, supportsRanges, isExpired, fileHeaders) = connection.ifLoading({
             state.withLock { state in
                 state.log.append(logged)
                 state.activeByPath[path, default: 0] += 1
@@ -92,7 +94,8 @@ final class StubServer: Sendable {
                     state.faultRule,
                     state.files[path],
                     state.supportsRanges,
-                    logged.token.map { state.expiredTokens.contains($0) } ?? false
+                    logged.token.map { state.expiredTokens.contains($0) } ?? false,
+                    state.responseHeaders[path] ?? [:]
                 )
             }
         }) else { return }
@@ -133,7 +136,7 @@ final class StubServer: Sendable {
         let total = Int64(file.count)
         var status = 200
         var body = file
-        var responseHeaders: [String: String] = [:]
+        var responseHeaders = fileHeaders
         if let range = logged.range, supportsRanges {
             let last = min(range.last ?? total - 1, total - 1)
             guard range.first <= last else { return respond(416) }

@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import os
 import Testing
@@ -341,6 +342,92 @@ private let megabyte = 1 << 20
         let log = fixture.server.log
         #expect(log.count { $0.token == "new" } == 4)
         #expect(log.allSatisfy { $0.headers["Cookie"] == "BDUSS=test" })
+    }
+
+    /// 旧地址已产生部分字节后失效，刷新地址只请求尚缺范围，不从零重下。
+    @Test func expiredLinkAfterPartialBytesRefreshesAtSavedOffset() async throws {
+        let fixture = Fixture(tokens: ["old", "new"])
+        let data = fixture.addFile("a.bin", size: megabyte)
+        fixture.server.setFaultRule { [weak server = fixture.server] request, index in
+            if index == 0, request.token == "old" {
+                // 首响应已被服务端接受，之后的新请求才会被判定过期。
+                server?.expire(token: "old")
+                return .disconnect(afterBytes: 64 * kilobyte)
+            }
+            return nil
+        }
+        defer { fixture.server.setFaultRule(nil) }
+        let engine = fixture.makeEngine(.test(files: 1, connections: 1))
+        try await engine.enqueue(fixture.request("a.bin"))
+        _ = try await engine.waitForCompletion(of: "a.bin")
+        #expect(fixture.contents("a.bin") == data)
+        #expect(fixture.source.resolveCount == 2)
+        let log = fixture.server.log
+        #expect(log.first?.token == "old")
+        #expect(log.first?.range?.first == 0)
+        #expect(log.contains { $0.token == "old" && $0.range?.first == Int64(64 * kilobyte) })
+        #expect(log.first { $0.token == "new" }?.range?.first == Int64(64 * kilobyte))
+        #expect(log.dropFirst().allSatisfy { ($0.range?.first ?? 0) >= Int64(64 * kilobyte) })
+        await engine.shutdown()
+    }
+
+    /// 即使长度相同，续传的实体标识变化也不能把新内容接在旧 partial 后面。
+    @Test(arguments: [true, false])
+    func changedContentIdentityPreservesPartialAndRejectsFinalFile(usingETag: Bool) async throws {
+        let fixture = Fixture()
+        let original = fixture.addFile("a.bin", size: megabyte)
+        let header = usingETag ? "ETag" : "Last-Modified"
+        let oldValue = usingETag ? "\"version-1\"" : "Mon, 01 Jan 2024 00:00:00 GMT"
+        let newValue = usingETag ? "\"version-2\"" : "Tue, 02 Jan 2024 00:00:00 GMT"
+        fixture.server.setResponseHeaders([header: oldValue], for: "/a.bin")
+        fixture.server.setStall(after: 64 * kilobyte)
+        defer { fixture.server.setStall(after: nil) }
+        let engine = fixture.makeEngine(.test(files: 1, connections: 1, retries: 0))
+        let request = fixture.request("a.bin")
+        try await engine.enqueue(request)
+        try await waitUntil("original partial bytes") {
+            await engine.snapshot(id: request.id)?.receivedBytes == Int64(64 * kilobyte)
+        }
+        await engine.pause(id: request.id)
+        let before = try Data(contentsOf: request.temporaryURL)
+        #expect(before == original.prefix(64 * kilobyte))
+        fixture.server.setFile("/a.bin", Data(repeating: original[0] ^ 0xff, count: original.count))
+        fixture.server.setResponseHeaders([header: newValue], for: "/a.bin")
+        fixture.server.clearLog()
+        fixture.server.setStall(after: nil)
+        await engine.resume(id: request.id)
+        try await waitUntil("changed identity to fail") {
+            if case .failed = await engine.snapshot(id: request.id)?.state { return true }
+            return false
+        }
+        #expect(await engine.snapshot(id: request.id)?.state == .failed(.invalidResponse("远端文件内容已变化，请重新添加任务")))
+        #expect(fixture.server.log.count == 1)
+        #expect(fixture.server.log.first?.headers["If-Range"] == oldValue)
+        #expect(fixture.server.log.first?.range?.first == Int64(before.count))
+        #expect(try Data(contentsOf: request.temporaryURL) == before)
+        #expect(!FileManager.default.fileExists(atPath: request.destination.path))
+        #expect(try fixture.savedRecords().first?.completedURL == nil)
+        await engine.shutdown()
+    }
+
+    /// MD5 与预期不一致时保留数据供诊断，不产生可被当作成功的最终文件。
+    @Test func mismatchedMD5DoesNotPublishCompletedFile() async throws {
+        let fixture = Fixture()
+        let data = fixture.addFile("a.bin", size: megabyte)
+        let actual = Insecure.MD5.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        var request = fixture.request("a.bin")
+        request.expectedMD5 = (actual.first == "0" ? "1" : "0") + String(actual.dropFirst())
+        let engine = fixture.makeEngine()
+        try await engine.enqueue(request)
+        try await waitUntil("MD5 verification to fail") {
+            if case .failed = await engine.snapshot(id: request.id)?.state { return true }
+            return false
+        }
+        #expect(await engine.snapshot(id: request.id)?.state == .failed(.invalidResponse("文件 MD5 与远端校验值不一致，请重新添加任务")))
+        #expect(!FileManager.default.fileExists(atPath: request.destination.path))
+        #expect(try Data(contentsOf: request.temporaryURL) == data)
+        #expect(try fixture.savedRecords().first?.completedURL == nil)
+        await engine.shutdown()
     }
 
     @Test(arguments: [
