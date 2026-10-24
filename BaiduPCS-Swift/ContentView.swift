@@ -98,25 +98,41 @@ struct Banners: View {
     }
 }
 
-/// 一条提示条。没有背景：放在 `edgeBar` 中，由它把提示条和内容分开。
+/// 固定高度的提示条；点击摘要可滚动查看全文，长错误不改变主窗口的最小尺寸。
 struct Banner<Actions: View>: View {
     let message: String
     var systemImage = "exclamationmark.triangle.fill"
     var iconColor: Color = .yellow
     @ViewBuilder let actions: Actions
+    @State private var isShowingDetails = false
 
     var body: some View {
         HStack {
             Image(systemName: systemImage)
                 .foregroundStyle(iconColor)
                 .accessibilityHidden(true)
-            Text(message)
-                .fixedSize(horizontal: false, vertical: true)
-            Spacer()
+            Button { isShowingDetails = true } label: {
+                Text(message)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .help("点击查看完整提示")
+            .popover(isPresented: $isShowingDetails) {
+                ScrollView {
+                    Text(message)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding()
+                }
+                .frame(width: 420, height: 240)
+            }
             actions
+                .fixedSize()
         }
         .padding(.horizontal)
-        .padding(.vertical, 8)
+        .frame(height: 64)
         .accessibilityElement(children: .combine)
     }
 }
