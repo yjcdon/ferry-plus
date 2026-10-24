@@ -4,7 +4,11 @@
 ![macOS](https://img.shields.io/badge/macOS-14%2B-black)
 [![license](https://img.shields.io/github/license/yjcdon/ferry-plus?color=blue)](LICENSE)
 
-Ferry Plus 基于 [Ferry](https://github.com/yiquncode/BaiduPCS-Swift)，使用 Swift 和 SwiftUI 构建 macOS 原生下载工具，面向百度网盘和夸克网盘。下载速度受网盘服务和账号权限限制。
+Ferry Plus 是一款简洁的 macOS 原生百度网盘、夸克网盘下载器，基于 [Ferry](https://github.com/yiquncode/BaiduPCS-Swift)，使用 Swift 和 SwiftUI 开发，专为 Apple Silicon Mac 构建。
+
+[下载 Ferry Plus 2.0](https://github.com/yjcdon/ferry-plus/releases/tag/v2.0) · [更新记录](CHANGELOG.md)
+
+支持分享链接和账号内文件下载，两家账号可同时登录，共用下载队列。下载速度受网盘服务和账号权限限制。
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset=".github/screenshot-dark.png">
@@ -13,13 +17,14 @@ Ferry Plus 基于 [Ferry](https://github.com/yiquncode/BaiduPCS-Swift)，使用 
 
 ## 当前功能
 
-- **双网盘下载**：支持百度、夸克分享链接和账号内文件下载，保留所选目录结构。
-- **双网盘登录**：通过百度、夸克的官方网页完成登录，分别保存账号状态。
+- **双网盘下载**：支持百度、夸克分享链接和账号内文件下载，保留所选目录结构；文件窗口通过 Tab 切换网盘，默认打开百度。
+- **双网盘登录**：通过百度、夸克的官方网页完成登录，分别保存账号状态；账号菜单同步显示账号名，并可单独退出。
 - **统一任务列表**：按网盘、状态和文件名筛选；批量操作遵守当前可见范围。
 - **断点恢复**：支持暂停、继续、退出恢复和地址刷新；分享转存保存各批回执，完成后按设置清理本任务目录。
-- **无服务器**：Cookie 凭据存在 macOS Keychain 中，不经过第三方。
+- **独立设置**：两家分别设置转存目录、完成清理和单文件连接数，共用全局同时下载文件数。
+- **本机保存凭据**：登录凭据存入 macOS Keychain，应用直接访问网盘服务。
 
-两家真实下载、夸克跨层转存及清理、暂停与退出恢复、网络恢复、错误提取码及大目录浏览已通过验证；两家独立设置转存、清理和连接数。当前继续完成生命周期与整体交付验收，主动睡眠恢复尚未实测。详细范围和进度见 [功能清单](docs/features.md)、[架构设计](docs/architecture.md) 和 [任务清单](docs/tasks.md)。上图沿用 Ferry 的界面截图。
+2.0 已发布。两家真实下载、夸克跨层转存及清理、暂停与退出恢复、网络恢复、错误提取码及大目录浏览已通过验证；真实 CDN 地址自然过期和物理睡眠恢复仍待实测。详细范围和进度见 [功能清单](docs/features.md)、[架构设计](docs/architecture.md) 和 [任务清单](docs/tasks.md)。上图沿用 Ferry 的界面截图。
 
 ## 系统要求
 
@@ -28,7 +33,9 @@ Ferry Plus 基于 [Ferry](https://github.com/yiquncode/BaiduPCS-Swift)，使用 
 
 ## 安装
 
-从 [Releases](https://github.com/yjcdon/ferry-plus/releases) 下载已发布的 `Ferry-Plus-<版本>-arm64.zip`，解压后把 `Ferry Plus.app` 拖到“应用程序”文件夹。每个版本同时提供 SHA-256 校验文件。
+从 [2.0 Release](https://github.com/yjcdon/ferry-plus/releases/tag/v2.0) 下载 `Ferry-Plus-2.0-arm64.zip`，解压后把 `Ferry Plus.app` 拖到“应用程序”文件夹即可，无需 DMG。发布页同时提供 SHA-256 校验文件。
+
+可与原版 Ferry 共存；两者的登录凭据、设置及任务数据独立。
 
 Ferry Plus 没有经过 Apple 公证。第一次打开时，如果 macOS 阻止运行，打开“系统设置 → 隐私与安全性”，在“安全性”中点击“仍要打开”。首次访问保存的凭据或切换签名身份时，系统可能要求允许访问钥匙串。
 
