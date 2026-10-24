@@ -32,6 +32,7 @@ final class AppModel {
     var uploadProblem: String?
     @ObservationIgnored private let transferBudget: TransferBudget
     @ObservationIgnored private var uploadUpdates: Task<Void, Never>?
+    @ObservationIgnored private var uploadActivityUpdates: Task<Void, Never>?
     @ObservationIgnored private var uploadReadSession: URLSession?
 
     /// 主窗口的 sheet。同一时间只显示一个。
@@ -80,6 +81,11 @@ final class AppModel {
     @ObservationIgnored private var activeProxy: ActiveProxy?
     /// 最近一次换引擎会话的 Task。下一次先等它完成，因为各个 Task 到达引擎的顺序不一定和创建顺序相同。
     @ObservationIgnored private var sessionReplacement: Task<Void, Never>?
+    @ObservationIgnored private var shutdownTask: Task<Void, Never>?
+    @ObservationIgnored private var transferLifecycle: TransferLifecycle?
+    @ObservationIgnored private var isSystemSleeping = false
+    @ObservationIgnored private var downloadIsExecuting = false
+    @ObservationIgnored private var uploadIsExecuting = false
     @ObservationIgnored private var hasStarted = false
     @ObservationIgnored private var isShuttingDown = false
     @ObservationIgnored private var notificationAuthorizationTask: Task<Bool, Never>?
@@ -146,7 +152,10 @@ final class AppModel {
         #if DEBUG
         if Self.isDriveVerification { coordinator.onJobCompleted = nil }
         #endif
-        coordinator.onRunningChanged = { [weak self] active in self?.downloadActivity.setActive(active) }
+        coordinator.onRunningChanged = { [weak self] active in
+            self?.downloadIsExecuting = active
+            self?.updateTransferActivity()
+        }
         resolveDownloadDirectory()
         #if DEBUG
         if DemoData.isEnabled {
@@ -243,6 +252,11 @@ final class AppModel {
         }
         #endif
         quark.onSessionChange = { [weak self] client, summary in self?.installQuark(client, summary: summary) }
+        quark.performSessionChange = { [weak self] operation in
+            guard let self else { throw CancellationError() }
+            try await self.performProviderChange(.quark, operation: operation)
+        }
+        transferLifecycle = TransferLifecycle { [weak self] sleeping in self?.systemSleepChanged(sleeping) }
         quark.publishRestoredSession()
         await coordinator.start()
         await startUploads()
@@ -253,17 +267,94 @@ final class AppModel {
     }
 
     func shutdown() async {
+        if let shutdownTask { await shutdownTask.value; return }
         isShuttingDown = true
         // 系统授权提示不一定响应取消；不等待它，回调返回后会再次检查取消状态。
         notificationAuthorizationTask?.cancel()
         uploadUpdates?.cancel()
-        await uploadCoordinator?.shutdown()
-        uploadReadSession?.invalidateAndCancel()
-        await coordinator.shutdown()
-        await transferBudget.shutdown()
-        downloadActivity.close()
-        await sessionReplacement?.value
-        releaseAccessedDirectory()
+        uploadActivityUpdates?.cancel()
+        transferLifecycle?.close()
+        transferLifecycle = nil
+        let previous = sessionReplacement
+        let task = Task {
+            await previous?.value
+            await uploadCoordinator?.shutdown()
+            uploadReadSession?.invalidateAndCancel()
+            uploadReadSession = nil
+            await coordinator.shutdown()
+            await transferBudget.shutdown()
+            downloadActivity.close()
+            releaseAccessedDirectory()
+        }
+        shutdownTask = task
+        sessionReplacement = task
+        await task.value
+    }
+
+    /// 所有运行时网络切换按同一顺序收尾；任务不等待此 lane 来提供客户端或完成通知。
+    private func enqueueSessionReplacement(_ operation: @escaping @MainActor () async -> Void) {
+        let previous = sessionReplacement
+        sessionReplacement = Task {
+            await previous?.value
+            guard !isShuttingDown else { return }
+            await operation()
+        }
+    }
+
+    /// 仅阻断发生变更的网盘；全局睡眠／代理阻断仍由其各自的生命周期操作控制。
+    private func enqueueProviderChange(_ provider: Provider,
+                                      operation: @escaping @MainActor () async throws -> Void) -> Task<Void, Error> {
+        let previous = sessionReplacement
+        let change = Task {
+            await previous?.value
+            guard !isShuttingDown else { throw CancellationError() }
+            try Task.checkCancellation()
+            await uploadCoordinator?.suspendExecution(for: provider)
+            do {
+                try Task.checkCancellation()
+                guard !isShuttingDown else { throw CancellationError() }
+                try await operation()
+                if !isShuttingDown, accountKey(for: provider) != nil {
+                    await uploadCoordinator?.resumeExecution(for: provider)
+                }
+            } catch {
+                if !isShuttingDown, accountKey(for: provider) != nil {
+                    await uploadCoordinator?.resumeExecution(for: provider)
+                }
+                throw error
+            }
+        }
+        // 错误交还发起者；串行 lane 只等待收尾，不吞掉界面的错误结果。
+        sessionReplacement = Task { _ = try? await change.value }
+        return change
+    }
+
+    private func performProviderChange(_ provider: Provider,
+                                       operation: @escaping @MainActor () async throws -> Void) async throws {
+        let change = enqueueProviderChange(provider, operation: operation)
+        try await withTaskCancellationHandler {
+            try await change.value
+        } onCancel: { change.cancel() }
+    }
+
+    /// 睡眠只改变运行时阻断，唤醒按原用户暂停意图继续，两个方向共用同一收尾 lane。
+    private func systemSleepChanged(_ sleeping: Bool) {
+        guard !isShuttingDown else { return }
+        isSystemSleeping = sleeping
+        enqueueSessionReplacement { [self] in
+            if sleeping {
+                await uploadCoordinator?.suspendExecution()
+                await engine.suspendExecution()
+            } else {
+                await engine.resumeExecution()
+                await uploadCoordinator?.resumeExecution()
+            }
+        }
+    }
+
+    /// 下载与上传／回读中的实际 worker 共用一个防休眠活动，没有定时轮询。
+    private func updateTransferActivity() {
+        downloadActivity.setActive(!isShuttingDown && (downloadIsExecuting || uploadIsExecuting))
     }
 
     // MARK: - 账号
@@ -275,27 +366,34 @@ final class AppModel {
     /// 校验凭据，通过后存入 Keychain 并开始使用。调用方取消时不保存。
     func logIn(credential: Credential) async throws {
         let proxy = activeProxy
-        var client = makeClient(credential: credential)
+        let client = makeClient(credential: credential)
         let account = try await client.validate()
         // 用户在校验期间取消了登录。
         try Task.checkCancellation()
-        try CredentialStore.save(StoredLogin(credential: credential, account: account))
-        // 校验期间代理变了。
-        if proxy != activeProxy {
-            client = makeClient(credential: credential)
+        try await performProviderChange(.baidu) { [self] in
+            try CredentialStore.save(StoredLogin(credential: credential, account: account))
+            // 校验和 lane 等待期间都可能改代理，只安装当前网络配置的客户端。
+            let currentClient = proxy == activeProxy ? client : makeClient(credential: credential)
+            apply(currentClient, credential: credential, account: account)
         }
-        apply(client, credential: credential, account: account)
     }
 
     func logOut() {
-        CredentialStore.delete()
-        client?.revoke()
-        client = nil
-        credential = nil
-        account = nil
-        isLoginExpired = false
-        source.setBaidu(nil, account: nil)
-        coordinator.netdisks[.baidu] = nil
+        let change = enqueueProviderChange(.baidu) { [self] in
+            CredentialStore.delete()
+            client?.revoke()
+            client = nil
+            credential = nil
+            account = nil
+            isLoginExpired = false
+            source.setBaidu(nil, account: nil)
+            coordinator.netdisks[.baidu] = nil
+        }
+        Task {
+            do { try await change.value }
+            catch is CancellationError {} // 应用退出已接管全部收尾。
+            catch { uploadProblem = error.localizedDescription }
+        }
     }
 
     private func apply(_ client: BaiduClient, credential: Credential, account: Account) {
@@ -337,6 +435,10 @@ final class AppModel {
     // MARK: - 设置
 
     private func settingsDidChange() {
+        if UserDefaults.standard.object(forKey: "settings.before-v3") == nil,
+           let original = UserDefaults.standard.data(forKey: Self.settingsKey) {
+            UserDefaults.standard.set(original, forKey: "settings.before-v3")
+        }
         if let data = try? JSONEncoder().encode(settings) {
             UserDefaults.standard.set(data, forKey: Self.settingsKey)
         }
@@ -395,15 +497,37 @@ final class AppModel {
         let proxy = ActiveProxy(settings.proxy, password: proxyPassword)
         guard proxy != activeProxy else { return }
         activeProxy = proxy
-        quark.updateConfiguration(Self.applying(proxy, to: QuarkClient.defaultConfiguration()))
         let configuration = Self.applying(proxy, to: DownloadEngine.defaultSessionConfiguration())
-        let previous = sessionReplacement
-        sessionReplacement = Task {
-            await previous?.value
+        enqueueSessionReplacement { [self] in
+            await uploadCoordinator?.suspendExecution()
+            await engine.suspendExecution()
+            guard !isShuttingDown else { return }
+            // 快速切换只应用最后一次设置；后继 lane 负责解除本次已持有的全局阻断。
+            guard proxy == activeProxy else { return }
+            quark.updateConfiguration(Self.applying(proxy, to: QuarkClient.defaultConfiguration()))
+            if let credential {
+                replaceClient(BaiduClient(credential: credential,
+                    configuration: Self.applying(proxy, to: BaiduClient.defaultConfiguration())))
+            }
             await engine.replaceSession(configuration: configuration)
-        }
-        if let credential {
-            replaceClient(makeClient(credential: credential))
+            let readSession = URLSession(configuration: configuration)
+            do {
+                let integrity = try IntegrityService(reader: RangeReader(session: readSession, budget: transferBudget))
+                try await uploadCoordinator?.replaceIntegrityService(integrity)
+                uploadReadSession?.invalidateAndCancel()
+                uploadReadSession = readSession
+                // updateConfiguration 暂时撤销再安装会话；按最终账号状态更新各家阻断。
+                for provider in Provider.allCases where accountKey(for: provider) != nil {
+                    await uploadCoordinator?.resumeExecution(for: provider)
+                }
+                if !isSystemSleeping, !isShuttingDown {
+                    await engine.resumeExecution()
+                    await uploadCoordinator?.resumeExecution()
+                }
+            } catch {
+                readSession.invalidateAndCancel()
+                uploadProblem = "更新上传校验网络失败：" + error.localizedDescription
+            }
         }
     }
 
@@ -514,6 +638,8 @@ final class AppModel {
 
     /// 初始化一次上传编排，复用现有账号及三类传输共享预算；恢复失败保留原检查点并显示原因。
     private func startUploads() async {
+        await sessionReplacement?.value
+        guard !isShuttingDown else { return }
         guard uploadCoordinator == nil else { return }
         do {
             let session = URLSession(configuration: Self.applying(activeProxy, to: DownloadEngine.defaultSessionConfiguration()))
@@ -522,6 +648,7 @@ final class AppModel {
             let uploads = try UploadCoordinator(store: UploadStore(), integrityStore: IntegrityStore(),
                 budget: transferBudget, integrity: integrity, secrets: KeychainUploadSecretStorage(),
                 maximumConcurrentJobs: settings.maxConcurrentUploads,
+                onBatchFinished: { [weak self] job in await self?.notifyUploadCompletion(of: job) },
                 environment: { [weak self] key in
                     guard let self else { throw CancellationError() }
                     return try await self.uploadEnvironment(for: key)
@@ -533,6 +660,17 @@ final class AppModel {
                     self?.uploadJobs = jobs
                 }
             }
+            uploadActivityUpdates = Task { [weak self] in
+                for await active in await uploads.activityUpdates() {
+                    guard !Task.isCancelled else { break }
+                    self?.uploadIsExecuting = active
+                    self?.updateTransferActivity()
+                }
+            }
+            for provider in Provider.allCases where accountKey(for: provider) == nil {
+                await uploads.suspendExecution(for: provider)
+            }
+            if isSystemSleeping { await uploads.suspendExecution() }
             try await uploads.restore()
         } catch {
             uploadProblem = error.localizedDescription
@@ -547,6 +685,7 @@ final class AppModel {
         }
         let selections = try files.map { try UploadSelection(url: $0, bookmark: UploadSource.bookmark(for: $0)) }
         let name = coordinator.accountNames[account.provider] ?? account.provider.title
+        requestNotificationAuthorization()
         let id = try await uploadCoordinator.add(account: account, accountName: name, destination: destination,
                                                 selections: selections, conflictPolicy: conflictPolicy)
         uploadJobs = await uploadCoordinator.snapshots()
@@ -664,15 +803,24 @@ final class AppModel {
             markBaiduExpired()
         }
         if let error = error as? QuarkError, error == .loginExpired, let installedQuarkClient {
-            quark.noteExpired(client: installedQuarkClient)
+            Task { await quark.noteExpired(client: installedQuarkClient) }
         }
     }
 
     private func markBaiduExpired() {
-        isLoginExpired = true
-        client?.revoke()
-        source.setBaidu(nil, account: nil)
-        coordinator.netdisks[.baidu] = nil
+        let expected = client
+        let change = enqueueProviderChange(.baidu) { [self] in
+            guard client === expected else { return }
+            isLoginExpired = true
+            client?.revoke()
+            source.setBaidu(nil, account: nil)
+            coordinator.netdisks[.baidu] = nil
+        }
+        Task {
+            do { try await change.value }
+            catch is CancellationError {}
+            catch { uploadProblem = error.localizedDescription }
+        }
     }
 
     /// 没有未完成的任务时直接退出登录，返回 false；否则返回 true，由界面先确认。
@@ -699,6 +847,15 @@ final class AppModel {
     func addNetdiskJob(entries: [RemoteEntry], account: AccountKey, downloadFolder: DownloadFolder? = nil) {
         guard accountKey(for: account.provider) == account else { return }
         lastAddedJobID = coordinator.addNetdiskJob(entries: entries, account: account, downloadFolder: downloadFolder).id
+        requestNotificationAuthorization()
+    }
+
+    /// 用户确认原始摘要后按准确账号和远端对象创建下载，校验错误在加入队列前报告。
+    func addNetdiskJob(entries: [RemoteEntry], account: AccountKey, downloadFolder: DownloadFolder? = nil,
+                       integrityBindings: [DownloadIntegrityBinding]) throws {
+        guard accountKey(for: account.provider) == account else { throw UploadDestinationError.otherAccount }
+        lastAddedJobID = try coordinator.addNetdiskJob(entries: entries, account: account,
+            downloadFolder: downloadFolder, integrityBindings: integrityBindings).id
         requestNotificationAuthorization()
     }
 
@@ -797,6 +954,35 @@ final class AppModel {
                   !Task.isCancelled, authorization?.isCancelled != true else { return }
             try? await center.add(request)
         }
+    }
+
+    /// Core 仅在终态已保存且 worker 移除后调用；这里不等待生命周期 lane 或系统通知授权。
+    private func notifyUploadCompletion(of job: UploadJob) {
+        guard !isShuttingDown else { return }
+        let content = UNMutableNotificationContent()
+        switch job.phase {
+        case .completed: content.title = "上传完成"
+        case .skipped: content.title = "上传结束，文件已跳过"
+        default: content.title = job.completedCount > 0 ? "上传结束，部分文件未成功" : "上传失败"
+        }
+        content.body = job.account.provider.title + " · " + job.title +
+            " · 完成 \(job.completedCount)，失败 \(job.failedCount)，跳过 \(job.skippedCount)"
+        let request = UNNotificationRequest(identifier: "upload-" + job.id.uuidString, content: content, trigger: nil)
+        let authorization = notificationAuthorizationTask
+        let center = UNUserNotificationCenter.current()
+        Task {
+            if let authorization { _ = await authorization.value }
+            guard !Task.isCancelled, authorization?.isCancelled != true else { return }
+            let status = await center.notificationSettings().authorizationStatus
+            guard status == .authorized || status == .provisional else { return }
+            try? await center.add(request)
+        }
+    }
+
+    isolated deinit {
+        uploadUpdates?.cancel()
+        uploadActivityUpdates?.cancel()
+        transferLifecycle?.close()
     }
 }
 

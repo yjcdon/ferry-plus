@@ -126,8 +126,10 @@ struct QuarkAccountControls: View {
                 Button("重试") { Task { await model.quark.revalidate() } }
             }
             Button("退出登录") {
-                do { try model.quark.logOut(); errorMessage = nil }
-                catch { errorMessage = error.localizedDescription }
+                Task {
+                    do { try await model.quark.logOut(); errorMessage = nil }
+                    catch { errorMessage = error.localizedDescription }
+                }
             }
         }
     }

@@ -31,6 +31,9 @@ final class QuarkAccountSession {
     @ObservationIgnored private var loginAttempt: UUID?
     @ObservationIgnored private var hasStarted = false
     @ObservationIgnored var onSessionChange: ((QuarkClient?, AccountSummary?) -> Void)?
+    typealias SessionChange = @MainActor () async throws -> Void
+    /// AppModel 在同一生命周期 lane 中停稳该网盘上传后才执行会话变更。
+    @ObservationIgnored var performSessionChange: ((@escaping SessionChange) async throws -> Void)?
 
     var summary: AccountSummary? {
         account.map { AccountSummary(key: AccountKey(provider: .quark, accountID: $0.id),
@@ -73,21 +76,23 @@ final class QuarkAccountSession {
     func completeLogin(client: QuarkClient, attempt: UUID) async throws {
         let login = try await client.validate()
         try Task.checkCancellation()
-        guard loginAttempt == attempt else { throw CancellationError() }
-        try QuarkCredentialStore.save(StoredQuarkLogin(credential: login.credential, account: login.account))
-        revision = UUID()
-        self.client?.revoke()
-        self.client = client
-        account = login.account
-        verifiedAt = login.verifiedAt
-        state = .loggedIn
-        problem = nil
-        loginAttempt = nil
-        let installedRevision = revision
-        let installedSummary = summary
-        await observeCookies(client: client, revision: installedRevision)
-        guard revision == installedRevision else { return }
-        onSessionChange?(client, installedSummary)
+        try await changeSession { [self] in
+            guard loginAttempt == attempt else { throw CancellationError() }
+            try QuarkCredentialStore.save(StoredQuarkLogin(credential: login.credential, account: login.account))
+            revision = UUID()
+            self.client?.revoke()
+            self.client = client
+            account = login.account
+            verifiedAt = login.verifiedAt
+            state = .loggedIn
+            problem = nil
+            loginAttempt = nil
+            let installedRevision = revision
+            let installedSummary = summary
+            await observeCookies(client: client, revision: installedRevision)
+            guard revision == installedRevision else { return }
+            onSessionChange?(client, installedSummary)
+        }
     }
 
     /// 界面按钮、启动恢复和命令行验证执行同一只读鉴权流程。
@@ -111,9 +116,16 @@ final class QuarkAccountSession {
             guard self.revision == revision else { return }
             problem = error.localizedDescription
             if let error = error as? QuarkError, error == .loginExpired || error == .accountChanged {
-                state = .expired
-                client.revoke()
-                onSessionChange?(nil, nil)
+                do {
+                    try await changeSession { [self] in
+                        guard self.revision == revision, self.client === client else { return }
+                        state = .expired
+                        client.revoke()
+                        onSessionChange?(nil, nil)
+                    }
+                } catch {
+                    if self.revision == revision { state = .problem(error.localizedDescription) }
+                }
             } else {
                 state = .problem(error.localizedDescription)
             }
@@ -121,20 +133,27 @@ final class QuarkAccountSession {
     }
 
     /// 本地退出只清理夸克条目，不触碰百度会话或其他应用的登录。
-    func logOut() throws {
-        try QuarkCredentialStore.delete()
-        revision = UUID()
-        loginAttempt = nil
-        client?.revoke()
-        client = nil
-        account = nil
-        verifiedAt = nil
-        problem = nil
-        onSessionChange?(nil, nil)
-        state = .loggedOut
+    func logOut() async throws {
+        try await changeSession { [self] in
+            try QuarkCredentialStore.delete()
+            revision = UUID()
+            loginAttempt = nil
+            client?.revoke()
+            client = nil
+            account = nil
+            verifiedAt = nil
+            problem = nil
+            onSessionChange?(nil, nil)
+            state = .loggedOut
+        }
     }
 
-    /// 代理变更时使用最新凭据替换客户端，旧响应不再写回新会话。
+    private func changeSession(_ operation: @escaping SessionChange) async throws {
+        if let performSessionChange { try await performSessionChange(operation) }
+        else { try await operation() } // 启动／隔离诊断尚无上传编排器。
+    }
+
+    /// AppModel 已在全局阻断上传及回读后调用；旧响应不再写回新会话。
     func updateConfiguration(_ configuration: URLSessionConfiguration) {
         self.configuration = configuration
         revision = UUID()
@@ -166,13 +185,19 @@ final class QuarkAccountSession {
     }
 
     /// 只接受当前客户端的失效信号，旧窗口的迟到错误不能撤销新登录。
-    func noteExpired(client expected: QuarkClient) {
-        guard client === expected else { return }
-        revision = UUID()
-        expected.revoke()
-        state = .expired
-        problem = "夸克登录已失效，请重新登录。"
-        onSessionChange?(nil, nil)
+    func noteExpired(client expected: QuarkClient) async {
+        do {
+            try await changeSession { [self] in
+                guard client === expected else { return }
+                revision = UUID()
+                expected.revoke()
+                state = .expired
+                problem = "夸克登录已失效，请重新登录。"
+                onSessionChange?(nil, nil)
+            }
+        } catch {
+            if client === expected { problem = error.localizedDescription }
+        }
     }
 
     private func observeCookies(client: QuarkClient, revision: UUID) async {

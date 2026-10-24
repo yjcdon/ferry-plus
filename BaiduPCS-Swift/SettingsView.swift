@@ -415,9 +415,11 @@ private struct AccountSettingsView: View {
 
     /// 退出夸克后保留百度会话；凭据删除失败时在对应账号区域说明原因。
     private func logOutQuark() {
-        do {
-            try model.quark.logOut()
-            quarkLogoutError = nil
-        } catch { quarkLogoutError = error.localizedDescription }
+        Task {
+            do {
+                try await model.quark.logOut()
+                quarkLogoutError = nil
+            } catch { quarkLogoutError = error.localizedDescription }
+        }
     }
 }
