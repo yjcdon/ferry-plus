@@ -14,6 +14,7 @@ extension AppModel {
             var sampleBytes: Int64?
             var downloadedBytes: Int64?
             var sha256: String?
+            var linkExpiry: RangeVerificationGate.ExpiryMetadata?
             var problem: String?
         }
         var results: [Result] = []
@@ -42,6 +43,7 @@ extension AppModel {
                 }
                 if let candidate {
                     result.sampleBytes = candidate.size
+                    result.linkExpiry = try await verificationLinkExpiry(candidate, account: disk.account)
                     let directory = URL(filePath: FileManager.default.currentDirectoryPath)
                         .appendingPathComponent(".build/verification/\(UUID().uuidString)/\(provider.rawValue)", isDirectory: true)
                     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

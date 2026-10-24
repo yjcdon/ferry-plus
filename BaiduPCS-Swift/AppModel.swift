@@ -150,6 +150,16 @@ final class AppModel {
             ProcessInfo.processInfo.arguments.contains("--verify-drive-resume")
     }
 
+    /// 复用正式账号路由解析一次候选链接，只返回脱敏到期元数据，不建立任务或请求下载正文。
+    func verificationLinkExpiry(_ entry: RemoteEntry, account: AccountKey) async throws -> RangeVerificationGate.ExpiryMetadata {
+        let context = DownloadContext(account: account, reference: entry.reference, size: entry.size, md5: entry.md5)
+        let request = DownloadRequest(id: UUID().uuidString,
+            destination: FileManager.default.temporaryDirectory.appendingPathComponent("Ferry-expiry-inspection"),
+            expectedSize: entry.size, context: try context.encoded())
+        let link = try await source.resolve(request)
+        return RangeVerificationGate.expiryMetadata(link.url)
+    }
+
     /// 用同一来源路由和代理创建隔离的正式下载栈；验证护栏只改变传输边界，不替换账号或下载内容。
     func makeResumeVerificationStack(directory: URL, disk: any Netdisk, lowerOffset: Int64,
                                      totalSize: Int64) -> (JobCoordinator, RangeVerificationGate) {

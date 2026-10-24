@@ -9,6 +9,15 @@ nonisolated final class RangeVerificationGate: @unchecked Sendable {
         let offset: Int64
         let endOffset: Int64
         let status: Int
+        let expiry: ExpiryMetadata
+    }
+    /// 仅报告主机和候选到期时长，不保留完整地址、参数值或请求头；候选不等于鉴权期限已被服务端证明。
+    struct ExpiryMetadata: Encodable, Sendable {
+        let host: String?
+        let state: String
+        let candidateExpirySeconds: Int64?
+        let parameterNames: [String]
+        let parameterFormats: [String: String]
     }
     enum Event: Sendable { case boundary; case failed(String) }
     enum Admission { case allow, wait, reject }
@@ -59,8 +68,72 @@ nonisolated final class RangeVerificationGate: @unchecked Sendable {
             fail("unexpected_response_range")
             return false
         }
-        state.withLock { $0.evidence.append(Evidence(offset: lowerOffset, endOffset: upperOffset, status: response.statusCode)) }
+        let expiry = Self.expiryMetadata(response.url)
+        state.withLock {
+            $0.evidence.append(Evidence(offset: lowerOffset, endOffset: upperOffset,
+                                       status: response.statusCode, expiry: expiry))
+        }
         return true
+    }
+
+    /// 只识别明确命名的 Unix 秒时间戳、显式单位时长及 OSS/AWS 日期加时长；忽略缓存头与不明签名内容。
+    static func expiryMetadata(_ url: URL?) -> ExpiryMetadata {
+        let items = url.flatMap { URLComponents(url: $0, resolvingAgainstBaseURL: false)?.queryItems } ?? []
+        let recognized = Set(["expires", "expire", "expiry", "expiration", "deadline", "e",
+                              "x-oss-expires", "x-oss-date", "x-amz-expires", "x-amz-date"])
+        let fields = Dictionary(grouping: items, by: { $0.name.lowercased() })
+        let names = Set(items.map(\.name)).sorted()
+        var candidates: [TimeInterval] = []
+        var formats: [String: String] = [:]
+        for name in fields.keys.sorted() where recognized.contains(name) && !name.hasSuffix("-date") {
+            guard let entries = fields[name], entries.count == 1, let value = entries[0].value else {
+                formats[name] = "ambiguous"
+                continue
+            }
+            guard let seconds = Int64(value) else {
+                formats[name] = "unrecognized"
+                // 显式带单位的 duration 只有配套唯一签发 epoch 时才构成候选到期时间。
+                let multipliers: [Character: Int64] = ["s": 1, "m": 60, "h": 3600, "d": 86400]
+                let text = value.lowercased()
+                if let unit = text.last, let multiplier = multipliers[unit],
+                   let amount = Int64(text.dropLast()), amount > 0, amount <= 604_800 / multiplier {
+                    formats[name] = "duration_with_unit"
+                    if let times = fields["time"], times.count == 1,
+                       let raw = times[0].value, let issued = Int64(raw),
+                       (946_684_800...4_102_444_800).contains(issued) {
+                        formats["time"] = "epoch_seconds"
+                        candidates.append(TimeInterval(issued + amount * multiplier))
+                    }
+                }
+                continue
+            }
+            formats[name] = "integer_without_epoch"
+            // 常规 epoch 秒范围；小数字不能直接当绝对日期，毫秒或其他签名格式不猜测。
+            if (946_684_800...4_102_444_800).contains(seconds) {
+                formats[name] = "epoch_seconds"
+                candidates.append(TimeInterval(seconds))
+            } else if name == "x-oss-expires" || name == "x-amz-expires" {
+                let dateName = name.replacingOccurrences(of: "-expires", with: "-date")
+                guard seconds > 0, seconds <= 7 * 24 * 60 * 60,
+                      let dates = fields[dateName], dates.count == 1, let value = dates[0].value else { continue }
+                let formatter = DateFormatter()
+                formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.calendar = Calendar(identifier: .iso8601)
+                formatter.timeZone = TimeZone(secondsFromGMT: 0)
+                formatter.dateFormat = "yyyyMMdd'T'HHmmss'Z'"
+                formatter.isLenient = false
+                if let issued = formatter.date(from: value) {
+                    formats[name] = "duration_seconds"
+                    formats[dateName] = "utc_basic_date"
+                    candidates.append(issued.timeIntervalSince1970 + TimeInterval(seconds))
+                }
+            }
+        }
+        let distinct = Set(candidates)
+        let expiry = distinct.count == 1 ? distinct.first : nil
+        return ExpiryMetadata(host: url?.host(), state: expiry == nil ? "not_declared" : "candidate",
+            candidateExpirySeconds: expiry.map { Int64(($0 - Date().timeIntervalSince1970).rounded(.down)) },
+            parameterNames: names, parameterFormats: formats)
     }
 
     /// 响应体累计不得超出一个窗口；超长块不会交给引擎写盘。
