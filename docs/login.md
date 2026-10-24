@@ -8,7 +8,7 @@
 - 夸克登录信息保存在本应用钥匙串的 quark-login 条目，Cookie 按域名、路径与有效期使用；响应更新 Cookie 后写回同一条目。
 - 启动恢复、校验失败重试和自动验证入口共用 QuarkAccountSession 与 QuarkClient。账号昵称不代替稳定 ID，网络失败不显示为校验成功。账号设置与百度采用一致布局；正常登录不显示额外验证或重新登录按钮，失效时提供重新登录。
 
-当前没有接入夸克分享、转存和正式下载任务。完整功能范围仍按 [功能清单](features.md) 执行。
+已接入两家分享、账号文件浏览、转存和正式下载任务。百度分享转存、续传及清理、两家账号文件下载已有真实证据；夸克分享完整下载及清理仍受服务端容量限制，尚未完成整体验收。完整范围与证据分别见 [功能清单](features.md) 和 [实施记录](implementation.md)。
 
 ## 构建与运行
 
@@ -17,6 +17,14 @@
 ```sh
 bash Scripts/build-app.sh
 ```
+
+默认使用 Debug，保留开发验证入口。交付时将包与应用一起按 Release 构建，启用优化及全模块编译，不定义 DEBUG：
+
+```sh
+FERRY_BUILD_CONFIGURATION=release bash Scripts/build-app.sh
+```
+
+`FERRY_BUILD_CONFIGURATION` 仅接受 `debug` 和 `release`；两种配置复用相同签名身份与产物路径。
 
 产物是仓库下的 `.build/Ferry Plus.app`，仅含 arm64，可直接运行或拖到“应用程序”。不生成 DMG；需要传输时可将 App 压缩为 ZIP。
 

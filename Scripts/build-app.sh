@@ -6,6 +6,15 @@ repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 package_dir="$repo_dir/Packages/FerryKit"
 build_dir="$repo_dir/.build"
 app_dir="$build_dir/Ferry Plus.app"
+build_configuration="${FERRY_BUILD_CONFIGURATION:-debug}"
+case "$build_configuration" in
+    debug) swift_flags=(-Onone -D DEBUG) ;;
+    release) swift_flags=(-O -whole-module-optimization) ;;
+    *)
+        printf '%s\n' 'FERRY_BUILD_CONFIGURATION 只支持 debug 或 release。' >&2
+        exit 1
+        ;;
+esac
 # 固定证书生成稳定的程序身份，钥匙串授权才能跨重建复用。
 signing_identity="${FERRY_CODESIGN_IDENTITY:-auto}"
 if [ "$signing_identity" = auto ]; then
@@ -26,8 +35,8 @@ fi
 # 本项目本机使用 Command Line Tools + 26.5 SDK；完整 Xcode 环境可显式指定其他 SDK。
 sdk_dir="$(xcrun --sdk "${FERRY_MACOS_SDK:-macosx26.5}" --show-sdk-path)"
 
-swift build --package-path "$package_dir" --build-system native --sdk "$sdk_dir" --configuration debug --jobs 4
-package_bin="$(swift build --package-path "$package_dir" --build-system native --sdk "$sdk_dir" --configuration debug --show-bin-path)"
+swift build --package-path "$package_dir" --build-system native --sdk "$sdk_dir" --configuration "$build_configuration" --jobs 4
+package_bin="$(swift build --package-path "$package_dir" --build-system native --sdk "$sdk_dir" --configuration "$build_configuration" --show-bin-path)"
 mkdir -p "$app_dir/Contents/MacOS" "$app_dir/Contents/Resources"
 
 objects=()
@@ -37,7 +46,7 @@ for module in BaiduKit QuarkKit DownloadKit FerryCore; do
     done
 done
 
-swiftc -swift-version 6 -parse-as-library -D DEBUG \
+swiftc -swift-version 6 -parse-as-library "${swift_flags[@]}" \
     -default-isolation MainActor \
     -enable-upcoming-feature NonisolatedNonsendingByDefault \
     -enable-upcoming-feature InferIsolatedConformances \
