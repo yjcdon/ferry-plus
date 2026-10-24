@@ -88,3 +88,11 @@ DownloadKit 新增 `TransferBudget`：可取消的 FIFO 连接许可、异常自
 DownloadKit 增加 `RangeReader`，默认每段 256 KiB、硬上限 1 MiB。先检查响应头中的状态、准确范围、完整大小及原始内容编码，再接收有界响应体；服务器忽略 Range 时立即拒绝，不接收整个大文件。零字节使用普通 GET 并确认响应体为空。共享连接和下载速率预算通过注入复用，代理和超时沿用调用方 URLSession。
 
 临时 URLProtocol 验证共 17 项通过，覆盖准确读取、忽略范围、错误范围／总长、压缩、短包／超长包、401／403／416、零字节、取消和连接释放。证据：`.build/range-reader-validation/result.txt`。该读取器已通过 26.5 SDK 的完整 Release App 构建与签名验证：`.build/v3-strategy-build.log`。目前是 V3-T08 的读取基础，完整摘要服务与正式任务接入继续实施。
+
+## 双网盘统一上传策略与授权桥接
+
+`UploadDestination` 统一准备、恢复准备、发送分片和合并接口。`PreparedUpload` 保存非敏感协议会话、准确远端身份及源内容指纹；夸克敏感授权通过 `UploadSecretStorage` 保存到现有应用 Keychain 的独立前缀。准备回执持久化回调为必填，夸克在哈希协商前后分别保存状态。服务端片长变化时，必须重新计算分块并确认完整内容摘要相同。
+
+恢复边界一次解析并验证原生会话和分片索引，逐片仅检查当前分片，避免分片数量增长造成重复遍历。发送前核对同一份内存字节的 SHA-256，协议合并回执只表示远端身份已确认，完整回读通过后才能完成上传任务。
+
+临时离线程序通过 JSON 恢复、摘要错误、片号错误、跨账号拒绝、夸克片长协商与指纹重绑定检查；普通 JSON 不含 authInfo／callback。证据：`.build/destination-validation/main.swift` 和 `check`。包含应用 Keychain 桥接的完整 Release App 构建、固定证书签名及严格验签通过，日志 `.build/v3-strategy-build.log`。尚未接入上传界面和任务编排。

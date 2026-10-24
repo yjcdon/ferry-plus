@@ -68,7 +68,7 @@ enum ProxyPasswordStore {
 }
 
 /// Keychain 中的一项通用密码。service 是应用的 bundle id。
-private struct KeychainItem {
+struct KeychainItem {
     let account: String
     /// 保存失败时提示中的名称。
     let name: String
