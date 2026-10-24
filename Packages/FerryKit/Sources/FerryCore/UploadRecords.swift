@@ -163,7 +163,7 @@ public struct IntegrityRecord: Codable, Sendable, Hashable, Identifiable {
 }
 
 /// 单个文件或目录独立存盘，列表不必常驻完整目录树和分片回执。
-public struct UploadFile: Codable, Sendable, Hashable, Identifiable {
+public struct UploadFile: Codable, Sendable, Equatable, Identifiable {
     public let id: UUID
     public let jobID: UUID
     public var relativePath: String
@@ -176,6 +176,8 @@ public struct UploadFile: Codable, Sendable, Hashable, Identifiable {
     public var md5: String?
     public var sha1: String?
     public var session: UploadSession?
+    /// 含原始内容指纹与原生会话；敏感授权仅保存 Keychain 引用。
+    public var preparation: PreparedUpload?
     public var parts: [UploadPartReceipt]
     public var commits: [UploadCommit]
     public var remoteReference: RemoteReference?
@@ -196,6 +198,14 @@ public struct UploadFile: Codable, Sendable, Hashable, Identifiable {
         if let session {
             guard !session.id.isEmpty, session.partSize > 0, account == nil || session.account == account else {
                 throw UploadRecordError.invalid("上传会话或账号不一致")
+            }
+        }
+        if let preparation {
+            guard preparation.fileID == id, account == nil || preparation.account == account,
+                  preparation.source.identity.size == source.size,
+                  expectation?.algorithm == .sha256,
+                  expectation?.digest == preparation.source.sha256 else {
+                throw UploadRecordError.invalid("上传准备记录与文件、账号或原始内容基准不一致")
             }
         }
         guard Set(parts.map(\.index)).count == parts.count else { throw UploadRecordError.invalid("分片回执重复") }
@@ -225,6 +235,19 @@ public struct UploadFile: Codable, Sendable, Hashable, Identifiable {
     }
 }
 
+/// 在开始扫描前保存完整选择，进程中断后不能仅凭已扫描部分认定清单完成。
+public struct UploadSelection: Codable, Sendable, Hashable {
+    public let url: URL
+    public let bookmark: Data
+
+    public init(url: URL, bookmark: Data) throws {
+        guard url.isFileURL, !bookmark.isEmpty else {
+            throw UploadRecordError.invalid("上传选择必须包含本地路径和有效授权书签")
+        }
+        self.url = url; self.bookmark = bookmark
+    }
+}
+
 /// 批次仅保存聚合和清单 ID；UploadCoordinator 是唯一运行状态写入方。
 public struct UploadJob: Codable, Sendable, Hashable, Identifiable {
     public let id: UUID
@@ -237,6 +260,10 @@ public struct UploadJob: Codable, Sendable, Hashable, Identifiable {
     public var isPaused: Bool
     public var cancellationRequested: Bool
     public var fileIDs: [UUID]
+    /// nil 表示旧检查点未保存扫描根；恢复时应报告，不能猜测完整清单。
+    public var selections: [UploadSelection]?
+    /// 只有全部根项目扫描完并持久化后才写入；此前不能开始远端上传。
+    public var scanCompletedAt: Date?
     public var totalBytes: Int64
     public var completedBytes: Int64
     public var completedCount: Int
@@ -257,6 +284,12 @@ public struct UploadJob: Codable, Sendable, Hashable, Identifiable {
     }
 
     public func validate() throws {
+        if let selections {
+            guard !selections.isEmpty,
+                  selections.allSatisfy({ $0.url.isFileURL && !$0.bookmark.isEmpty }) else {
+                throw UploadRecordError.invalid("上传批次原始选择或授权缺失")
+            }
+        }
         guard !account.accountID.isEmpty, !title.isEmpty, destination.provider == account.provider,
               !destination.identifier.isEmpty, Set(fileIDs).count == fileIDs.count,
               totalBytes >= 0, completedBytes >= 0, completedBytes <= totalBytes,

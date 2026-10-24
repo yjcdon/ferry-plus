@@ -48,7 +48,7 @@ public enum UploadDestinationError: Error, LocalizedError, Sendable {
 }
 
 /// 可恢复的准备回执。nativeSession 只含原生非敏感会话，secretReference 指向 Keychain。
-public struct PreparedUpload: Codable, Sendable {
+public struct PreparedUpload: Codable, Sendable, Equatable {
     public let version: Int
     public let account: AccountKey
     public let fileID: UUID
