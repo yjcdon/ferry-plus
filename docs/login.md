@@ -50,6 +50,14 @@ open ".build/Ferry Plus.app" --args --quark-login
 
 后续接口验证使用同一客户端与会话服务，按 [任务清单](tasks.md) 的 T-21 推进。首次登录及需要重新认证时由用户完成官方验证；登录有效时复用会话。短信是否能自动读取及填写尚未验证，不作为现有能力；手机号与验证码不保存到代码或文档。
 
+Debug 另有只读容量诊断，用于核对空间不足原因，不启动主下载队列、不导出凭据或文件信息：
+
+```sh
+".build/Ferry Plus.app/Contents/MacOS/Ferry Plus" --verify-quark-capacity
+```
+
+成功报告只含 provider（网盘）、authenticated（鉴权结果）、totalBytes（总容量字节）和 usedBytes（已用字节）。缺字段或异常数值会失败，不解释为零容量；会员权益变化后已用空间可以超过总容量。此入口仅在 Debug 中编译，执行前应正常退出正在运行的 App。
+
 ## 2026-10-24 真实下载与签名记录
 
 用户解锁并授权后，重建 App 恢复百度和夸克账号。独立进程运行 `--verify-drive-interfaces`，通过正式适配器、任务准备和下载引擎完成两家小文件下载，退出码为 0：

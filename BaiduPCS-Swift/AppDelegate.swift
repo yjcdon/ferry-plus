@@ -6,6 +6,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--verify-quark-capacity") {
+            NSApp.setActivationPolicy(.prohibited)
+            NSApp.windows.forEach { $0.orderOut(nil) }
+            Task {
+                do {
+                    let report = try await model.quark.capacityVerificationReport()
+                    FileHandle.standardOutput.write(report + Data([10]))
+                    exit(0)
+                } catch {
+                    let report = ["provider": "quark", "problem": error.localizedDescription]
+                    do {
+                        let data = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
+                        FileHandle.standardOutput.write(data + Data([10]))
+                    } catch {
+                        FileHandle.standardError.write(Data("无法生成夸克容量验证报告。\n".utf8))
+                    }
+                    exit(1)
+                }
+            }
+            return
+        }
         if ProcessInfo.processInfo.arguments.contains("--verify-drive-interfaces") {
             NSApp.setActivationPolicy(.prohibited)
             NSApp.windows.forEach { $0.orderOut(nil) }

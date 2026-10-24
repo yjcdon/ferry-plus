@@ -92,8 +92,8 @@ public enum QuarkError: LocalizedError, Sendable, Equatable {
     /// 将服务端业务失败转为可操作的说明；原始消息仍保存在错误关联值中供诊断。
     private static func serviceDescription(code: String, message: String?) -> String {
         if code == "32003" {
-            // 已实测该码表示容量限制，但响应未说明是账号剩余空间还是单次转存额度。
-            return "夸克服务端拒绝了本次操作：容量限制（业务码 32003）。请在夸克官方页面检查可用空间和转存限制，必要时减少所选文件后重试。"
+            // 已通过只读容量接口确认：账号已用容量超过当前总容量时返回此码。
+            return "夸克网盘空间不足（业务码 32003）。请在夸克官方页面检查可用空间和空间权益，处理后再重试。"
         }
         guard let message else { return "夸克请求未成功（业务码 \(code)），请稍后重试。" }
         // 有些接口返回未替换参数的模板；保留原因文字，不把模板当成完整的服务端说明。

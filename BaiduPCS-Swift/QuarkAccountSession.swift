@@ -206,4 +206,28 @@ final class QuarkAccountSession {
         let verifiedAt: Date?
         let problem: String?
     }
+
+    #if DEBUG
+    /// 复用本应用登录校验，只读取账号容量；报告不含凭据、账号标识或文件信息。
+    func capacityVerificationReport() async throws -> Data {
+        await start()
+        let client = try authenticatedClient()
+        let revision = revision
+        let capacity = try await client.capacity()
+        try Task.checkCancellation()
+        guard self.revision == revision, self.client === client else { throw CancellationError() }
+        let report = CapacityReport(provider: "quark", authenticated: true,
+                                    totalBytes: capacity.total, usedBytes: capacity.used)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        return try encoder.encode(report)
+    }
+
+    private struct CapacityReport: Encodable {
+        let provider: String
+        let authenticated: Bool
+        let totalBytes: Int64
+        let usedBytes: Int64
+    }
+    #endif
 }

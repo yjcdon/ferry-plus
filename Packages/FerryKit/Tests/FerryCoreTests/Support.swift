@@ -390,18 +390,31 @@ struct QuarkAPIStub: Sendable {
         var lastDetailQuery: String?
         var shareDirectoryOverrides: [String: [(fid: String, name: String, isDirectory: Bool)]] = [:]
         var requestedShareParents: [String] = []
+        var capacityPayload = #"{"total_capacity":100,"use_capacity":40}"#
+        var capacityRequests: [(method: String, host: String, query: [String: String])] = []
     }
     let id = UUID().uuidString
     let state = OSAllocatedUnfairLock(initialState: State())
 
     func makeDisk() -> QuarkNetdisk {
+        QuarkNetdisk(client: makeClient(), account: AccountKey(provider: .quark, accountID: "test"))
+    }
+
+    func makeClient() -> QuarkClient {
         let state = state
         FileProtocol.registerAPI(id) { request in
             let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
             let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
             let path = components.path
             let data: Any
-            if path.hasSuffix("/share/sharepage/token") { data = state.withLock { ["stoken": $0.shareToken, "title": "Test share"] } }
+            if path.hasSuffix("/member") {
+                let payload = state.withLock { state -> String in
+                    state.capacityRequests.append((request.httpMethod ?? "", components.host ?? "", query))
+                    return state.capacityPayload
+                }
+                data = try JSONSerialization.jsonObject(with: Data(payload.utf8))
+            }
+            else if path.hasSuffix("/share/sharepage/token") { data = state.withLock { ["stoken": $0.shareToken, "title": "Test share"] } }
             else if path.hasSuffix("/share/sharepage/detail") {
                 let encodedQuery = components.percentEncodedQuery
                 state.withLock {
@@ -471,7 +484,7 @@ struct QuarkAPIStub: Sendable {
         let configuration = QuarkClient.defaultConfiguration()
         configuration.protocolClasses = [FileProtocol.self]
         configuration.httpAdditionalHeaders = ["X-Ferry-Test-API": id]
-        return QuarkNetdisk(client: QuarkClient(configuration: configuration), account: AccountKey(provider: .quark, accountID: "test"))
+        return QuarkClient(configuration: configuration)
     }
 }
 

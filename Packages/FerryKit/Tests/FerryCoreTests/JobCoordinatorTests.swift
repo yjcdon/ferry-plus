@@ -7,14 +7,52 @@ import os
 @testable import FerryCore
 
 @MainActor @Suite struct JobCoordinatorTests {
+    @Test func quarkCapacityReadsByteCountsWithoutWritesAndAllowsUsedAboveTotal() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        let client = stub.makeClient()
+        let capacity = try await client.capacity()
+        #expect(capacity.total == 100)
+        #expect(capacity.used == 40)
+        let requests = stub.state.withLock { $0.capacityRequests }
+        #expect(requests.count == 1)
+        let request = try #require(requests.first)
+        #expect(request.method == "GET")
+        #expect(request.host == "drive-pc.quark.cn")
+        #expect(request.query == ["pr": "ucpro", "fr": "pc", "uc_param_str": ""])
+        stub.state.withLock { $0.capacityPayload = #"{"total_capacity":0,"use_capacity":9223372036854775807}"# }
+        let exceeded = try await client.capacity()
+        #expect(exceeded.total == 0)
+        #expect(exceeded.used == Int64.max)
+        #expect(stub.state.withLock { $0.saves.isEmpty && $0.queried.isEmpty })
+    }
+
+    @Test(arguments: [
+        #"{}"#, #"{"total_capacity":100}"#, #"{"total_capacity":null,"use_capacity":0}"#,
+        #"{"total_capacity":-1,"use_capacity":0}"#, #"{"total_capacity":1,"use_capacity":-1}"#,
+        #"{"total_capacity":"100","use_capacity":0}"#, #"{"total_capacity":100,"use_capacity":1.5}"#,
+        #"{"total_capacity":true,"use_capacity":0}"#,
+        #"{"total_capacity":9223372036854775808,"use_capacity":0}"#,
+    ])
+    func quarkCapacityRejectsMissingNegativeAndNonIntegerValues(_ payload: String) async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        stub.state.withLock { $0.capacityPayload = payload }
+        let client = stub.makeClient()
+        do {
+            _ = try await client.capacity()
+            Issue.record("Invalid capacity response must fail without defaulting to zero.")
+        } catch QuarkError.invalidResponse {}
+    }
+
     @Test func quarkCapacityFailureExplainsServerLimitWithoutAssumingAccountIsFull() throws {
         let original = "capacity limit[{0}]"
         let failure = QuarkError.serviceFailure(code: "32003", message: original)
         let description = try #require(failure.errorDescription)
-        #expect(description.contains("容量限制"))
+        #expect(description.contains("空间不足"))
         #expect(description.contains("32003"))
         #expect(description.contains("官方页面检查"))
-        #expect(description.contains("减少所选文件"))
+        #expect(description.contains("空间权益"))
         #expect(!description.contains("空间已满"))
         #expect(!description.contains("{0}"))
         #expect(QuarkError.serviceCode("32003").errorDescription == description)

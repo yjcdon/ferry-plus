@@ -1,6 +1,26 @@
 import Foundation
 import os
 
+/// 服务端账号容量，单位为字节；会员失效时已用空间可以超过当前总容量。
+public struct QuarkCapacity: Decodable, Sendable, Equatable {
+    public let total: Int64
+    public let used: Int64
+
+    private enum CodingKeys: String, CodingKey {
+        case total = "total_capacity", used = "use_capacity"
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        total = try container.decode(Int64.self, forKey: .total)
+        used = try container.decode(Int64.self, forKey: .used)
+        guard total >= 0, used >= 0 else {
+            throw DecodingError.dataCorrupted(.init(codingPath: decoder.codingPath,
+                debugDescription: "Quark capacity values must be nonnegative byte counts."))
+        }
+    }
+}
+
 /// 本机直连的夸克登录客户端。Cookie 按域和路径发送，独立于系统及百度会话。
 public actor QuarkClient {
     private let session: URLSession
@@ -24,6 +44,11 @@ public actor QuarkClient {
 
     private static let userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) quark-cloud-drive/2.5.20 Chrome/100.0.4896.160 Electron/18.3.5.4-b478491100 Safari/537.36 Channel/pckk_other_ch"
     private static let commonQuery = [("pr", "ucpro"), ("fr", "pc"), ("uc_param_str", "")]
+
+    /// 只读查询账号总容量和已用容量，不把缺失或无效字段解释为零。
+    public func capacity() async throws -> QuarkCapacity {
+        try await api(path: "/member")
+    }
 
     /// 打开分享时仅取得短期访问令牌，后续目录请求仍独立校验接口结果。
     public func openShare(_ link: QuarkShareLink) async throws -> QuarkShareSession {
