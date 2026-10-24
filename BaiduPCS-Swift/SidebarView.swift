@@ -93,7 +93,7 @@ private struct AccountView: View {
     var body: some View {
         Menu {
             if provider == nil || provider == .baidu {
-                Section("百度网盘") {
+                Menu {
                     if let account = model.account {
                         Text(account.username.isEmpty ? "百度账号" : account.username)
                         Text(model.isLoginExpired ? "登录已失效" : "已登录")
@@ -103,11 +103,15 @@ private struct AccountView: View {
                         Text("未登录")
                         Button("登录百度网盘…") { model.presentLogin() }
                     }
+                } label: {
+                    Label("百度网盘 · \(model.account.map { $0.username.isEmpty ? "百度账号" : $0.username } ?? "未登录")", systemImage: "b.circle")
                 }
             }
             if provider == nil || provider == .quark {
-                Section("夸克网盘") {
+                Menu {
                     QuarkAccountControls()
+                } label: {
+                    Label("夸克网盘 · \(model.quark.summary?.name ?? "未登录")", systemImage: "q.circle")
                 }
             }
             Divider()
