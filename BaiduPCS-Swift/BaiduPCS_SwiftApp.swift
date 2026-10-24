@@ -43,8 +43,14 @@ private struct FerryCommands: Commands {
     let model: AppModel
     @Environment(\.openWindow) private var openWindow
     @FocusedValue(\.jobSelection) private var selection
+    @FocusedValue(\.focusTaskSearch) private var focusTaskSearch
 
     var body: some Commands {
+        CommandGroup(after: .textEditing) {
+            Button("搜索任务") { focusTaskSearch?() }
+                .keyboardShortcut("f")
+                .disabled(focusTaskSearch == nil)
+        }
         CommandGroup(replacing: .newItem) {
             Button("添加链接…") {
                 openWindow(id: ContentView.windowID)

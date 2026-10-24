@@ -11,6 +11,8 @@ struct MainView: View {
     @State private var selection: Set<Job.ID> = []
     @SceneStorage("isInspectorPresented") private var isInspectorPresented = false
     @State private var searchText = ""
+    @State private var searchFocusRequest = 0
+    @State private var windowWidth: CGFloat = 960
     /// 等待确认的移除。
     @State private var pendingRemoval: PendingRemoval?
 
@@ -31,16 +33,23 @@ struct MainView: View {
                 .edgeBar(.top) {
                     Banners()
                     if let job = addedJobNotice {
-                        Banner(message: "已添加\(job.provider.title)任务“\(job.title)”", systemImage: "checkmark.circle.fill", iconColor: .green) {
+                        HStack(spacing: 8) {
+                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+                            Text("已添加\(job.provider.title)任务“\(job.title)”")
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .help(job.title)
                             Button("查看任务") { revealAddedJob(job) }
                             Button("关闭") { addedJobNotice = nil }
                         }
+                        .padding(.horizontal)
+                        .frame(height: 40)
                     }
                 }
                 .edgeBar(.bottom) { StatusBar() }
                 .navigationTitle(providerFilter.map { "\($0.title) · \(current.title)" } ?? current.title)
                 .navigationSubtitle("\(jobs.count) 个任务")
-                .searchable(text: $searchText, placement: .toolbar, prompt: "搜索任务")
                 .inspector(isPresented: $isInspectorPresented) {
                     JobInspector(jobs: selectedJobs, onRemove: requestRemoval)
                         .inspectorColumnWidth(min: 260, ideal: 320, max: 480)
@@ -74,9 +83,14 @@ struct MainView: View {
                         }
                         .help(isInspectorPresented ? "隐藏详情" : "显示详情")
                     }
+                    ToolbarItem(placement: .primaryAction) {
+                        TaskSearchField(text: $searchText, focusRequest: searchFocusRequest)
+                            .frame(width: min(280, max(80, windowWidth - 600)))
+                    }
                 }
         }
         .frame(minWidth: 640, minHeight: 400)
+        .onGeometryChange(for: CGFloat.self, of: { $0.size.width }) { windowWidth = $0 }
         #if DEBUG
         .task { await showDemoSelection() }
         #endif
@@ -87,11 +101,15 @@ struct MainView: View {
             if sheet == nil { model.presentRequestedNetdiskDownload(provider: providerFilter) }
         }
         .focusedSceneValue(\.jobSelection, JobSelection(jobs: selectedJobs, visibleJobs: jobs, providerFilter: providerFilter, onRemove: requestRemoval))
+        .focusedSceneValue(\.focusTaskSearch, { searchFocusRequest += 1 })
         // 文本框优先处理自己的全选；其余主窗口响应只选择当前筛选列表。
         .onCommand(#selector(NSResponder.selectAll(_:))) {
             selection = Set(jobs.map(\.id))
         }
         .onChange(of: jobs.map(\.id)) { _, ids in selection.formIntersection(ids) }
+        .onChange(of: model.coordinator.jobs.map(\.id)) { _, ids in
+            if let notice = addedJobNotice, !ids.contains(notice.id) { addedJobNotice = nil }
+        }
         .onChange(of: model.lastAddedJobID) { _, id in
             guard let id, let job = model.coordinator.jobs.first(where: { $0.id == id }) else { return }
             if jobs.contains(where: { $0.id == id }) { selection = [id] } else { addedJobNotice = job }
@@ -137,13 +155,14 @@ struct MainView: View {
         })
     }
 
-    /// 切到新增任务的来源并清除会隐藏它的筛选。
+    /// 任务仍存在时切到其来源并清除筛选；已移除时只关闭过期提示。
     private func revealAddedJob(_ job: Job) {
-        providerFilter = job.provider
+        addedJobNotice = nil
+        guard let currentJob = model.coordinator.jobs.first(where: { $0.id == job.id }) else { return }
+        providerFilter = currentJob.provider
         category = .all
         searchText = ""
-        selection = [job.id]
-        addedJobNotice = nil
+        selection = [currentJob.id]
     }
 
     private func remove(_ jobs: [Job], _ removal: JobRemoval, cleanup: [Job.ID: Bool]) {
@@ -291,5 +310,67 @@ private struct StatusBar: View {
             .padding(.horizontal)
             .padding(.vertical, 6)
         }
+    }
+}
+
+/// 原生搜索框直接回写当前窗口状态，工具栏或提示栏更新后仍保持同一条输入链路。
+private struct TaskSearchField: NSViewRepresentable {
+    @Binding var text: String
+    let focusRequest: Int
+
+    func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
+
+    func makeNSView(context: Context) -> NSSearchField {
+        let field = NSSearchField()
+        field.placeholderString = "搜索任务"
+        field.setAccessibilityLabel("搜索任务")
+        field.sendsSearchStringImmediately = true
+        field.sendsWholeSearchString = false
+        field.delegate = context.coordinator
+        field.target = context.coordinator
+        field.action = #selector(Coordinator.search(_:))
+        return field
+    }
+
+    func updateNSView(_ field: NSSearchField, context: Context) {
+        context.coordinator.text = $text
+        if field.stringValue != text { field.stringValue = text }
+        if context.coordinator.lastFocusRequest != focusRequest, let window = field.window {
+            context.coordinator.lastFocusRequest = focusRequest
+            window.makeFirstResponder(field)
+            field.selectText(nil)
+        }
+    }
+
+    static func dismantleNSView(_ field: NSSearchField, coordinator: Coordinator) {
+        field.delegate = nil
+        field.target = nil
+    }
+
+    final class Coordinator: NSObject, NSSearchFieldDelegate {
+        var text: Binding<String>
+        var lastFocusRequest = 0
+
+        init(text: Binding<String>) { self.text = text }
+
+        func controlTextDidChange(_ notification: Notification) {
+            guard let field = notification.object as? NSSearchField else { return }
+            text.wrappedValue = field.stringValue
+        }
+
+        @objc func search(_ field: NSSearchField) {
+            text.wrappedValue = field.stringValue
+        }
+    }
+}
+
+private struct TaskSearchFocusKey: FocusedValueKey {
+    typealias Value = () -> Void
+}
+
+extension FocusedValues {
+    var focusTaskSearch: (() -> Void)? {
+        get { self[TaskSearchFocusKey.self] }
+        set { self[TaskSearchFocusKey.self] = newValue }
     }
 }

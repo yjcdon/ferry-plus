@@ -12,24 +12,24 @@
 
 | 位置 | 当前职责与限制 |
 | --- | --- |
-| [Package.swift](../Packages/FerryKit/Package.swift) | 已有 BaiduKit、DownloadKit、FerryCore；FerryCore 依赖前两者 |
-| [Netdisk.swift](../Packages/FerryKit/Sources/FerryCore/Netdisk.swift) | 已有网盘协议，但参数使用 BaiduKit 的分享会话、文件等类型 |
+| [Package.swift](../Packages/FerryKit/Package.swift) | 包含 BaiduKit、QuarkKit、DownloadKit、FerryCore；FerryCore 依赖前三者，两个协议包相互独立 |
+| [Netdisk.swift](../Packages/FerryKit/Sources/FerryCore/Netdisk.swift)、[RemoteModels.swift](../Packages/FerryKit/Sources/FerryCore/RemoteModels.swift) | 公共协议使用 AccountKey、DiskShareSession、RemoteEntry、RemoteReference 和转存回执；BaiduNetdisk、QuarkNetdisk 分别转换原生接口类型 |
 | [DownloadTypes.swift](../Packages/FerryKit/Sources/DownloadKit/DownloadTypes.swift) | DownloadSource.resolve 返回地址及请求头，DownloadRequest.context 是应用提供的持久化数据 |
-| [BaiduDownloadSource.swift](../Packages/FerryKit/Sources/FerryCore/BaiduDownloadSource.swift) | 百度地址解析策略，context 当前为网盘路径的 UTF-8 数据 |
-| [Job.swift](../Packages/FerryKit/Sources/FerryCore/Job.swift) | 任务来源持有百度类型，归属为 accountUK；文件定位主要是 remotePath |
-| [JobCoordinator.swift](../Packages/FerryKit/Sources/FerryCore/JobCoordinator.swift) | 统一转存、下载、清理和持久化，但只持有一个当前 netdisk、accountUK，并直接构造百度下载 context |
-| [AppModel.swift](../BaiduPCS-Swift/AppModel.swift) | 只有一套当前账号、凭据、客户端与下载来源；启动时恢复任务并校验登录 |
-| [MainView.swift](../BaiduPCS-Swift/MainView.swift)、[SidebarView.swift](../BaiduPCS-Swift/SidebarView.swift) | 主窗口持有分类、搜索、选中项；列表按分类及搜索过滤，选中项操作取可见交集。侧边栏显示单一百度账号，分类数量及底部速度从完整任务集合计算 |
-| [MainView.swift](../BaiduPCS-Swift/MainView.swift)、[BaiduPCS_SwiftApp.swift](../BaiduPCS-Swift/BaiduPCS_SwiftApp.swift) | PauseResumeAllButton 和 FerryCommands 的“全部暂停／继续”当前使用完整任务集合；选中项菜单通过 JobSelection 获得主窗口范围，需要同步调整两类入口 |
-| [CredentialStore.swift](../BaiduPCS-Swift/CredentialStore.swift) | 使用应用 bundle 标识划分钥匙串空间，百度登录使用 baidu-login 条目 |
-| [JobStore.swift](../Packages/FerryKit/Sources/FerryCore/JobStore.swift) | JSON 任务列表及 Application Support/Ferry 数据目录 |
+| [RoutedDownloadSource.swift](../Packages/FerryKit/Sources/FerryCore/RoutedDownloadSource.swift)、[BaiduDownloadSource.swift](../Packages/FerryKit/Sources/FerryCore/BaiduDownloadSource.swift) | 统一解析带版本的 DownloadContext，按账号和远端引用路由到百度或夸克客户端；百度文件只保留其错误策略，没有独立下载入口 |
+| [Job.swift](../Packages/FerryKit/Sources/FerryCore/Job.swift) | 分享和账号内文件均使用公共条目；持久化网盘、AccountKey、账号名称快照、远端引用、转存进度与清单；保留旧百度任务的兼容解码 |
+| [JobCoordinator.swift](../Packages/FerryKit/Sources/FerryCore/JobCoordinator.swift) | 按来源保存适配器、按任务账号校验操作；共用准备、转存、下载、清理和持久化流程，转存意图、回执与清单落盘后才进入后续步骤 |
+| [AppModel.swift](../BaiduPCS-Swift/AppModel.swift)、[QuarkAccountSession.swift](../BaiduPCS-Swift/QuarkAccountSession.swift) | 分别管理两家会话及登录状态，组装共享下载引擎和来源路由；启动恢复任务并独立校验账号，换号或会话替换撤销旧客户端 |
+| [MainView.swift](../BaiduPCS-Swift/MainView.swift)、[SidebarView.swift](../BaiduPCS-Swift/SidebarView.swift) | 主窗口持有网盘、分类、搜索及选择；分类数量按网盘计算，操作取当前可见范围，账号入口随网盘筛选展示；底部统计汇总两家全部任务 |
+| [MainView.swift](../BaiduPCS-Swift/MainView.swift)、[BaiduPCS_SwiftApp.swift](../BaiduPCS-Swift/BaiduPCS_SwiftApp.swift) | 工具栏暂停／继续使用 visibleJobs，任务菜单通过活动主窗口的 JobSelection 取得同一范围；搜索使用原生 NSSearchField 桥接，⌘F 通过窗口焦点上下文定位搜索框 |
+| [CredentialStore.swift](../BaiduPCS-Swift/CredentialStore.swift) | 钥匙串服务名使用应用 bundle 标识；baidu-login、quark-login 和 socks-proxy 分别保存两家登录信息及代理密码 |
+| [JobStore.swift](../Packages/FerryKit/Sources/FerryCore/JobStore.swift) | JSON 任务列表及 Application Support/Ferry Plus 数据目录；首次覆盖前保留升级备份，损坏任务文件另存后提示 |
 | [DownloadRecord.swift](../Packages/FerryKit/Sources/DownloadKit/DownloadRecord.swift) | 分片状态按文件下载 ID 保存；临时文件位于目标文件同目录，名称由下载 ID 推导 |
 | [FileTransfer.swift](../Packages/FerryKit/Sources/DownloadKit/FileTransfer.swift) | 已处理 Range、Content-Range、大小、退避和地址失效；同文件的并发刷新合并处理 |
-| [FerrySettings.swift](../Packages/FerryKit/Sources/FerryCore/FerrySettings.swift) | 下载并发为全局设置，包含百度会员预设与总连接数约束 |
-| website 目录、README、.gitignore | website/public/index.html 是 Ferry 静态介绍页，包含网站专用图片和字体；website/wrangler.jsonc 仅配置静态资源发布，README 有原网站徽章，.gitignore 有 .wrangler/ 忽略项；当前应用源码及工程未引用网站目录 |
-| [.github/workflows/release.yml](../.github/workflows/release.yml) | 当前唯一工作流用于构建、签名和发布 Mac 应用，没有网站部署步骤；与介绍网站移除分别处理 |
+| [FerrySettings.swift](../Packages/FerryKit/Sources/FerryCore/FerrySettings.swift) | 下载文件并发、保存目录和代理共用；两家分别保存转存目录、清理开关和单文件连接数，保留总连接数约束及百度会员预设 |
+| README、.gitignore | website 目录及网站专用 Wrangler 配置和忽略项已移除；README 指向本仓库 Releases，保留上游来源、许可及应用截图 |
+| [Scripts/build-app.sh](../Scripts/build-app.sh)、[.github/workflows/release.yml](../.github/workflows/release.yml) | 本机通过 Command Line Tools 构建独立 arm64 App，支持 Release 优化及固定证书；发布工作流构建 arm64 App、校验签名并生成 ZIP 与 SHA-256，没有网站部署步骤 |
 
-因此，现有策略入口可以复用，主要改造集中在公共模型、来源路由和账号归属；新建 QuarkKit 处理夸克协议。
+轻量策略、公共模型和双网盘路由已接入。以下章节描述其职责和行为；完成情况与真实验证范围以 [任务清单](tasks.md) 和 [实现与验收进度](implementation.md) 为准。
 
 ## 3. 模块与依赖
 
@@ -92,6 +92,10 @@ flowchart TD
 | 新建任务上下文 | 添加窗口持有明确 Provider 和本次 AccountKey | 分享来源由解析结果确定；账号文件入口从筛选取得默认来源或先选择来源，打开后不随主窗口筛选改变 |
 
 数据顺序为：JobCoordinator 完整任务集合 → providerJobs → 按 category 过滤 → 按 searchText 过滤 → visibleJobs。底部统计直接汇总完整任务集合，显示“全部网盘”、已下载／总大小、速度及文件完成数，统计弹层补充进度和预计剩余时间；准备中的任务注明总量尚未确定。完成文件数复用任务增量统计，避免每次进度刷新遍历全部文件。全局下载并发与通知同样不受筛选影响。
+
+搜索词只有 MainView.searchText 一份状态。工具栏的 TaskSearchField 通过 NSViewRepresentable 桥接 NSSearchField，Coordinator 同时处理文本变更 delegate 和搜索 action；每次更新视图时重新绑定当前 Binding，使输入和取消搜索立即回写同一状态。⌘F 通过主窗口的 focusedSceneValue 请求聚焦并选中搜索内容，无活动主窗口时命令禁用；搜索框拆除时解除 delegate 和 target。
+
+新任务在当前列表内时直接选中；被网盘、分类或搜索条件隐藏时，保留现有筛选并显示添加提示。提示固定为单行 40 点高度，长标题从中间截断，悬停可查看完整标题。“查看任务”重新按任务 ID 查找当前记录，再切到所属网盘、全部分类并清空搜索；记录已移除时只关闭提示。任务集合变化时同步清除已移除任务的旧提示。
 
 SidebarView 顶部使用“全部网盘／百度网盘／夸克网盘”下拉菜单。标题在全部网盘时为分类名，在单一网盘时为“网盘名称 · 分类名”；副标题为 visibleJobs 数量。行来源图标、悬停提示和辅助功能名称均由 Job 的 Provider 决定。
 
