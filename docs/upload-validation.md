@@ -106,10 +106,32 @@ c5bee9ac7f6118d7043171628a9f61bcde0cc1a870c8065e6d65642be3e48697
 
 百度官方 SDK 的 [Rename](https://github.com/baidu-netdisk/baidu-drive-sdk-go/blob/main/baidudriver/api/file_manager_rename.go) 按 path／newname 操作，[Move](https://github.com/baidu-netdisk/baidu-drive-sdk-go/blob/main/baidudriver/api/file_manager_move.go) 有 ondup=fail，但这些材料没有证明源 fsID 或内容版本可作为操作前置条件。路径预查后重命名仍有并发窗口。
 
-夸克的 [OpenList 适配实现](https://github.com/OpenListTeam/OpenList/blob/main/drivers/quark_uc/driver.go) 按 fid／file_name 重命名；[官方文件操作文档](https://github.com/quark-clouddrive/quarkclouddrive_offical/blob/main/skills/quarkclouddrive/references/file-ops.md) 未给出重名原子失败和对象 ID 绑定不可变内容版本的保证。上传自动另存的实测不能推导重命名也有同样语义。
+夸克的 [OpenList 适配实现](https://github.com/OpenListTeam/OpenList/blob/main/drivers/quark_uc/driver.go) 按 fid／file_name 重命名；[官方文件操作文档](https://github.com/quark-clouddrive/quarkclouddrive_offical/blob/main/skills/quarkclouddrive/references/file-ops.md) 没有给出内容版本条件写入合同。后续实测已证明本次重命名对现有同名明确拒绝，但对象 ID 绑定不可变内容版本仍未证明。
 
-若能证明准确旧 ID 改备份、新 ID 原子不覆盖发布、失败时不覆盖恢复，可实现保留旧内容的可恢复替换。但原名称可能短暂空缺，且不能天然拒绝执行期间变化的旧版本。这是更弱的合同，不代替 V3-T09 约定的并发版本保护。本轮仅查阅资料，未修改云端文件；V3-T09 保持未完成。
+若能证明准确旧 ID 改备份、新 ID 原子不覆盖发布、失败时不覆盖恢复，可实现保留旧内容的可恢复替换。但原名称可能短暂空缺，且不能天然拒绝执行期间变化的旧版本。这不代替 V3-T09 约定的并发版本保护；V3-T09 保持未完成。
 
 证据 `.build/v3-collision-probe/run.jsonl`。两家专用目录 `FerryPlus-V3-Collision-66638F3C-952F-4FB5-BC75-6FA8F6D03E86` 均按目录 ID 核对后移入回收站，并确认原位置消失。
 
 正式实现继续使用 Swift 原生请求，不引入 Node 或 Go 运行时。按分片读取文件并限制并发；本次探针为有界样本使用内存数据，不作为正式大文件内存策略。
+
+### 2026-10-25 重命名及对象版本能力复验
+
+复用当前登录，仅在全新随机专用目录使用 4096 字节不同内容样本，操作前保存意图，操作后按对象身份完整回读 SHA-256。
+
+| 探针 | 实际结果 | 可确认的边界 |
+| --- | --- | --- |
+| 百度将 A 改为已存在的 B | `/api/filemanager` 返回 errno 12、子项 -8；A/B 的 fsID、名称、完整 SHA 均不变 | 本次 rename 明确拒绝同名覆盖，不提供源内容版本条件 |
+| 夸克将 A 改为已存在的 B | `/file/rename` 返回 HTTP 400／23008，明确存在同名；A/B 的 fid、名称、完整 SHA 均不变 | 本次 rename 明确拒绝同名覆盖，不证明 fid 内容不可变 |
+| 百度 PCS `ondup=overwrite` 同名内容更新 | HTTP 200，新内容完整 SHA 匹配，fsID 改变；旧 ID 不在当前目录 | 只证明该写入路径更换对象身份，没有证明旧 ID 内容仍能读取或恢复 |
+
+百度官方 [预创建](https://github.com/baidu-netdisk/baidu-drive-sdk-go/blob/main/baidudriver/api/upload_precreate.go) 和 [合并](https://github.com/baidu-netdisk/baidu-drive-sdk-go/blob/main/baidudriver/api/upload_create.go) SDK 有 `is_revision=1` 版本管理参数；其 OAuth 合同不能直接套入现有 Cookie 接口，也不等于条件版本替换。夸克官方分发 1.0.25 的 `file-rename.md` 提供批量名称撤回，但没有内容版本 CAS；GitHub 对应文件 404 不代表分发包缺少该文档。
+
+证据 `.build/v3-overwrite-capability-audit/{report.md,p1/journal.jsonl,p4/journal.jsonl}`。三个专用目录均已核对身份后移入回收站，未永久清空，无未知请求或重发。夸克没有已核实的内容覆盖参数，未猜测参数发请求；两家仍缺已证明的目标内容版本条件发布合同。
+
+## 夸克未完成会话清理的真实限制
+
+同一自有 4096 字节会话可鉴权列出一片；去掉授权后 GET 返回 403，排除匿名访问。DELETE 使用真实 OSS bucket、无 body／Content-Type，服务端 StringToSign 与本地请求逐字节一致，仍返回 403／SignatureDoesNotMatch。只更改鉴权 meta 的 method 或 bucket 返回同一 Authorization，更改日期才变化；当前 Cookie 鉴权入口不能当作任意 OSS method 的标准签名器。
+
+按[官方安装脚本](https://github.com/quark-clouddrive/quarkclouddrive_offical/blob/main/skills/quarkclouddrive/install.sh) 下载的 1.0.25 公开 ZIP 仅作静态检查，未安装／执行。其 OAuth 上传任务 cancel 使用本地 AbortController；没有查到远端 multipart abort 调用，不能据此声称远端清理已完成。现有 Cookie 与该 OAuth 合同分别保留，不混用授权。
+
+证据 `.build/v3-quark-abort-diagnosis/{report.md,run.jsonl,auth-control.jsonl,anonymous-control.jsonl,source-hashes.json}`。未接入未验证的 abort；原会话仍可列片，归属和唯一 Keychain 上下文保留，`aborted=false`。不涉及用户两条暂停的大文件会话，没有新建云端对象，探针均已退出。
