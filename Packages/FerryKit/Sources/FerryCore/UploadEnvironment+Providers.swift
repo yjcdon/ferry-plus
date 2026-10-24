@@ -65,7 +65,7 @@ extension UploadEnvironment {
             let entries = try await client.listDirectory(parentFID: native.parentFID)
             try await checkSession()
             guard let entry = entries.first(where: { $0.fid == native.fileID }) else { return .unconfirmed }
-            guard !entry.isDirectory, entry.size == native.size, entry.name == native.name else {
+            guard !entry.isDirectory, entry.size == native.size else {
                 return .rejected("预分配的夸克上传对象与文件基准不一致")
             }
             return .confirmed(.quark(fid: native.fileID))

@@ -332,11 +332,16 @@ public actor UploadCoordinator {
 
     private func process(_ file: inout UploadFile, jobID: UUID, parent: RemoteReference, environment env: UploadEnvironment) async throws {
         guard jobs[jobID]?.scanCompletedAt != nil else { throw UploadCoordinatorError.missingSelections }
-        if file.commits.contains(where: { $0.status == .pending }) {
+        let hadPendingCommit = file.commits.contains(where: { $0.status == .pending })
+        if hadPendingCommit {
             try await inspect(&file, parent: parent, environment: env)
         }
-        if file.isDirectory, file.remoteReference != nil { file.phase = .completed; try await saveFile(file); return }
+        if file.isDirectory, file.remoteReference != nil {
+            if !hadPendingCommit { try await refreshRemoteName(&file, parent: parent, environment: env) }
+            file.phase = .completed; try await saveFile(file); return
+        }
         if !file.isDirectory, file.remoteReference != nil {
+            if !hadPendingCommit { try await refreshRemoteName(&file, parent: parent, environment: env) }
             try await verify(&file, environment: env); return
         }
         let job = jobs[jobID]!
@@ -368,8 +373,11 @@ public actor UploadCoordinator {
             file.commits.append(commit); file.phase = .committing; try await saveFile(file)
             let reference = try await env.createDirectory(parent, file.remoteName!)
             file.remoteReference = reference; file.commits[file.commits.count - 1].status = .confirmed
-            file.commits[file.commits.count - 1].finalObject = reference; file.phase = .completed
-            try await saveFile(file); return
+            file.commits[file.commits.count - 1].finalObject = reference; file.phase = .committing
+            try await saveFile(file)
+            try await refreshRemoteName(&file, parent: parent, environment: env)
+            file.phase = .completed; try await saveFile(file)
+            return
         }
         let localURL: URL
         if let bookmark = file.source.bookmark { localURL = try UploadSource.resolve(bookmark: bookmark) }
@@ -387,11 +395,7 @@ public actor UploadCoordinator {
             file.expectation = try IntegrityExpectation(algorithm: .sha256, digest: fingerprint.sha256, origin: .localOriginal, size: file.source.size)
             file.md5 = fingerprint.md5; file.sha1 = fingerprint.sha1; try await saveFile(file)
             try Task.checkCancellation()
-            _ = try await env.destination.prepare(name: file.remoteName!, target: parent, source: fingerprint, fileID: file.id,
-                onPrepared: { [weak self] prepared in
-                    guard let self else { throw CancellationError() }
-                    try await self.prepared(prepared, jobID: jobID)
-                })
+            guard try await prepare(&file, fingerprint: fingerprint, parent: parent, environment: env) else { return }
             file = try await store.loadFile(id: file.id, in: jobs[jobID]!)
         }
         guard var prepared = file.preparation else { throw UploadDestinationError.invalidPreparation }
@@ -427,7 +431,46 @@ public actor UploadCoordinator {
             file.commits[file.commits.count - 1].finalObject = reference; file.phase = .verifying
             try await saveFile(file)
         }
+        try await refreshRemoteName(&file, parent: parent, environment: env)
         try await verify(&file, environment: env)
+    }
+
+    /// 只对明确未创建会话的名称冲突重选，复用原始指纹；已持久化 preparation 永远不换名重建。
+    private func prepare(_ file: inout UploadFile, fingerprint: UploadSourceFingerprint, parent: RemoteReference,
+                         environment env: UploadEnvironment) async throws -> Bool {
+        let jobID = file.jobID
+        var rejectedNames: Set<String> = []
+        for attempt in 0...3 {
+            try Task.checkCancellation()
+            do {
+                _ = try await env.destination.prepare(name: file.remoteName!, target: parent, source: fingerprint, fileID: file.id,
+                    onPrepared: { [weak self] prepared in
+                        guard let self else { throw CancellationError() }
+                        try await self.prepared(prepared, jobID: jobID)
+                    })
+                return true
+            } catch UploadDestinationError.nameConflict {
+                guard let job = jobs[jobID] else { throw UploadCoordinatorError.missingJob }
+                file = try await store.loadFile(id: file.id, in: job)
+                guard file.preparation == nil else { throw UploadDestinationError.nameConflict }
+                switch job.conflictPolicy {
+                case .skip:
+                    file.phase = .skipped; try await saveFile(file); return false
+                case .replace: throw UploadCoordinatorError.unsafeReplacement
+                case .keepBoth:
+                    guard attempt < 3 else { throw UploadDestinationError.nameConflict }
+                    let entries = try await env.listDirectory(parent)
+                    if let current = file.remoteName { rejectedNames.insert(LocalPath.key(current)) }
+                    let used = Set(entries.map { LocalPath.key($0.name) }).union(rejectedNames)
+                    let original = (file.relativePath as NSString).lastPathComponent
+                    var number = 1; var candidate = LocalPath.numbered(original, number)
+                    while used.contains(LocalPath.key(candidate)) { number += 1; candidate = LocalPath.numbered(original, number) }
+                    file.remoteName = candidate
+                    try await saveFile(file)
+                }
+            }
+        }
+        throw UploadDestinationError.nameConflict
     }
 
     private func inspect(_ file: inout UploadFile, parent: RemoteReference, environment env: UploadEnvironment) async throws {
@@ -440,10 +483,37 @@ public actor UploadCoordinator {
             case .confirmed(let reference):
                 guard reference.provider == env.destination.account.provider, !reference.identifier.isEmpty else { throw UploadDestinationError.otherAccount }
                 file.commits[index].status = .confirmed; file.commits[index].finalObject = reference
-                file.remoteReference = reference; file.phase = file.isDirectory ? .completed : .verifying
+                file.remoteReference = reference; file.phase = file.isDirectory ? .committing : .verifying
                 try await saveFile(file)
+                try await refreshRemoteName(&file, parent: parent, environment: env)
+                if file.isDirectory { file.phase = .completed; try await saveFile(file) }
             }
         }
+    }
+
+    /// 服务端可能自动另存为其他名称；以已确认对象身份查询实际名称，绝不按请求名称认领对象。
+    /// 调用前成功回执必须已经保存，目录查询失败只影响后续阶段，不会丢失合并结果。
+    private func refreshRemoteName(_ file: inout UploadFile, parent: RemoteReference, environment env: UploadEnvironment) async throws {
+        guard let reference = file.remoteReference else { throw UploadDestinationError.invalidPreparation }
+        for attempt in 0..<6 {
+            try Task.checkCancellation()
+            let entries = try await env.listDirectory(parent)
+            let exact = entries.filter { $0.reference == reference }
+            if !exact.isEmpty {
+                guard exact.count == 1, let entry = exact.first, entry.isDirectory == file.isDirectory,
+                      file.isDirectory || entry.size == file.source.size else {
+                    throw UploadDestinationError.remoteResultUnconfirmed
+                }
+                if file.remoteName != entry.name {
+                    file.remoteName = entry.name
+                    try await saveFile(file)
+                }
+                return
+            }
+            // 建目录和合并均可能先返回成功回执、后更新目录索引。仅查询准确对象，不重提副作用。
+            if attempt < 5 { try await Task.sleep(for: .milliseconds(200 * (1 << attempt))) }
+        }
+        throw UploadDestinationError.remoteResultUnconfirmed
     }
 
     private func verify(_ file: inout UploadFile, environment env: UploadEnvironment) async throws {
@@ -517,15 +587,22 @@ public actor UploadCoordinator {
         guard let job = jobs[id] else { throw UploadCoordinatorError.missingJob }
         var completed = 0, failed = 0, skipped = 0
         var bytes: Int64 = 0
+        var firstFailure: String?
         for fileID in job.fileIDs {
             let file = try await store.loadFile(id: fileID, in: job)
             bytes += confirmedBytes(file)
             if file.phase == .completed { completed += 1 }
-            if file.phase == .failed { failed += 1 }
+            if file.phase == .failed {
+                failed += 1
+                if firstFailure == nil {
+                    firstFailure = "\(file.relativePath)：\(file.error ?? "上传失败，未记录具体原因")"
+                }
+            }
             if file.phase == .skipped { skipped += 1 }
         }
         jobs[id]!.completedBytes = bytes; jobs[id]!.completedCount = completed
         jobs[id]!.failedCount = failed; jobs[id]!.skippedCount = skipped
+        if let firstFailure { jobs[id]!.error = "\(failed) 项失败：\(firstFailure)" }
         try await persistJob(id)
     }
 

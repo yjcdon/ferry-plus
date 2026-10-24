@@ -29,6 +29,7 @@ public enum UploadDestinationError: Error, LocalizedError, Sendable {
     case invalidPreparation
     case otherAccount
     case invalidName
+    case nameConflict
     case requiresChunkSize(Int64)
     case sourceMismatch
     case invalidReceipt
@@ -39,6 +40,7 @@ public enum UploadDestinationError: Error, LocalizedError, Sendable {
         case .invalidPreparation: "上传准备记录或分块基准无效。"
         case .otherAccount: "上传策略、任务与目标必须属于同一网盘账号。"
         case .invalidName: "上传文件名必须是单个有效名称。"
+        case .nameConflict: "上传目标名称已被占用，请重新选择同名处理方式。"
         case .requiresChunkSize(let size): "请按服务端要求重新计算分块指纹（每片 \(size) 字节）。"
         case .sourceMismatch: "待发送内容与上传原始基准不一致。"
         case .invalidReceipt: "上传分片回执与原会话或源内容不一致。"
@@ -235,8 +237,11 @@ public struct BaiduUploadDestination: UploadDestination {
         let hashes = source.identity.size == 0 ? [PreparedUpload.emptyMD5] : source.chunks.map(\.md5)
         // 完整本地边界先校验，再执行预创建，避免错误摘要计划触发远端写入。
         try PreparedUpload.validateSource(source)
-        let native = try await client.prepareUpload(path: path, size: source.identity.size, blockMD5s: hashes,
-                                                   contentMD5: source.md5, sliceMD5: source.first256KiBMD5)
+        let native: BaiduUploadPreparation
+        do {
+            native = try await client.prepareUpload(path: path, size: source.identity.size, blockMD5s: hashes,
+                                                     contentMD5: source.md5, sliceMD5: source.first256KiBMD5)
+        } catch BaiduError.alreadyExists { throw UploadDestinationError.nameConflict }
         let prepared: PreparedUpload
         switch native {
         case .upload(let session):
@@ -359,11 +364,18 @@ public struct QuarkUploadDestination: UploadDestination {
             try await client.completeUploadParts(session: session, authorization: authorization(prepared), receipts: native)
             try await client.finishUpload(session: session)
         }
-        let entries = try await client.listDirectory(parentFID: session.parentFID)
-        guard entries.contains(where: { $0.fid == session.fileID && !$0.isDirectory && $0.size == session.size && $0.name == session.name }) else {
-            throw UploadDestinationError.remoteResultUnconfirmed
+        // finish 后目录索引可能尚未可见；只重复查询，不再次合并或认领同名对象。
+        // 服务端遇到竞态同名会自动另存，准确 fid 与大小才是本次对象的依据。
+        for attempt in 0..<6 {
+            try Task.checkCancellation()
+            let entries = try await client.listDirectory(parentFID: session.parentFID)
+            if let entry = entries.first(where: { $0.fid == session.fileID }) {
+                guard !entry.isDirectory, entry.size == session.size else { throw UploadDestinationError.remoteResultUnconfirmed }
+                return .quark(fid: session.fileID)
+            }
+            if attempt < 5 { try await Task.sleep(for: .milliseconds(200 * (1 << attempt))) }
         }
-        return .quark(fid: session.fileID)
+        throw UploadDestinationError.remoteResultUnconfirmed
     }
 
     private func nativeSession(_ prepared: PreparedUpload) throws -> QuarkUploadSession {

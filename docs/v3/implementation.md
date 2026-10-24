@@ -150,3 +150,15 @@ DownloadEngine 增加可选共享预算参数，默认保持原有请求行为�
 两家各有两份独立 verified 记录：4096 字节样本原始和实际 SHA-256 均为 `c76b17844d30bf2100d06250a17d853afdc47cb90736fed5c80867dca9db2776`，空文件均为标准空 SHA-256。证据 `.build/ui-upload-validation/baidu-completed.txt`、`quark-recovered-completed.txt`、`integrity-results.json`。这只覆盖本轮实际操作，不替代拖放、混合负载、大文件、异常恢复等剩余验收。目录索引有限等待和真实同名竞态修正继续处理。
 
 文件选择结束后 Computer Use 曾返回无窗口；重新激活同一进程后原确认页和选择仍保留，采样显示主线程正常等待、CPU 空闲，无新崩溃报告。窗口焦点行为继续复核，不将工具错误直接认定为 App 崩溃。
+
+## 实测问题修复与分片界面验证
+
+实测补齐百度名称原子冲突拒绝、夸克自动另存的准确身份行为，详见 [协议验证](../upload-validation.md#正式接口同名冲突实测)。百度准备阶段明确名称冲突时，保留两份最多重选 3 次并保存新名称，复用原始指纹；跳过策略标记 skipped。夸克按预分配 fid 确认产物，接受服务端实际改名。目录创建和文件合并确认后先保存准确对象，再有限查询目录索引；只查询 6 轮，不重复创建或合并。批次错误保留失败数和首个文件原因。
+
+24 项隔离验证通过，新增目录索引前两轮缺失后成功、只创建一次、准确对象大小异常拒绝，以及服务端改名、查询失败后保存确认、名称竞态的有限处理。证据 `.build/coordinator-validation/result.txt`。完整 Release App 构建及签名通过：`.build/v3-visibility-build.log`。
+
+通过 Computer Use 的正式窗口，两家分别上传 4194305 字节样本，实际分片回执长度均为 4194304 和 1，完整回读 SHA-256 均等于本地的 `a416d0f2f813d19014a6e05c2eb03adf8a90fdfb053ecb08606fa265c87498fb`。旧轮夸克目录索引延迟通过界面重试恢复；补齐目录等待后的新 App（PID 22948）再以新专用目录 `FerryPlus-V3-Visibility-20261024` 验证，根目录、空子目录、4 KiB 文件、零字节文件首次全部完成，没有手动重试。其原始及实际 SHA-256 均为 `17e8c63ed0c8133cead61204e5de2172813070c2ba3c4ea1ae3d2baab47bc595`。
+
+证据 `.build/ui-upload-validation/baidu-multipart-completed.txt`、`quark-multipart-recovered.txt`、`multipart-integrity-results.json`、`visibility-fixed-completed.txt`、`visibility-integrity-results.json`。最初及 multipart 两轮两家的测试目录、最终 visibility 夸克目录均已按身份移入回收站并确认消失，清理日志 `cleanup-initial.jsonl`／`cleanup-multipart.jsonl`／`cleanup-visibility.jsonl`。
+
+昵称切 Tab 的截图像素正确，可访问性文本存在旧值缓存，没有为此增加昵称状态或强制重建。尝试附着文件选择面板未消除 Computer Use 无窗口错误，已撤回该无效焦点补丁，沿用 Ferry 的 `panel.begin`；测试通过重新激活同一进程继续，不把它写成已修复的 App 缺陷。
