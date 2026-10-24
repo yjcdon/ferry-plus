@@ -54,35 +54,8 @@ extension UploadEnvironment {
             try await checkSession()
             return reference
         }
-        return UploadEnvironment(destination: destination, listDirectory: { reference in
-            try await checkSession()
-            let entries = try await client.listDirectory(parentFID: quarkFID(reference)).map { QuarkNetdisk.convert($0) }
-            try await checkSession()
-            return entries
-        }, createDirectory: { parent, name in
-            try await createDirectory(parent, name, { _ in })
-        }, resolve: { reference, size in
-            try await checkSession()
-            let link = try await client.download(fid: quarkFID(reference))
-            guard link.size == nil || link.size == size else { throw UploadDestinationError.remoteResultUnconfirmed }
-            try await checkSession()
-            return ResolvedURL(url: link.url, headers: link.headers)
-        }, inspectCommit: { commit, file, parent in
-            try await checkSession()
-            guard commit.kind == .merge, let prepared = file.preparation, prepared.account == account else { return .unconfirmed }
-            let native = try JSONDecoder().decode(QuarkUploadSession.self, from: prepared.nativeSession)
-            guard native.parentFID == (try quarkFID(parent)) else { throw UploadDestinationError.invalidPreparation }
-            let entries = try await client.listDirectory(parentFID: native.parentFID)
-            try await checkSession()
-            guard let entry = entries.first(where: { $0.fid == native.fileID }) else { return .unconfirmed }
-            guard !entry.isDirectory, entry.size == native.size else {
-                return .rejected("预分配的夸克上传对象与文件基准不一致")
-            }
-            return .confirmed(.quark(fid: native.fileID))
-        }, releasePreparation: { prepared in
-            guard prepared.account == account else { throw UploadDestinationError.otherAccount }
-            if let reference = prepared.secretReference { try await secrets.delete(reference: reference) }
-        }, inspectPreparedResult: { prepared, parent in
+        // 合并回执丢失与会话失效恢复共享准确对象查询，避免外部移动后永久未知。
+        let inspectPreparedResult: @Sendable (PreparedUpload, RemoteReference) async throws -> UploadCommitInspection = { prepared, parent in
             try await checkSession()
             guard prepared.account == account else { throw UploadDestinationError.otherAccount }
             let native = try JSONDecoder().decode(QuarkUploadSession.self, from: prepared.nativeSession)
@@ -107,7 +80,28 @@ extension UploadEnvironment {
                 return .rejected("原预分配对象的大小与上传基准不一致")
             }
             return .confirmed(.quark(fid: native.fileID))
-        }, createDirectoryWithCheckpoint: createDirectory)
+        }
+        return UploadEnvironment(destination: destination, listDirectory: { reference in
+            try await checkSession()
+            let entries = try await client.listDirectory(parentFID: quarkFID(reference)).map { QuarkNetdisk.convert($0) }
+            try await checkSession()
+            return entries
+        }, createDirectory: { parent, name in
+            try await createDirectory(parent, name, { _ in })
+        }, resolve: { reference, size in
+            try await checkSession()
+            let link = try await client.download(fid: quarkFID(reference))
+            guard link.size == nil || link.size == size else { throw UploadDestinationError.remoteResultUnconfirmed }
+            try await checkSession()
+            return ResolvedURL(url: link.url, headers: link.headers)
+        }, inspectCommit: { commit, file, parent in
+            try await checkSession()
+            guard commit.kind == .merge, let prepared = file.preparation else { return .unconfirmed }
+            return try await inspectPreparedResult(prepared, parent)
+        }, releasePreparation: { prepared in
+            guard prepared.account == account else { throw UploadDestinationError.otherAccount }
+            if let reference = prepared.secretReference { try await secrets.delete(reference: reference) }
+        }, inspectPreparedResult: inspectPreparedResult, createDirectoryWithCheckpoint: createDirectory)
     }
 
     private static func validateName(_ name: String) throws {

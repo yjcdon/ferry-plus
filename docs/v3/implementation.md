@@ -384,3 +384,9 @@ Release 构建 `.build/v3-inspector-final-build.log` 通过。Computer Use 在�
 两家创建目录返回准确引用后，通过 `onCreated` 先将目录 ID 与确认提交保存到发起时账号的任务，再进行后置会话检查。会话失效、换号或取消不会丢弃已拿到的准确回执，后续重试沿用原目录而不重复创建。落盘失败停止后续操作；真正响应丢失仍保持未决，不按名称猜测归属。旧注入环境和目标选择页的目录创建入口保持兼容。
 
 独立编译当前 Core 并验证 21 项通过，包含两家后置会话失败、原账号持久化、落盘失败、错误引用、旧环境及真实 worker 取消恢复：`.build/directory-checkpoint-validation/result.txt`。统一 307 项测试及 Release App 构建通过：`.build/v3-directory-checkpoint-tests.log`、`.build/v3-directory-checkpoint-app-build.log`。该修复只消除已收到回执之后的丢失窗口，不作为 T07 真正响应丢失自动恢复的完成证据。
+
+## 夸克合并未决复用精确产物查询
+
+合并回执丢失和原会话不可用共用准确 fid 查询：先有限重查原父目录，再按原预分配 fid 解析已被外部移动的对象。两种入口使用同一账号、父目录及大小约束；同名同大小但其他 fid 不认领，网络错误保留原始原因，不重复合并。解析结果仍须完整回读 SHA-256 后才能记为内容验证通过。
+
+独立复制当前四个模块编译和 provider 层 12 项 URLProtocol 检查通过，覆盖两个入口的移走产物、错误大小、账号／父目录拒绝及原网络错误，所有请求只有目录和下载解析，没有 merge／写请求：`.build/v3-commit-inspection-validation/{report.md,checks.log,source-hashes.json}`。统一 307 项测试及 Release App 构建通过：`.build/v3-shared-commit-inspection-tests.log`、`.build/v3-shared-commit-inspection-app-build.log`。真实移动后合并恢复现场仍未完整覆盖，不能据此勾选 T07 或 T10。
