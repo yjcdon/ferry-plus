@@ -123,13 +123,14 @@ struct NetdiskDownloadView: View {
             let disk = try model.netdisk(for: provider)
             let key = disk.account
             errorMessage = nil
-            let tree = FileTree<RemoteEntry>(initialSelection: .none) { directory in
+            // 只捕获模型，避免闭包持有整个视图及其保存文件树的 State，形成引用环。
+            let tree = FileTree<RemoteEntry>(initialSelection: .none) { [model] directory in
                 guard model.accountKey(for: provider) == key else { throw CancellationError() }
                 let entries = try await disk.listDirectory(directory?.reference)
                 try Task.checkCancellation()
                 guard model.accountKey(for: provider) == key else { throw CancellationError() }
                 return entries
-            } onError: { model.noteError($0, from: disk) }
+            } onError: { [model] in model.noteError($0, from: disk) }
             self.tree = tree
             treeAccount = key
             await tree.load(tree.root)

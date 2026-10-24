@@ -195,7 +195,7 @@ struct AddLinkView: View {
                 }
                 let tree = FileTree<RemoteEntry>(initialSelection: .all) { directory in
                     try await disk.listShare(session, directory: directory)
-                } onError: { model.noteError($0, from: disk) }
+                } onError: { [model] in model.noteError($0, from: disk) }
                 share = OpenedShare(session: session, disk: disk, tree: tree)
                 await tree.load(tree.root)
             } catch is CancellationError {
