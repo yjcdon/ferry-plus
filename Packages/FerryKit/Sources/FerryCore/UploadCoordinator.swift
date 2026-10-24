@@ -85,6 +85,10 @@ public actor UploadCoordinator {
         var job = UploadJob(account: account, accountName: accountName, title: names.count == 1 ? names[0] : "\(names[0]) 等 \(names.count) 项",
                             destination: destination, conflictPolicy: conflictPolicy)
         job.selections = selections
+        job.duplicateCandidateIDs = jobs.values.filter {
+            $0.account == account && $0.destination == destination && !$0.phase.isTerminal &&
+            !$0.cancellationRequested && $0.duplicateOfJobID == nil
+        }.map(\.id)
         try await store.saveJob(job)
         jobs[job.id] = job; emit(); schedule()
         return job.id
@@ -172,11 +176,12 @@ public actor UploadCoordinator {
         if let saveError { throw saveError }
     }
 
-    /// 继续只启动一个新 worker，旧 worker 未结束时不允许两代并写。
+    /// 继续只启动一个新 worker；重复任务的继续表示用户明确允许再次上传，持久化后不再自阻断。
     public func resume(_ id: UUID) async throws {
         guard let job = jobs[id] else { throw UploadCoordinatorError.missingJob }
         guard workers[id] == nil, !stopping.contains(id), !job.cancellationRequested else { throw UploadCoordinatorError.busy }
         jobs[id]!.isPaused = false
+        jobs[id]!.duplicateOfJobID = nil
         try await persistJob(id); schedule()
     }
 
@@ -243,7 +248,8 @@ public actor UploadCoordinator {
         }
         let accessed = url.startAccessingSecurityScopedResource()
         defer { if accessed { url.stopAccessingSecurityScopedResource() } }
-        let fingerprint = try await UploadSource.fingerprint(of: url, chunkSize: file.preparation?.partSize ?? 4 * 1024 * 1024)
+        let fingerprint = try await UploadSource.fingerprint(of: url,
+            chunkSize: file.preparation?.partSize ?? file.sourceFingerprint?.chunkSize ?? 4 * 1024 * 1024)
         guard fingerprint.identity.size == file.source.size, fingerprint.identity.size == original.size,
               fingerprint.sha256 == original.digest,
               file.md5 == nil || file.md5 == fingerprint.md5,
@@ -260,6 +266,7 @@ public actor UploadCoordinator {
             modificationDate: Date(timeIntervalSince1970: Double(fingerprint.identity.modifiedNanoseconds) / 1_000_000_000),
             resourceIdentifier: try JSONEncoder().encode(fingerprint.identity))
         file.preparation = preparation
+        file.sourceFingerprint = preparation == nil ? fingerprint : nil
         file.md5 = fingerprint.md5; file.sha1 = fingerprint.sha1
         file.phase = phase; file.failedPhase = nil; file.error = nil
         do {
@@ -410,6 +417,8 @@ public actor UploadCoordinator {
         do {
             if jobs[id]?.scanCompletedAt == nil { try await scan(id) }
             try Task.checkCancellation()
+            guard try await prepareContent(id) else { throw CancellationError() }
+            try Task.checkCancellation()
             guard let job = jobs[id] else { throw UploadCoordinatorError.missingJob }
             let env = try await environment(job.account)
             guard env.destination.account == job.account else { throw UploadDestinationError.otherAccount }
@@ -494,6 +503,129 @@ public actor UploadCoordinator {
         }
     }
 
+    private struct ContentEntry: Encodable {
+        let path: String
+        let directory: Bool
+        let size: Int64
+        let sha256: String?
+    }
+
+    /// 首次远端写入前完成全部源基准；只暂存指纹，发送时复用，不额外读取第二遍完整文件。
+    /// 已确认远端对象只使用已有摘要，保留本地文件移走后的独立回读能力。
+    private func prepareContent(_ id: UUID) async throws -> Bool {
+        guard let job = jobs[id] else { throw UploadCoordinatorError.missingJob }
+        if job.contentSignature != nil { return job.duplicateOfJobID == nil }
+        var entries: [ContentEntry] = []
+        var hasRemoteState = false
+        var hasCompleteBaseline = true
+        for fileID in job.fileIDs {
+            try Task.checkCancellation()
+            var file = try await store.loadFile(id: fileID, in: job)
+            hasRemoteState = hasRemoteState || file.remoteReference != nil || file.preparation != nil || !file.commits.isEmpty
+            if !file.isDirectory, file.remoteReference == nil, file.preparation == nil,
+               ![.completed, .skipped, .cancelled].contains(file.phase) {
+                do {
+                    if file.sourceFingerprint == nil {
+                        file.phase = .preparing; try await saveFile(file)
+                        let fingerprint = try await fingerprint(file)
+                        file.expectation = try IntegrityExpectation(algorithm: .sha256, digest: fingerprint.sha256,
+                                                                   origin: .localOriginal, size: file.source.size)
+                        file.sourceFingerprint = fingerprint
+                        file.md5 = fingerprint.md5; file.sha1 = fingerprint.sha1
+                        try await saveFile(file)
+                    }
+                } catch {
+                    if error is CancellationError || Task.isCancelled { throw CancellationError() }
+                    if case UploadCoordinatorError.persistence = error { throw error }
+                    file = try await store.loadFile(id: fileID, in: job)
+                    file.failedPhase = file.phase == .failed ? file.failedPhase : file.phase
+                    file.phase = .failed; file.error = error.localizedDescription
+                    try await saveFile(file)
+                    hasCompleteBaseline = false
+                }
+            }
+            let digest = file.expectation?.algorithm == .sha256 ? file.expectation?.digest : nil
+            if !file.isDirectory && digest == nil { hasCompleteBaseline = false }
+            entries.append(ContentEntry(path: file.relativePath, directory: file.isDirectory,
+                                        size: file.source.size, sha256: digest))
+        }
+        // 旧记录缺少原始摘要时保持未知，不能靠名称和大小判相同或要求已完成项的本地源仍存在。
+        guard hasCompleteBaseline else { return true }
+        let signature = try contentSignature(entries)
+        var knownSignatures: [UUID: String] = [:]
+        // 旧版暂停批次可能尚无批次摘要，但已有完整文件摘要；只读检查点复用，不重读其本地源。
+        let candidates = jobs.values.filter {
+            $0.id != id && $0.account == job.account && $0.destination == job.destination &&
+            $0.contentSignature == nil && $0.scanCompletedAt != nil && $0.fileIDs.count == job.fileIDs.count &&
+            $0.totalBytes == job.totalBytes && isDuplicateCandidate($0, for: job)
+        }
+        for candidate in candidates {
+            if let signature = try await knownContentSignature(candidate) { knownSignatures[candidate.id] = signature }
+        }
+        try Task.checkCancellation()
+        // 判定与占位发布之间没有 await；并行准备的相同批次只能先到者继续。
+        let existing = jobs.values.filter {
+            $0.id != id && $0.account == job.account && $0.destination == job.destination &&
+            ($0.contentSignature ?? knownSignatures[$0.id]) == signature &&
+            isDuplicateCandidate($0, for: job)
+        }.min { $0.createdAt < $1.createdAt }
+        jobs[id]!.contentSignature = signature
+        if !hasRemoteState, let existing {
+            jobs[id]!.duplicateOfJobID = existing.id
+            jobs[id]!.isPaused = true; jobs[id]!.phase = .queued
+        }
+        try await persistJob(id)
+        return jobs[id]?.duplicateOfJobID == nil
+    }
+
+    /// 默认单上传队列可能在核对前已传完原批次，保留添加时活动且现已成功的候选。
+    private func isDuplicateCandidate(_ candidate: UploadJob, for job: UploadJob) -> Bool {
+        guard !candidate.cancellationRequested, candidate.failedCount == 0, candidate.duplicateOfJobID == nil else { return false }
+        return !candidate.phase.isTerminal ||
+            (candidate.phase == .completed && job.duplicateCandidateIDs?.contains(candidate.id) == true)
+    }
+
+    /// 旧活动批次只从完整原始 SHA-256 清单取得签名；有任一文件缺失基准就保持未知。
+    private func knownContentSignature(_ job: UploadJob) async throws -> String? {
+        var entries: [ContentEntry] = []
+        for id in job.fileIDs {
+            try Task.checkCancellation()
+            let file = try await store.loadFile(id: id, in: job)
+            guard file.phase != .failed else { return nil }
+            let digest = file.expectation?.algorithm == .sha256 ? file.expectation?.digest : nil
+            guard file.isDirectory || digest != nil else { return nil }
+            entries.append(ContentEntry(path: file.relativePath, directory: file.isDirectory,
+                                        size: file.source.size, sha256: digest))
+        }
+        return try contentSignature(entries)
+    }
+
+    /// 排序消除扫描顺序差异；路径和目录项本身参与摘要，改名或增删空目录不会误判重复。
+    private func contentSignature(_ entries: [ContentEntry]) throws -> String {
+        let encoder = JSONEncoder(); encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
+        var hash = SHA256()
+        hash.update(data: Data("FerryUploadContent/v1\n".utf8))
+        hash.update(data: try encoder.encode(entries.sorted { $0.path < $1.path }))
+        return hash.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    /// 在原始文件身份不变时建立一次完整摘要，拒绝把扫描后被改写的内容替换为新基准。
+    private func fingerprint(_ file: UploadFile) async throws -> UploadSourceFingerprint {
+        let url = try file.source.bookmark.map { try UploadSource.resolve(bookmark: $0) } ?? file.source.url
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        let result = try await UploadSource.fingerprint(of: url, chunkSize: 4 * 1024 * 1024)
+        guard result.identity.size == file.source.size else { throw UploadSourceError.changed(url.path) }
+        if let identity = file.source.resourceIdentifier,
+           try JSONDecoder().decode(UploadSourceIdentity.self, from: identity) != result.identity {
+            throw UploadSourceError.changed(url.path)
+        }
+        if let original = file.expectation, original.algorithm == .sha256, original.digest != result.sha256 {
+            throw UploadSourceError.changed(url.path)
+        }
+        return result
+    }
+
     private func process(_ file: inout UploadFile, jobID: UUID, parent: RemoteReference, environment env: UploadEnvironment) async throws {
         guard jobs[jobID]?.scanCompletedAt != nil else { throw UploadCoordinatorError.missingSelections }
         let hadPendingCommit = file.commits.contains(where: { $0.status == .pending })
@@ -550,13 +682,12 @@ public actor UploadCoordinator {
         defer { if accessed { localURL.stopAccessingSecurityScopedResource() } }
         if file.preparation == nil {
             file.phase = .preparing; try await saveFile(file)
-            let fingerprint = try await UploadSource.fingerprint(of: localURL, chunkSize: 4 * 1024 * 1024)
-            guard fingerprint.identity.size == file.source.size else { throw UploadSourceError.changed(localURL.path) }
-            if let identity = file.source.resourceIdentifier,
-               try JSONDecoder().decode(UploadSourceIdentity.self, from: identity) != fingerprint.identity {
-                throw UploadSourceError.changed(localURL.path)
-            }
+            let fingerprint: UploadSourceFingerprint
+            if let saved = file.sourceFingerprint { fingerprint = saved }
+            else { fingerprint = try await self.fingerprint(file) }
+            guard try UploadSource.identity(of: localURL) == fingerprint.identity else { throw UploadSourceError.changed(localURL.path) }
             file.expectation = try IntegrityExpectation(algorithm: .sha256, digest: fingerprint.sha256, origin: .localOriginal, size: file.source.size)
+            file.sourceFingerprint = fingerprint
             file.md5 = fingerprint.md5; file.sha1 = fingerprint.sha1; try await saveFile(file)
             try Task.checkCancellation()
             guard try await prepare(&file, fingerprint: fingerprint, parent: parent, environment: env) else { return }
@@ -720,6 +851,7 @@ public actor UploadCoordinator {
         guard let job = jobs[jobID], prepared.account == job.account else { throw UploadDestinationError.otherAccount }
         var file = try await store.loadFile(id: prepared.fileID, in: job)
         file.preparation = prepared
+        file.sourceFingerprint = nil
         try await saveFile(file)
     }
 

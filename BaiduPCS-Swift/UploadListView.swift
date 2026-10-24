@@ -39,6 +39,8 @@ enum UploadAction {
 
 struct UploadRow: View {
     let job: UploadJob
+    let onLocateDuplicate: (UUID) -> Void
+    let onResumeDuplicate: () -> Void
     @State private var isShowingDetails = false
     var body: some View {
         HStack(spacing: 12) {
@@ -68,11 +70,23 @@ struct UploadRow: View {
                 .font(.caption).foregroundStyle(.secondary)
                 Text("完成 \(job.completedCount) · 失败 \(job.failedCount) · 跳过 \(job.skippedCount)")
                     .font(.caption).foregroundStyle(.secondary)
+                if let originalID = job.duplicateOfJobID {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Label("已有相同内容的上传，当前任务已暂停", systemImage: "doc.on.doc")
+                        HStack(spacing: 10) {
+                            Button("查看原任务") { onLocateDuplicate(originalID) }
+                            Button("仍然上传", action: onResumeDuplicate)
+                        }
+                    }
+                    .font(.caption)
+                    .buttonStyle(.borderless)
+                }
                 if let error = job.error {
                     Label(error, systemImage: "exclamationmark.triangle")
                         .font(.caption).foregroundStyle(.red).lineLimit(2).textSelection(.enabled)
                 }
             }
+            .fixedSize(horizontal: false, vertical: true)
             Button("明细") { isShowingDetails = true }
                 .buttonStyle(.borderless)
         }

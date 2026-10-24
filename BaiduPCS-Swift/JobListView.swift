@@ -9,6 +9,7 @@ struct TransferListView: View {
     let searchText: String
     @Binding var selection: Set<TransferTaskID>
     let scope: TransferSelection
+    let onLocateUpload: (UUID) -> Void
     @Environment(AppModel.self) private var model
     @FocusState private var isListFocused: Bool
 
@@ -31,7 +32,9 @@ struct TransferListView: View {
             List(items, selection: $selection) { item in
                 switch item {
                 case .download(let job): JobRow(job: job)
-                case .upload(let job): UploadRow(job: job)
+                case .upload(let job):
+                    UploadRow(job: job, onLocateDuplicate: onLocateUpload,
+                              onResumeDuplicate: { scope.onAction(.resume, [item.id]) })
                 }
             }
             .focused($isListFocused)

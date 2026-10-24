@@ -175,6 +175,8 @@ public struct UploadFile: Codable, Sendable, Equatable, Identifiable {
     public var failedPhase: UploadPhase?
     public var error: String?
     public var expectation: IntegrityExpectation?
+    /// 远端准备前持久化的完整源基准；建立 preparation 后由其 source 接管。
+    public var sourceFingerprint: UploadSourceFingerprint?
     public var md5: String?
     public var sha1: String?
     public var session: UploadSession?
@@ -202,6 +204,27 @@ public struct UploadFile: Codable, Sendable, Equatable, Identifiable {
         }
         try expectation?.validate()
         if let expectation, expectation.size != source.size { throw UploadRecordError.invalid("源大小与校验基准不一致") }
+        if let fingerprint = sourceFingerprint {
+            guard !isDirectory, fingerprint.identity.size == source.size, fingerprint.chunkSize > 0,
+                  expectation?.algorithm == .sha256, expectation?.digest == fingerprint.sha256,
+                  IntegrityExpectation.isDigest(fingerprint.md5, algorithm: .md5),
+                  IntegrityExpectation.isDigest(fingerprint.first256KiBMD5, algorithm: .md5),
+                  fingerprint.sha1.utf8.count == 40,
+                  fingerprint.sha1.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else {
+                throw UploadRecordError.invalid("上传源指纹与文件原始基准不一致")
+            }
+            var offset: Int64 = 0
+            for (index, chunk) in fingerprint.chunks.enumerated() {
+                guard chunk.index == index, chunk.offset == offset, offset < source.size,
+                      chunk.length == min(fingerprint.chunkSize, source.size - offset),
+                      IntegrityExpectation.isDigest(chunk.md5, algorithm: .md5),
+                      IntegrityExpectation.isDigest(chunk.sha256, algorithm: .sha256) else {
+                    throw UploadRecordError.invalid("上传源分块指纹不完整")
+                }
+                offset += chunk.length
+            }
+            guard offset == source.size else { throw UploadRecordError.invalid("上传源分块指纹长度不一致") }
+        }
         if let session {
             guard !session.id.isEmpty, session.partSize > 0, account == nil || session.account == account else {
                 throw UploadRecordError.invalid("上传会话或账号不一致")
@@ -284,6 +307,12 @@ public struct UploadJob: Codable, Sendable, Hashable, Identifiable {
     public var selections: [UploadSelection]?
     /// 只有全部根项目扫描完并持久化后才写入；此前不能开始远端上传。
     public var scanCompletedAt: Date?
+    /// 完整相对路径、目录和原始内容清单的版本化 SHA-256，不包含账号凭据。
+    public var contentSignature: String?
+    /// 仅完整内容相同的活动批次可关联；继续操作表示用户明确允许再次上传。
+    public var duplicateOfJobID: UUID?
+    /// 添加时同账号、同目标的活动批次；排队期间完成后仍可提示，失败和取消项不阻断。
+    public var duplicateCandidateIDs: [UUID]?
     public var totalBytes: Int64
     public var completedBytes: Int64
     public var completedCount: Int
@@ -297,7 +326,8 @@ public struct UploadJob: Codable, Sendable, Hashable, Identifiable {
 
     private enum CodingKeys: String, CodingKey {
         case id, account, accountName, title, destination, conflictPolicy, priority, isPaused, cancellationRequested
-        case fileIDs, selections, scanCompletedAt, totalBytes, completedBytes, completedCount, failedCount, skippedCount
+        case fileIDs, selections, scanCompletedAt, contentSignature, duplicateOfJobID, duplicateCandidateIDs
+        case totalBytes, completedBytes, completedCount, failedCount, skippedCount
         case phase, error, createdAt
     }
 
@@ -312,6 +342,15 @@ public struct UploadJob: Codable, Sendable, Hashable, Identifiable {
     }
 
     public func validate() throws {
+        if let contentSignature, !IntegrityExpectation.isDigest(contentSignature, algorithm: .sha256) {
+            throw UploadRecordError.invalid("上传内容清单摘要无效")
+        }
+        if let duplicateOfJobID, duplicateOfJobID == id || contentSignature == nil {
+            throw UploadRecordError.invalid("重复上传关联缺少完整内容基准或指向自身")
+        }
+        if let duplicateCandidateIDs, Set(duplicateCandidateIDs).count != duplicateCandidateIDs.count || duplicateCandidateIDs.contains(id) {
+            throw UploadRecordError.invalid("重复上传候选包含重复或自身任务")
+        }
         if let selections {
             guard !selections.isEmpty,
                   selections.allSatisfy({ $0.url.isFileURL && !$0.bookmark.isEmpty }) else {

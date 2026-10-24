@@ -121,7 +121,8 @@ struct MainView: View {
     }
 
     private func transferContent(items: [TransferListItem], scope: TransferSelection) -> some View {
-        TransferListView(items: items, category: currentCategory, searchText: query, selection: $selection, scope: scope)
+        TransferListView(items: items, category: currentCategory, searchText: query, selection: $selection, scope: scope,
+                         onLocateUpload: locateUpload)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .edgeBar(.top) {
                 Picker("传输方向", selection: $direction) {
@@ -269,6 +270,15 @@ struct MainView: View {
         }
         category = .all; searchText = ""; selection = [item.id]
     }
+    /// 重复提醒主动定位原批次，复用父页筛选与选中状态，不受新增任务一次性标记限制。
+    private func locateUpload(_ id: UUID) {
+        guard let job = model.uploadJobs.first(where: { $0.id == id }) else {
+            operationError = "原上传任务已移除。可选择继续当前任务。"
+            return
+        }
+        reveal(.upload(job))
+    }
+
     private func revealNewUpload() {
         guard let id = model.lastAddedUploadID, id != revealedUploadID,
               let job = model.uploadJobs.first(where: { $0.id == id }) else { return }
