@@ -366,3 +366,9 @@ Release 构建 `.build/v3-inspector-final-build.log` 通过。Computer Use 在�
 ## 暂停验收的服务器收尾观察
 
 补跑发现运行时暂停用例偶发在请求取消已完成、StubServer 独立线程尚未退出其 1 ms 停顿循环时，立即读取活动请求数。生产引擎仍等待 worker、URLSession 完成回调及检查点收尾；测试改为复用既有有界 waitUntil，等待服务器线程实际归零，超时仍失败，与现有暂停及共享预算用例保持一致。没有改变生产暂停逻辑或放宽资源数量要求。修改后完整 307 项既有测试通过：`.build/v3-preflight-directory-recheck-tests.log`，首次失败证据保留于 `.build/v3-preflight-directory-tests.log`。
+
+## 全部网盘入口明确选择上传目标
+
+上传页保留真正可空的网盘选择。“全部网盘”入口显示“请选择网盘”，选择前没有目标目录、账号会话、目录请求或预检请求，上传与新建目录均不可执行。选择后显示百度／夸克两段；来自明确网盘或准确目录的上下文直接选中，不增加额外确认。
+
+所有调用方已核对，独立类型检查和三项初始化／副作用入口验证通过：`.build/upload-provider-validation/result.txt`。Release 实际 App 构建通过：`.build/v3-explicit-provider-app-build.log`。构建后 Computer Use 返回 Mac 锁屏，尚未完成该版本窗口验收；不将离线门槛验证作为真实拖放或界面验收证据。
