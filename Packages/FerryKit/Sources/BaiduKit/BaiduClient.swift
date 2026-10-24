@@ -97,7 +97,7 @@ extension BaiduClient {
             return (data, http)
         } catch let error as URLError {
             if error.code == .cancelled { throw CancellationError() }
-            throw BaiduError.network(error.localizedDescription)
+            throw BaiduError.transport(error.code)
         }
     }
 

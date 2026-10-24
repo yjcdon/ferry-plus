@@ -46,6 +46,8 @@ public enum BaiduError: LocalizedError, Equatable, Sendable {
     case httpStatus(Int)
     case invalidResponse
     case network(String)
+    /// 保留 URLSession 的错误码，分片等幂等请求据此判断是否可以有限重试。
+    case transport(URLError.Code)
 
     public var errorDescription: String? {
         switch self {
@@ -119,6 +121,8 @@ public enum BaiduError: LocalizedError, Equatable, Sendable {
             "百度返回了无法识别的数据，接口可能已变化。"
         case let .network(message):
             "网络错误：\(message)"
+        case let .transport(code):
+            "网络错误：\(URLError(code).localizedDescription)"
         }
     }
 }

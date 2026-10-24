@@ -47,6 +47,7 @@ extension BaiduClient {
                 return try await listShareDirectory(session, directory: directory, method: method)
             } catch let error as BaiduError {
                 if case .network = error { throw error }
+                if case .transport = error { throw error }
                 firstError = firstError ?? error
             }
         }

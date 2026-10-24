@@ -131,7 +131,7 @@ DownloadEngine 增加可选共享预算参数，默认保持原有请求行为�
 
 14 项隔离验证通过，覆盖嵌套与空目录、零文件、独立摘要、暂停继续、跳过／保留两份、安全覆盖阻断、合并响应丢失、核对后不重复合并、本地源移走后回读、取消后核对与移除、资源归零。证据 `.build/coordinator-validation/result.txt`。完整 26.5 SDK Release App 构建和验签通过：`.build/v3-upload-ui-build.log`。
 
-仍待完成的能力：安全覆盖、服务端过期／分片查询、自动有限分片重试及真实异常恢复验收；当前分片失败保留检查点供重试。真实网盘命名冲突的原子行为另行验证，离线同名用例不等同于服务端并发保证。
+仍待完成的能力：安全覆盖、服务端过期／分片查询及真实异常恢复验收。真实网盘命名冲突的原子行为另行验证，离线同名用例不等同于服务端并发保证。
 
 ## 传输设置
 
@@ -162,3 +162,9 @@ DownloadEngine 增加可选共享预算参数，默认保持原有请求行为�
 证据 `.build/ui-upload-validation/baidu-multipart-completed.txt`、`quark-multipart-recovered.txt`、`multipart-integrity-results.json`、`visibility-fixed-completed.txt`、`visibility-integrity-results.json`。最初及 multipart 两轮两家的测试目录、最终 visibility 夸克目录均已按身份移入回收站并确认消失，清理日志 `cleanup-initial.jsonl`／`cleanup-multipart.jsonl`／`cleanup-visibility.jsonl`。
 
 昵称切 Tab 的截图像素正确，可访问性文本存在旧值缓存，没有为此增加昵称状态或强制重建。尝试附着文件选择面板未消除 Computer Use 无窗口错误，已撤回该无效焦点补丁，沿用 Ferry 的 `panel.begin`；测试通过重新激活同一进程继续，不把它写成已修复的 App 缺陷。
+
+## 分片有限自动重试
+
+上传引擎仅重试同一会话、同一编号、同一内容的分片发送，默认额外 2 次。结构化的暂时网络错误、HTTP 429 和 5xx 可重试；凭据、签名、摘要及回执保存失败立即返回。准备和合并不走此重试，避免重复副作用。百度保留 URLError 的结构化错误码，不解析错误文案判断是否重试。
+
+重试重新计入上传流量，等待期间释放连接；确认字节只在回执保存后累加。13 项隔离检查通过，包含重试上限、流量计数、取消、源文件变化、错误分类及许可释放，证据 `.build/upload-retry-validation/result.txt`。真实包编译已通过；全套测试发现的账号警告优先级问题随下载校验功能修正后复测。

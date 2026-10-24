@@ -23,6 +23,28 @@ public protocol UploadDestination: Sendable {
                     prepared: PreparedUpload) async throws -> UploadPartReceipt
     /// 调用前由编排层保存合并意图；抛错可能表示结果未知，禁止据此无条件重新提交。
     func complete(_ prepared: PreparedUpload, receipts: [UploadPartReceipt]) async throws -> RemoteReference
+    /// 只用于同会话同分片的幂等发送，不适用于准备、合并或 finish。
+    func shouldRetryPart(after error: any Error) -> Bool
+}
+
+extension UploadDestination {
+    /// 仅结构化传输错误和 HTTP 暂态可重试；业务码、凭据、摘要、配额和签名错误保持失败。
+    public func shouldRetryPart(after error: any Error) -> Bool {
+        let transportCode: URLError.Code?
+        if let error = error as? URLError { transportCode = error.code }
+        else if case BaiduError.transport(let code) = error { transportCode = code }
+        else { transportCode = nil }
+        if let transportCode {
+            return [.timedOut, .networkConnectionLost, .notConnectedToInternet, .cannotConnectToHost,
+                    .cannotFindHost, .dnsLookupFailed, .resourceUnavailable].contains(transportCode)
+        }
+        let status: Int
+        if case BaiduError.httpStatus(let value) = error { status = value }
+        else if case QuarkError.httpStatus(let value) = error { status = value }
+        else if let error = error as? QuarkStorageError { status = error.status }
+        else { return false }
+        return status == 429 || (500...599).contains(status)
+    }
 }
 
 public enum UploadDestinationError: Error, LocalizedError, Sendable {

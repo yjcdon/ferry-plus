@@ -45,6 +45,7 @@ struct StubResponse: Sendable {
     var body = Data()
     /// 模拟重定向后的最终地址。
     var url: URL?
+    var transportError: URLError.Code?
 
     static func json(_ text: String, status: Int = 200, headers: [String: String] = [:]) -> StubResponse {
         var headers = headers
@@ -99,6 +100,10 @@ final class StubURLProtocol: URLProtocol, @unchecked Sendable {
             body: request.httpBody ?? request.httpBodyStream.map(Self.read) ?? Data()
         )
         let stub = Stub.shared.respond(to: recorded)
+        if let code = stub.transportError {
+            client?.urlProtocol(self, didFailWithError: URLError(code))
+            return
+        }
         let response = HTTPURLResponse(url: stub.url ?? recorded.url, statusCode: stub.status,
                                        httpVersion: "HTTP/1.1", headerFields: stub.headers)!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)

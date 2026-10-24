@@ -2,6 +2,11 @@ import Foundation
 import Darwin
 import DownloadKit
 
+public enum UploadEngineError: Error, LocalizedError, Sendable {
+    case invalidRetryConfiguration
+    public var errorDescription: String? { "分片额外重试次数必须为 0～5，等待时间必须为 0～10 秒" }
+}
+
 /// 只统计服务端已确认且已持久化的逻辑字节；重复执行和分片重试不会重复累加。
 public struct UploadEngineProgress: Sendable, Equatable {
     public let confirmedBytes: Int64
@@ -15,9 +20,17 @@ public struct UploadEngineProgress: Sendable, Equatable {
 public struct UploadEngine: Sendable {
     private let destination: any UploadDestination
     private let budget: TransferBudget
+    private let maximumPartRetries: Int
+    private let partRetryDelay: Duration
 
-    public init(destination: any UploadDestination, budget: TransferBudget) {
+    public init(destination: any UploadDestination, budget: TransferBudget, maximumPartRetries: Int = 2,
+                partRetryDelay: Duration = .milliseconds(300)) throws {
+        guard (0...5).contains(maximumPartRetries), (.zero ... .seconds(10)).contains(partRetryDelay) else {
+            throw UploadEngineError.invalidRetryConfiguration
+        }
         self.destination = destination; self.budget = budget
+        self.maximumPartRetries = maximumPartRetries
+        self.partRetryDelay = partRetryDelay
     }
 
     /// 只发送本会话待发且没有持久回执的分片；每个确认回执必须先成功保存才推进。
@@ -68,12 +81,8 @@ public struct UploadEngine: Sendable {
                                  count: count, url: localURL)
             try verify(descriptor: descriptor, url: localURL, expected: sourceIdentity)
             let expectedSHA256 = sha256(of: index, prepared: prepared)
-            let receipt = try await budget.withPermit {
-                try Task.checkCancellation()
-                // 等待连接期间路径可能被替换；核对后发送已读出的同一份字节。
-                try verify(descriptor: descriptor, url: localURL, expected: sourceIdentity)
-                return try await destination.uploadPart(bytes, index: index, expectedSHA256: expectedSHA256, prepared: prepared)
-            }
+            let receipt = try await send(bytes, index: index, expectedSHA256: expectedSHA256, prepared: prepared,
+                                         descriptor: descriptor, url: localURL)
             try check(receipt, index: index, prepared: prepared)
             // 收到确认后优先保存，不在此边界先检查取消而丢掉已确认回执。
             try await onReceipt(receipt)
@@ -87,6 +96,33 @@ public struct UploadEngine: Sendable {
             try verify(descriptor: descriptor, url: localURL, expected: sourceIdentity)
         }
         return confirmed.values.sorted { $0.index < $1.index }
+    }
+
+    /// 首次额度在读取缓冲前领取；重试重新计入发送流量，始终发送同一份已核对字节。
+    private func send(_ bytes: Data, index: Int, expectedSHA256: String, prepared: PreparedUpload,
+                      descriptor: Int32, url: URL) async throws -> UploadPartReceipt {
+        for attempt in 0...maximumPartRetries {
+            try Task.checkCancellation()
+            try verify(descriptor: descriptor, url: url, expected: prepared.source.identity)
+            if attempt > 0 {
+                try await budget.consume(bytes.count, direction: .upload)
+                try verify(descriptor: descriptor, url: url, expected: prepared.source.identity)
+            }
+            do {
+                return try await budget.withPermit {
+                    try Task.checkCancellation()
+                    try verify(descriptor: descriptor, url: url, expected: prepared.source.identity)
+                    return try await destination.uploadPart(bytes, index: index, expectedSHA256: expectedSHA256, prepared: prepared)
+                }
+            } catch {
+                if error is CancellationError || Task.isCancelled { throw CancellationError() }
+                guard attempt < maximumPartRetries, destination.shouldRetryPart(after: error) else { throw error }
+                // withPermit 已释放连接；等待期间取消立即退出，也不产生后续逻辑进度。
+                if partRetryDelay > .zero { try await Task.sleep(for: partRetryDelay) }
+                try verify(descriptor: descriptor, url: url, expected: prepared.source.identity)
+            }
+        }
+        throw UploadDestinationError.invalidReceipt
     }
 
     /// 恢复回执必须属于当前待发片及原始源版本，非空服务端回执由对应策略在合并时解析核对。

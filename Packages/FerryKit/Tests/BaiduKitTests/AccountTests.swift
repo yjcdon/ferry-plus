@@ -61,6 +61,17 @@ extension StubbedNetworkTests {
             await #expect(throws: BaiduError.loginExpired) { try await client.validate() }
         }
 
+        /// URLSession 的结构化错误跨客户端边界保留，不依赖本地化文案判断重试。
+        @Test func preservesTransportErrorCode() async {
+            let client = Fixture.client { _ in StubResponse(transportError: .timedOut) }
+            await #expect(throws: BaiduError.transport(.timedOut)) { try await client.validate() }
+        }
+
+        @Test func mapsTransportCancellationToTaskCancellation() async {
+            let client = Fixture.client { _ in StubResponse(transportError: .cancelled) }
+            await #expect(throws: CancellationError.self) { try await client.validate() }
+        }
+
         @Test func emptyBDStokenFailsValidation() async {
             let client = Fixture.client { _ in .json(#"{"errno":0,"result":{"bdstoken":""}}"#) }
             await #expect(throws: BaiduError.loginExpired) { try await client.validate() }
