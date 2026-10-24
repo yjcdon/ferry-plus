@@ -8,10 +8,16 @@ public struct JobStore: Sendable {
         self.fileURL = fileURL
     }
 
-    /// 文件不存在时返回空列表。文件无法读取或解码时抛出错误。
+    /// 读取成功后保留首次进入 3.0 时的原始元数据，后续保存不覆盖该备份。
+    /// 文件无法读取、解码或备份时抛出错误，避免没有回退依据就覆盖旧格式。
     public func load() throws -> [Job] {
         guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
-        return try JSONDecoder().decode([Job].self, from: Data(contentsOf: fileURL))
+        let jobs = try JSONDecoder().decode([Job].self, from: Data(contentsOf: fileURL))
+        let backup = fileURL.appendingPathExtension("before-v3")
+        if !FileManager.default.fileExists(atPath: backup.path) {
+            try FileManager.default.copyItem(at: fileURL, to: backup)
+        }
+        return jobs
     }
 
     public func save(_ jobs: [Job]) throws {

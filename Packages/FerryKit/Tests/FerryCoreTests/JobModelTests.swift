@@ -144,7 +144,13 @@ import Testing
         second.warning = "清理失败"
 
         try store.save([first, second])
+        let original = try Data(contentsOf: store.fileURL)
         #expect(try store.load() == [first, second])
+        let beforeV3 = store.fileURL.appendingPathExtension("before-v3")
+        #expect(try Data(contentsOf: beforeV3) == original)
+        try store.save([second])
+        #expect(try store.load() == [second])
+        #expect(try Data(contentsOf: beforeV3) == original)
     }
 
     @Test func decodesJobsWithMissingFields() throws {

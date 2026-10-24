@@ -120,7 +120,15 @@ struct StateStore: Sendable {
         return try FileManager.default
             .contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "json" }
-            .map { try decoder.decode(DownloadRecord.self, from: Data(contentsOf: $0)) }
+            .map { url in
+                let record = try decoder.decode(DownloadRecord.self, from: Data(contentsOf: url))
+                // 只保留原始 JSON，不复制分片正文；备份扩展名不参与状态枚举。
+                let backup = url.appendingPathExtension("before-v3")
+                if !FileManager.default.fileExists(atPath: backup.path) {
+                    try FileManager.default.copyItem(at: url, to: backup)
+                }
+                return record
+            }
     }
 
     func fileURL(for id: String) -> URL {
