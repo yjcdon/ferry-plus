@@ -109,8 +109,6 @@ struct UploadView: View {
         HStack {
             Text("上传到网盘").font(.headline)
             Spacer()
-            Button("添加文件或文件夹…", action: chooseFiles)
-                .disabled(isSubmitting)
         }
     }
 
@@ -121,11 +119,7 @@ struct UploadView: View {
                 Spacer()
                 Text("\(files.count) 项").foregroundStyle(.secondary)
             }
-            if files.isEmpty {
-                Text("将文件或文件夹拖到这里，或点击“添加文件或文件夹”。")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 65)
-            } else {
+            if !files.isEmpty {
                 ScrollView {
                     LazyVStack(spacing: 6) {
                         ForEach(files, id: \.self) { url in
@@ -149,6 +143,15 @@ struct UploadView: View {
                 }
                 .frame(height: min(CGFloat(files.count) * 25, 100))
             }
+            Button(action: chooseFiles) {
+                Text(files.isEmpty ? "点击选择文件或文件夹，也可拖到这里" : "点击继续添加文件或文件夹")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: files.isEmpty ? 65 : 32)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .disabled(isSubmitting)
+            .accessibilityLabel("选择文件或文件夹")
             if let selectionError { errorLabel(selectionError) }
         }
     }

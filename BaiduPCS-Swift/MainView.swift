@@ -139,7 +139,14 @@ struct MainView: View {
                     .inspectorColumnWidth(min: 260, ideal: 320, max: 480)
             }
             .toolbar {
-                ToolbarItem(placement: .primaryAction) { addMenu }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button { model.presentAddLink() } label: { Label("添加分享链接", systemImage: "link") }
+                        .help("添加分享链接")
+                    Button { model.presentNetdiskDownload() } label: { Label("从我的网盘下载", systemImage: "cloud") }
+                        .help("从我的网盘下载")
+                    Button { model.presentUpload(provider: providerFilter) } label: { Label("上传文件", systemImage: "arrow.up.doc") }
+                        .help("上传文件")
+                }
                 ToolbarItem(placement: .primaryAction) { TransferPauseResumeButton(scope: scope) }
                 ToolbarItem(placement: .primaryAction) {
                     Button { isInspectorPresented.toggle() } label: {
@@ -151,15 +158,6 @@ struct MainView: View {
                     TaskSearchField(text: $searchText, focusRequest: searchFocusRequest).frame(width: 104)
                 }
             }
-    }
-
-    private var addMenu: some View {
-        Menu {
-            Button { model.presentAddLink() } label: { Label("添加分享链接…", systemImage: "link") }
-            Button { model.presentNetdiskDownload() } label: { Label("从我的网盘下载…", systemImage: "cloud") }
-            Button { model.presentUpload(provider: providerFilter) } label: { Label("上传文件…", systemImage: "arrow.up.doc") }
-        } label: { Label("添加任务", systemImage: "plus") }
-        .help("添加任务")
     }
 
     /// 即使菜单携带旧快照，执行入口也只接收当前仍可见的同方向身份。
