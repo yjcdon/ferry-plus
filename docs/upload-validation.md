@@ -135,3 +135,9 @@ c5bee9ac7f6118d7043171628a9f61bcde0cc1a870c8065e6d65642be3e48697
 按[官方安装脚本](https://github.com/quark-clouddrive/quarkclouddrive_offical/blob/main/skills/quarkclouddrive/install.sh) 下载的 1.0.25 公开 ZIP 仅作静态检查，未安装／执行。其 OAuth 上传任务 cancel 使用本地 AbortController；没有查到远端 multipart abort 调用，不能据此声称远端清理已完成。现有 Cookie 与该 OAuth 合同分别保留，不混用授权。
 
 证据 `.build/v3-quark-abort-diagnosis/{report.md,run.jsonl,auth-control.jsonl,anonymous-control.jsonl,source-hashes.json}`。未接入未验证的 abort；原会话仍可列片，归属和唯一 Keychain 上下文保留，`aborted=false`。不涉及用户两条暂停的大文件会话，没有新建云端对象，探针均已退出。
+
+## 百度预创建容量拒绝的当前网页合同
+
+2026-10-25，匿名读取[官方主页面](https://pan.baidu.com/disk/main)实际引入的 [home](https://nd-static.bdstatic.com/m-static/v20-main/home/js/home.0192e673.js) 和 [上传 SDK](https://nd-static.bdstatic.com/m-static/v20-main/home/js/chunk-vendors.ba2fd94a.js)。同一个 SDK 的预创建地址为 `/api/precreate`，回调将非零 errno 直接交给该 SDK 的上传错误映射，其中 -10 明确为空间不足，正数 10 为 superfile 创建失败。现只将该准备阶段的 -10 识别为明确容量拒绝；未知码和 HTTP 错误仍保留未决，不猜测文字。
+
+证据 `.build/baidu-precreate-contract/{report.md,manifest.json,evidence-excerpts.json}` 保存 URL、原始哈希和精确字符／字节偏移。此为当前官方网页接口合同核对，没有填满真实网盘；独立 actor 验证确认 -10 修复原因后可以重试，+10 和未知码不重复预创建。

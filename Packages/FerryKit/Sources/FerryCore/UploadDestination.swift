@@ -16,6 +16,8 @@ public protocol UploadDestination: Sendable {
     /// 服务端准备回执到达时立即持久化，再进行后续哈希协商等远端副作用。
     func prepare(name: String, target: RemoteReference, source: UploadSourceFingerprint, fileID: UUID,
                  onPrepared: @Sendable (PreparedUpload) async throws -> Void) async throws -> PreparedUpload
+    /// 只有可确定没有建立新会话／产物的准备拒绝才允许再次预创建；网络、解析及未知结果默认保留意图。
+    func preparationFailureIsDefinitive(_ error: any Error) -> Bool
     /// 仅补完准备后的哈希协商；不声称查询或验证服务端已保留分片。
     func finishPreparation(_ prepared: PreparedUpload,
                            onPrepared: @Sendable (PreparedUpload) async throws -> Void) async throws -> PreparedUpload
@@ -30,6 +32,9 @@ public protocol UploadDestination: Sendable {
 }
 
 extension UploadDestination {
+    /// 自定义策略未声明准确拒绝语义时，失败不能证明远端没有副作用。
+    public func preparationFailureIsDefinitive(_ error: any Error) -> Bool { false }
+
     /// 未提供服务端列片合同的策略沿用本地回执，不宣称远端分片已重新查询。
     public func validateResumedParts(_ prepared: PreparedUpload, receipts: [UploadPartReceipt]) async throws { }
 
@@ -282,6 +287,20 @@ public struct BaiduUploadDestination: UploadDestination {
         return prepared
     }
 
+    /// 这些类型来自本地凭据校验或预创建的明确业务拒绝；HTTP 状态、未知 errno、无身份秒传均不是拒绝凭据。
+    public func preparationFailureIsDefinitive(_ error: any Error) -> Bool {
+        if case UploadDestinationError.nameConflict = error { return true }
+        guard let error = error as? BaiduError else { return false }
+        switch error {
+        // 当前官方上传 SDK 的 /api/precreate errno=-10 明确为空间不足；正数 10 不具有此语义。
+        case .server(code: -10, message: _): return true
+        case .missingBDUSS, .missingSTOKEN, .loginExpired, .loginStateMissing, .securityVerification,
+             .alreadyExists, .invalidFileName, .invalidNameOrAccessDenied, .accessDenied, .unauthorized:
+            return true
+        default: return false
+        }
+    }
+
     /// 百度预创建已完成准备；只核对恢复记录，不重复请求产生新会话。
     public func finishPreparation(_ prepared: PreparedUpload,
                                   onPrepared: @Sendable (PreparedUpload) async throws -> Void) async throws -> PreparedUpload {
@@ -348,6 +367,16 @@ public struct QuarkUploadDestination: UploadDestination {
             isReadyForTransfer: false, secretReference: reference, source: source)
         try await onPrepared(prepared)
         return try await finishPreparation(prepared, onPrepared: onPrepared)
+    }
+
+    /// 登录与容量权益拒绝有现有结构化合同；不按任意 HTTP 4xx 或错误文字猜测预创建未发生。
+    public func preparationFailureIsDefinitive(_ error: any Error) -> Bool {
+        guard let error = error as? QuarkError else { return false }
+        switch error {
+        case .loginExpired, .missingCredential: return true
+        case .serviceCode(let code), .serviceFailure(let code, _): return code == "32003"
+        default: return false
+        }
     }
 
     /// 使用已保存的原会话补完哈希协商；该请求的重复结果需由网盘明确返回，不能猜测秒传。

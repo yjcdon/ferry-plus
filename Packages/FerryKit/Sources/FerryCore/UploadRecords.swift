@@ -60,7 +60,7 @@ public struct UploadPartReceipt: Codable, Sendable, Hashable {
 
 /// 服务端副作用前保存意图，响应丢失保留 pending，恢复时查询而不是盲目重提。
 public struct UploadCommit: Codable, Sendable, Hashable, Identifiable {
-    public enum Kind: String, Codable, Sendable, Hashable { case createDirectory, merge, replacement }
+    public enum Kind: String, Codable, Sendable, Hashable { case prepare, createDirectory, merge, replacement }
     public enum Status: String, Codable, Sendable, Hashable { case pending, confirmed, rejected }
     public let id: UUID
     public let kind: Kind

@@ -816,24 +816,47 @@ public actor UploadCoordinator {
         try await verify(&file, environment: env)
     }
 
-    /// 只对明确未创建会话的名称冲突重选，复用原始指纹；已持久化 preparation 永远不换名重建。
+    /// 预创建前先保存意图；无准确回执的失败保留 pending，明确拒绝才允许重新选择名称或显式重试。
     private func prepare(_ file: inout UploadFile, fingerprint: UploadSourceFingerprint, parent: RemoteReference,
                          environment env: UploadEnvironment) async throws -> Bool {
         let jobID = file.jobID
         var rejectedNames: Set<String> = []
         for attempt in 0...3 {
             try Task.checkCancellation()
+            guard !file.commits.contains(where: { $0.kind == .prepare && $0.status == .pending }) else {
+                throw UploadCoordinatorError.unconfirmedCommit
+            }
+            let intent = UploadCommit(kind: .prepare)
+            file.commits.append(intent)
+            try await saveFile(file)
+            // 策略尚未调用时的本地取消可确定无远端副作用，避免留下不必要的未决请求。
+            if Task.isCancelled {
+                file.commits[file.commits.count - 1].status = .rejected
+                try await saveFile(file)
+                throw CancellationError()
+            }
             do {
                 _ = try await env.destination.prepare(name: file.remoteName!, target: parent, source: fingerprint, fileID: file.id,
                     onPrepared: { [weak self] prepared in
                         guard let self else { throw CancellationError() }
                         try await self.prepared(prepared, jobID: jobID)
                     })
-                return true
-            } catch UploadDestinationError.nameConflict {
                 guard let job = jobs[jobID] else { throw UploadCoordinatorError.missingJob }
                 file = try await store.loadFile(id: file.id, in: job)
-                guard file.preparation == nil else { throw UploadDestinationError.nameConflict }
+                guard file.preparation != nil else { throw UploadCoordinatorError.unconfirmedCommit }
+                return true
+            } catch {
+                guard let job = jobs[jobID] else { throw UploadCoordinatorError.missingJob }
+                file = try await store.loadFile(id: file.id, in: job)
+                // 首次回调已经确认时，后续哈希协商或写入失败只能恢复原会话，不能拒绝后重新预创建。
+                guard file.preparation == nil,
+                      let index = file.commits.firstIndex(where: { $0.id == intent.id && $0.status == .pending }),
+                      env.destination.preparationFailureIsDefinitive(error) || isNameConflict(error) else {
+                    throw error
+                }
+                file.commits[index].status = .rejected
+                try await saveFile(file)
+                guard case UploadDestinationError.nameConflict = error else { throw error }
                 switch job.conflictPolicy {
                 case .skip:
                     file.phase = .skipped; try await saveFile(file); return false
@@ -852,6 +875,11 @@ public actor UploadCoordinator {
             }
         }
         throw UploadDestinationError.nameConflict
+    }
+
+    private func isNameConflict(_ error: any Error) -> Bool {
+        if case UploadDestinationError.nameConflict = error { return true }
+        return false
     }
 
     /// 与未决合并共用准确对象回执合同；查询失败/未确认时保持恢复标记，显式重试仍可再次查询。
@@ -883,6 +911,8 @@ public actor UploadCoordinator {
 
     private func inspect(_ file: inout UploadFile, parent: RemoteReference, environment env: UploadEnvironment) async throws {
         for index in file.commits.indices where file.commits[index].status == .pending {
+            // 预创建未知结果没有可查询的会话 ID；现有合并查询合同不能认领同名对象或解除此意图。
+            guard file.commits[index].kind != .prepare else { throw UploadCoordinatorError.unconfirmedCommit }
             switch try await env.inspectCommit(file.commits[index], file, parent) {
             case .unconfirmed: throw UploadCoordinatorError.unconfirmedCommit
             case .rejected(let reason):
@@ -989,11 +1019,17 @@ public actor UploadCoordinator {
         }
     }
 
+    /// 会话与首次预创建确认原子保存；重复协商回调只更新同一会话，旧版无意图记录继续兼容。
     private func prepared(_ prepared: PreparedUpload, jobID: UUID) async throws {
         guard let job = jobs[jobID], prepared.account == job.account else { throw UploadDestinationError.otherAccount }
         var file = try await store.loadFile(id: prepared.fileID, in: job)
         file.preparation = prepared
         file.sourceFingerprint = nil
+        // Quark 会先保存会话、再保存哈希协商结果；只确认首次意图，旧记录没有该意图也可继续。
+        for index in file.commits.indices where file.commits[index].kind == .prepare && file.commits[index].status == .pending {
+            file.commits[index].status = .confirmed
+            file.commits[index].finalObject = prepared.remoteReference
+        }
         try await saveFile(file)
     }
 
