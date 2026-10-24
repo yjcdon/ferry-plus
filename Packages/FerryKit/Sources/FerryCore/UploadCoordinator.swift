@@ -1,6 +1,7 @@
 import Foundation
 import CryptoKit
 import DownloadKit
+import QuarkKit
 
 public enum UploadCoordinatorError: Error, LocalizedError, Sendable {
     case missingJob, missingSelections, scanIssue(String), missingParent(String), unsafeReplacement
@@ -325,7 +326,8 @@ public actor UploadCoordinator {
         guard let job = jobs[id] else { throw UploadCoordinatorError.missingJob }
         for fileID in job.fileIDs {
             var file = try await store.loadFile(id: fileID, in: job)
-            if file.commits.contains(where: { $0.status == .pending }) { throw UploadCoordinatorError.unconfirmedCommit }
+            if file.commits.contains(where: { $0.status == .pending }) ||
+                (file.sessionResultRecoveryRequired == true && file.remoteReference == nil) { throw UploadCoordinatorError.unconfirmedCommit }
             if ![.completed, .skipped].contains(file.phase) {
                 file.phase = .cancelled; file.failedPhase = nil; file.error = nil; try await saveFile(file)
             }
@@ -338,13 +340,18 @@ public actor UploadCoordinator {
         guard let job = jobs[id] else { throw UploadCoordinatorError.missingJob }
         guard workers[id] == nil, !stopping.contains(id) else { throw UploadCoordinatorError.busy }
         stopping.insert(id)
-        defer { stopping.remove(id) }
+        defer { stopping.remove(id); schedule() }
         let env = try await environment(job.account)
         guard env.destination.account == job.account else { throw UploadDestinationError.otherAccount }
         var directories: [String: RemoteReference] = ["": job.destination]
         for fileID in job.fileIDs {
             var file = try await store.loadFile(id: fileID, in: job)
-            if file.commits.contains(where: { $0.status == .pending }) {
+            if file.sessionResultRecoveryRequired == true {
+                let parentPath = file.relativePath.split(separator: "/").dropLast().joined(separator: "/")
+                guard let parent = directories[parentPath] else { throw UploadCoordinatorError.missingParent(parentPath) }
+                try await recoverSessionResult(&file, parent: parent, environment: env)
+                if !job.cancellationRequested { jobs[id]!.phase = .queued }
+            } else if file.commits.contains(where: { $0.status == .pending }) {
                 let parentPath = file.relativePath.split(separator: "/").dropLast().joined(separator: "/")
                 guard let parent = directories[parentPath] else { throw UploadCoordinatorError.missingParent(parentPath) }
                 do { try await inspect(&file, parent: parent, environment: env) }
@@ -371,7 +378,9 @@ public actor UploadCoordinator {
         stopping.insert(id)
         defer { stopping.remove(id) }
         for fileID in job.fileIDs {
-            if try await store.loadFile(id: fileID, in: job).commits.contains(where: { $0.status == .pending }) {
+            let file = try await store.loadFile(id: fileID, in: job)
+            if file.commits.contains(where: { $0.status == .pending }) ||
+                (file.sessionResultRecoveryRequired == true && file.remoteReference == nil) {
                 throw UploadCoordinatorError.unconfirmedCommit
             }
         }
@@ -654,7 +663,30 @@ public actor UploadCoordinator {
         return result
     }
 
+    /// 原会话不可用先查产物；只有精确结果进入完整回读，未知结果保留原会话而不重新准备。
     private func process(_ file: inout UploadFile, jobID: UUID, parent: RemoteReference, environment env: UploadEnvironment) async throws {
+        do {
+            try await processCurrent(&file, jobID: jobID, parent: parent, environment: env)
+        } catch let error as QuarkStorageError where error.status == 404 && error.code == "NoSuchUpload" {
+            guard env.destination.account.provider == .quark, !file.isDirectory,
+                  let job = jobs[jobID] else { throw error }
+            file = try await store.loadFile(id: file.id, in: job)
+            guard file.preparation != nil, file.remoteReference == nil else { throw error }
+            file.sessionResultRecoveryRequired = true
+            file.error = "原上传会话不可用，云端产物仍待核对；未重新上传。"
+            try await saveFile(file)
+            try Task.checkCancellation()
+            try await recoverSessionResult(&file, parent: parent, environment: env)
+            try await verify(&file, environment: env)
+        }
+    }
+
+    private func processCurrent(_ file: inout UploadFile, jobID: UUID, parent: RemoteReference, environment env: UploadEnvironment) async throws {
+        if file.sessionResultRecoveryRequired == true {
+            try await recoverSessionResult(&file, parent: parent, environment: env)
+            try await verify(&file, environment: env)
+            return
+        }
         guard jobs[jobID]?.scanCompletedAt != nil else { throw UploadCoordinatorError.missingSelections }
         let hadPendingCommit = file.commits.contains(where: { $0.status == .pending })
         if hadPendingCommit {
@@ -805,6 +837,33 @@ public actor UploadCoordinator {
         throw UploadDestinationError.nameConflict
     }
 
+    /// 与未决合并共用准确对象回执合同；查询失败/未确认时保持恢复标记，显式重试仍可再次查询。
+    private func recoverSessionResult(_ file: inout UploadFile, parent: RemoteReference, environment env: UploadEnvironment) async throws {
+        guard file.sessionResultRecoveryRequired == true, let prepared = file.preparation,
+              prepared.account == env.destination.account, !file.isDirectory else {
+            throw UploadDestinationError.invalidPreparation
+        }
+        if file.remoteReference != nil {
+            file.phase = .verifying; file.failedPhase = nil; file.error = nil
+            try await saveFile(file)
+            return
+        }
+        switch try await env.inspectPreparedResult(prepared, parent) {
+        case .unconfirmed:
+            throw UploadCoordinatorError.unconfirmedCommit
+        case .rejected(let reason):
+            throw UploadCoordinatorError.rejectedCommit(reason)
+        case .confirmed(let reference):
+            let native = try JSONDecoder().decode(QuarkUploadSession.self, from: prepared.nativeSession)
+            guard reference == .quark(fid: native.fileID) else { throw UploadDestinationError.remoteResultUnconfirmed }
+            file.remoteReference = reference; file.phase = .verifying; file.failedPhase = nil; file.error = nil
+            for index in file.commits.indices where file.commits[index].status == .pending && file.commits[index].kind == .merge {
+                file.commits[index].status = .confirmed; file.commits[index].finalObject = reference
+            }
+            try await saveFile(file)
+        }
+    }
+
     private func inspect(_ file: inout UploadFile, parent: RemoteReference, environment env: UploadEnvironment) async throws {
         for index in file.commits.indices where file.commits[index].status == .pending {
             switch try await env.inspectCommit(file.commits[index], file, parent) {
@@ -872,7 +931,7 @@ public actor UploadCoordinator {
         catch { throw UploadCoordinatorError.persistence(error.localizedDescription) }
         file.integrityRecordID = record.id
         guard record.status == .verified else { try await saveFile(file); throw UploadCoordinatorError.mismatch }
-        file.phase = .completed; try await saveFile(file)
+        file.phase = .completed; file.sessionResultRecoveryRequired = nil; try await saveFile(file)
         if let prepared = file.preparation {
             do {
                 if let reference = prepared.secretReference, let secrets { try await secrets.delete(reference: reference) }

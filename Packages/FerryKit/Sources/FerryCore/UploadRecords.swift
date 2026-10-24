@@ -1,4 +1,5 @@
 import Foundation
+import QuarkKit
 
 /// 上传阶段独立于暂停、取消意图；提交中断后仍需核对远端结果。
 public enum UploadPhase: String, Codable, Sendable, Hashable, CaseIterable {
@@ -182,6 +183,9 @@ public struct UploadFile: Codable, Sendable, Equatable, Identifiable {
     public var session: UploadSession?
     /// 含原始内容指纹与原生会话；敏感授权仅保存 Keychain 引用。
     public var preparation: PreparedUpload?
+    /// 原会话明确返回 NoSuchUpload 后保留恢复依据；无远端引用时待查结果，有引用时只恢复完整回读。
+    /// 旧记录缺失为 nil；此标记不表示已取消、已过期或允许重新上传。
+    public var sessionResultRecoveryRequired: Bool?
     public var parts: [UploadPartReceipt]
     public var commits: [UploadCommit]
     public var remoteReference: RemoteReference?
@@ -236,6 +240,18 @@ public struct UploadFile: Codable, Sendable, Equatable, Identifiable {
                   expectation?.algorithm == .sha256,
                   expectation?.digest == preparation.source.sha256 else {
                 throw UploadRecordError.invalid("上传准备记录与文件、账号或原始内容基准不一致")
+            }
+        }
+        if sessionResultRecoveryRequired == true {
+            guard !isDirectory, let preparation, preparation.account.provider == .quark,
+                  ![.completed, .skipped].contains(phase) else {
+                throw UploadRecordError.invalid("会话结果恢复缺少原夸克准备记录，或文件已完成")
+            }
+            if let remoteReference {
+                let native = try JSONDecoder().decode(QuarkUploadSession.self, from: preparation.nativeSession)
+                guard remoteReference == .quark(fid: native.fileID) else {
+                    throw UploadRecordError.invalid("会话恢复产物不是原预分配文件")
+                }
             }
         }
         guard Set(parts.map(\.index)).count == parts.count else { throw UploadRecordError.invalid("分片回执重复") }

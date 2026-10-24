@@ -72,6 +72,31 @@ extension UploadEnvironment {
         }, releasePreparation: { prepared in
             guard prepared.account == account else { throw UploadDestinationError.otherAccount }
             if let reference = prepared.secretReference { try await secrets.delete(reference: reference) }
+        }, inspectPreparedResult: { prepared, parent in
+            try await checkSession()
+            guard prepared.account == account else { throw UploadDestinationError.otherAccount }
+            let native = try JSONDecoder().decode(QuarkUploadSession.self, from: prepared.nativeSession)
+            guard native.parentFID == (try quarkFID(parent)) else { throw UploadDestinationError.invalidPreparation }
+            // 只重查准确 fid，不认领名称相同的条目，也不把短暂不可见当成无产物。
+            for attempt in 0..<4 {
+                try Task.checkCancellation()
+                let entries = try await client.listDirectory(parentFID: native.parentFID)
+                try await checkSession()
+                if let entry = entries.first(where: { $0.fid == native.fileID }) {
+                    guard !entry.isDirectory, entry.size == native.size else {
+                        return .rejected("原预分配对象的类型或大小与上传基准不一致")
+                    }
+                    return .confirmed(.quark(fid: native.fileID))
+                }
+                if attempt < 3 { try await Task.sleep(for: .milliseconds(200 * (1 << attempt))) }
+            }
+            // 对象可能已被外部移动；以精确 fid 解析可回读产物，错误原样保留，不能据此宣称不存在。
+            let link = try await client.download(fid: native.fileID)
+            try await checkSession()
+            guard link.size == nil || link.size == native.size else {
+                return .rejected("原预分配对象的大小与上传基准不一致")
+            }
+            return .confirmed(.quark(fid: native.fileID))
         })
     }
 
