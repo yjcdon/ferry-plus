@@ -128,27 +128,33 @@ public enum UploadSource {
         while true {
             try Task.checkCancellation()
             try await checkpoint()
-            let data = try handle.read(upToCount: readSize) ?? Data()
-            if data.isEmpty { break }
-            let length = Int64(data.count)
-            guard offset <= expected.size, length <= expected.size - offset else { throw UploadSourceError.changed(url.path) }
-            sha256.update(data: data); md5.update(data: data); sha1.update(data: data)
-            if offset < 262_144 {
-                prefixMD5.update(data: data.prefix(Int(min(length, 262_144 - offset))))
-            }
-            var start = 0
-            while start < data.count {
-                let count = Int(min(Int64(data.count - start), chunkSize - partLength))
-                let slice = data[start..<(start + count)]
-                partMD5.update(data: slice); partSHA256.update(data: slice)
-                partLength += Int64(count); start += count
-                if partLength == chunkSize {
-                    chunks.append(.init(index: chunks.count, offset: partOffset, length: partLength,
-                                        md5: hex(partMD5.finalize()), sha256: hex(partSHA256.finalize())))
-                    partOffset += partLength; partLength = 0
-                    partMD5 = Insecure.MD5(); partSHA256 = SHA256()
+            // Foundation 的读取与切片可能产生 autoreleased NSData；每轮释放，避免长时间 async worker
+            // 在处理多 GiB 文件时积累整文件量级的临时对象。
+            let length: Int64 = try autoreleasepool {
+                let data = try handle.read(upToCount: readSize) ?? Data()
+                if data.isEmpty { return 0 }
+                let length = Int64(data.count)
+                guard offset <= expected.size, length <= expected.size - offset else { throw UploadSourceError.changed(url.path) }
+                sha256.update(data: data); md5.update(data: data); sha1.update(data: data)
+                if offset < 262_144 {
+                    prefixMD5.update(data: data.prefix(Int(min(length, 262_144 - offset))))
                 }
+                var start = 0
+                while start < data.count {
+                    let count = Int(min(Int64(data.count - start), chunkSize - partLength))
+                    let slice = data[start..<(start + count)]
+                    partMD5.update(data: slice); partSHA256.update(data: slice)
+                    partLength += Int64(count); start += count
+                    if partLength == chunkSize {
+                        chunks.append(.init(index: chunks.count, offset: partOffset, length: partLength,
+                                            md5: hex(partMD5.finalize()), sha256: hex(partSHA256.finalize())))
+                        partOffset += partLength; partLength = 0
+                        partMD5 = Insecure.MD5(); partSHA256 = SHA256()
+                    }
+                }
+                return length
             }
+            if length == 0 { break }
             offset += length
         }
         guard offset == expected.size,

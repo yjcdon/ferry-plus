@@ -218,3 +218,11 @@ Computer Use 在进程 28205 通过正式窗口上传专用目录 `FerryPlus-V3-
 故意将夸克样本期望改为全零 SHA-256 后，任务明确失败，明细显示内容校验失败；错误文件没有发布最终名称，正确零文件仍完成。切换上传页后旧下载选择消失，系统任务菜单全部禁用；搜索空结果的分类和任务数同步归零。证据 `.build/ui-upload-validation/roundtrip-integrity-results.json`、`quark-roundtrip-completed.txt`、`wrong-digest-rejected.txt`、`wrong-digest-results.json`、导出的 `Ferry-88E010B9-SHA256.json`。该轮测试目录暂保留用于后续恢复／清理验证。
 
 本次 Release App 体积 9280 KiB，安装版 2.0 为 6052 KiB；操作后空闲 CPU 0.0%，sample 物理占用 90.0 MiB、峰值 148.3 MiB，主线程主要等待事件。证据 `.build/v3-lifecycle-idle-sample.txt`。这不是多 GiB 混合负载验收，也不替代完整泄漏检查。
+
+## 多 GiB 实测发现并修复哈希临时内存累积
+
+正式 App 上传 2147483649 字节样本时，源文件准备阶段物理峰值达到约 2.1 GiB。`FileHandle.read` 和摘要桥接产生的临时对象在长时间异步 worker 内没有逐轮释放；仅限定每次读取 1 MiB 并不足以保证实际内存有界。
+
+上传指纹和下载最终摘要循环均改为每轮同步读取、全部摘要更新后立即释放 autoreleasepool，取消检查仍在每轮执行。相同 2 GiB+1 样本独立前后对比：SHA-256 和 103 个分片基准全部正确，最大 RSS 从 2162999296 字节降为 9158656 字节；耗时分别 15.21 秒和 14.72 秒。证据 `.build/source-memory-validation/before-result.txt`、`before-resources.txt`、`after-result.txt`、`after-resources.txt`。原有已知摘要、空文件、分片边界、扫描、源变化和取消检查仍通过。
+
+真实 FileTransfer.run→finalize 对 2 GiB+1 文件同时核对 MD5／SHA-256，峰值 RSS 14532608 字节，证据 `.build/finalize-memory-validation/result.txt`、`resources.txt`。重新构建 App 成功，日志 `.build/v3-memory-fix-app-build.log`；进程 29684 恢复原夸克暂停状态，并为百度重新准备同一大文件，资源采样未再出现整文件量级内存增长，证据 `.build/ui-large-validation/app-29684-resources.jsonl`。大文件完整上传和回读仍在继续，不能提前标为验收完成。

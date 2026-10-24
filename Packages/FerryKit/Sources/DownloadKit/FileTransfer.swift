@@ -183,10 +183,16 @@ struct FileTransfer: Sendable {
             defer { try? handle.close() }
             var md5 = Insecure.MD5()
             var sha256 = SHA256()
-            while let chunk = try handle.read(upToCount: 1024 * 1024), !chunk.isEmpty {
+            while true {
                 try Task.checkCancellation()
-                if current.request.expectedMD5 != nil { md5.update(data: chunk) }
-                if current.request.expectedSHA256 != nil { sha256.update(data: chunk) }
+                // FileHandle 与 CryptoKit 的桥接临时对象在每轮一起释放，避免长寿命异步 worker 累积 NSData。
+                let hasData = try autoreleasepool {
+                    guard let chunk = try handle.read(upToCount: 1024 * 1024), !chunk.isEmpty else { return false }
+                    if current.request.expectedMD5 != nil { md5.update(data: chunk) }
+                    if current.request.expectedSHA256 != nil { sha256.update(data: chunk) }
+                    return true
+                }
+                if !hasData { break }
             }
             if let expected = current.request.expectedMD5 {
                 let actual = md5.finalize().map { String(format: "%02x", $0) }.joined()
