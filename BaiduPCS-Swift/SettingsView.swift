@@ -2,14 +2,14 @@ import BaiduKit
 import FerryCore
 import SwiftUI
 
-/// 设置窗口：下载、网盘、网络和账号四个标签页。
+/// 设置窗口：传输、网盘、网络和账号四个标签页。
 struct SettingsView: View {
     @State private var tab = 0
 
     var body: some View {
         TabView(selection: $tab) {
-            DownloadSettingsView()
-                .tabItem { Label("下载", systemImage: "arrow.down.circle") }
+            TransferSettingsView()
+                .tabItem { Label("传输", systemImage: "arrow.up.arrow.down.circle") }
                 .tag(0)
             NetdiskSettingsView()
                 .tabItem { Label("网盘", systemImage: "cloud") }
@@ -30,8 +30,8 @@ struct SettingsView: View {
     }
 }
 
-/// 下载目录、并发数和剪贴板检测。
-private struct DownloadSettingsView: View {
+/// 下载目录、上传和下载预算以及剪贴板检测。
+private struct TransferSettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var isChoosingDirectory = false
 
@@ -83,8 +83,19 @@ private struct DownloadSettingsView: View {
                 Stepper(value: $model.settings.maxConcurrentFiles, in: model.settings.allowedConcurrentFiles) {
                     LabeledContent("同时下载文件数", value: "\(model.settings.maxConcurrentFiles)")
                 }
+                Stepper(value: $model.settings.maxConcurrentUploads, in: FerrySettings.concurrentUploadsRange) {
+                    LabeledContent("同时上传任务数", value: "\(model.settings.maxConcurrentUploads)")
+                }
             } footer: {
-                Text("百度和夸克共用下载队列，同时下载文件数适用于所有网盘。")
+                Text("并发设置适用于百度和夸克。上传任务按添加的文件批次计算。")
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                TransferRateField(title: "上传限速", bytesPerSecond: $model.settings.uploadBytesPerSecond)
+                TransferRateField(title: "下载限速", bytesPerSecond: $model.settings.downloadBytesPerSecond)
+            } footer: {
+                Text("0 表示不限速。1 KiB/s = 1024 字节/秒，下载限速也适用于上传后的内容校验。")
                     .foregroundStyle(.secondary)
             }
 
@@ -98,6 +109,32 @@ private struct DownloadSettingsView: View {
         .formStyle(.grouped)
         .directoryPicker(isPresented: $isChoosingDirectory, directory: model.downloadDirectory,
                          onChoose: model.chooseDownloadDirectory)
+    }
+}
+
+/// 以 KiB/s 编辑原始字节预算；限制乘法范围，避免输入极大整数导致溢出。
+private struct TransferRateField: View {
+    let title: String
+    @Binding var bytesPerSecond: Int64
+
+    private var kibibytesPerSecond: Binding<Int64> {
+        Binding {
+            max(0, bytesPerSecond) / 1024
+        } set: { value in
+            bytesPerSecond = min(max(0, value), Int64.max / 1024) * 1024
+        }
+    }
+
+    var body: some View {
+        LabeledContent(title) {
+            HStack(spacing: 6) {
+                TextField("0", value: kibibytesPerSecond, format: .number.grouping(.never))
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 100)
+                    .accessibilityLabel(title)
+                Text("KiB/s").foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
