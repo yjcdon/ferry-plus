@@ -519,23 +519,57 @@ public final class JobCoordinator {
         let children = try await netdisk.listDirectory(directory.reference)
         try netdisk.validateChildren(children, of: directory.reference)
         let files = try await netdisk.files(in: children)
-        if files.isEmpty {
-            if entries.contains(where: { !$0.isDirectory }) { throw TransferCheckError.noFiles }
-            let share: DiskShareSession
-            if let ownedShare { share = ownedShare } else {
-                share = try await netdisk.openShare(link, password: password)
-                ownedShare = share
-            }
-            var pending = entries
-            var visited = Set<RemoteReference>()
-            while let entry = pending.popLast() {
-                try Task.checkCancellation()
-                if !entry.isDirectory { throw TransferCheckError.noFiles }
+        // 回执完成只代表服务端结束处理，目标列表仍必须覆盖全部所选文件。
+        // 文件选择直接使用已保存的路径和大小；仅所选目录需要读取源目录，避免扫描整个分享。
+        if entries.contains(where: \.isDirectory), ownedShare == nil {
+            ownedShare = try await netdisk.openShare(link, password: password)
+        }
+        try await validateTransferredFiles(files, selected: entries, progress: progress,
+                                           session: ownedShare, netdisk: netdisk)
+        return files
+    }
+
+    /// 用原选择的相对路径和大小核对完整转存；目录只读取所选子树，目标列表复用已完成的递归结果。
+    private func validateTransferredFiles(_ files: [PreparedFile], selected: [RemoteEntry],
+                                          progress: TransferProgress?, session: DiskShareSession?,
+                                          netdisk: any Netdisk) async throws {
+        var pending: [(RemoteEntry, String)] = selected.map { entry in
+            let recordedParent = progress?.batches?.first { $0.entryIDs.contains(entry.id) }?.relativeDirectory
+            let parent = entry.relativeDirectory ?? recordedParent ?? ""
+            return (entry, parent.isEmpty ? entry.name : parent + "/" + entry.name)
+        }
+        var visited = Set<RemoteReference>()
+        var expected: [String: Int64] = [:]
+        while let (entry, path) = pending.popLast() {
+            try Task.checkCancellation()
+            guard LocalPath.isSafe(path) else { throw TransferCheckError.unsafePath(path) }
+            if entry.isDirectory {
                 guard visited.insert(entry.reference).inserted else { continue }
-                pending += try await netdisk.listShare(share, directory: entry)
+                guard let session else { throw TransferCheckError.unconfirmedTransfer }
+                let children = try await netdisk.listShare(session, directory: entry)
+                for child in children {
+                    guard !child.name.contains("/"), LocalPath.isSafe(child.name) else {
+                        throw TransferCheckError.unsafePath(child.name)
+                    }
+                    pending.append((child, path + "/" + child.name))
+                }
+            } else {
+                expected[path] = entry.size
             }
         }
-        return files
+        if files.isEmpty, !expected.isEmpty { throw TransferCheckError.noFiles }
+        var actual: [String: Int64] = [:]
+        for file in files {
+            guard actual.updateValue(file.entry.size, forKey: file.relativePath) == nil else {
+                throw TransferCheckError.incompleteTransfer(file.relativePath)
+            }
+        }
+        for (path, size) in expected where actual[path] != size {
+            throw TransferCheckError.incompleteTransfer(path)
+        }
+        for path in actual.keys where expected[path] == nil {
+            throw TransferCheckError.incompleteTransfer(path)
+        }
     }
 
     /// 批次意图写盘失败时尚未发出请求；已收到的回执即使磁盘失败也保留在内存供再次保存。
@@ -1100,6 +1134,7 @@ private enum Outcome: Equatable {
 
 enum TransferCheckError: LocalizedError {
     case noFiles
+    case incompleteTransfer(String)
     case unconfirmedTransfer
     case missingJobDirectory
     case outsideJobDirectory(String)
@@ -1111,6 +1146,8 @@ enum TransferCheckError: LocalizedError {
         switch self {
         case .unconfirmedTransfer:
             "转存结果尚未确认，已保留目录和回执。请核对原转存结果，不会自动重复提交或删除目录。"
+        case .incompleteTransfer(let path):
+            "转存结果不完整或文件大小不一致（\(path)），已保留目录和回执。请稍后重试核对，不会重复转存或自动清理。"
         case .noFiles:
             "转存后网盘中没有找到文件，可能转存尚未完成，请重试。"
         case .missingJobDirectory:

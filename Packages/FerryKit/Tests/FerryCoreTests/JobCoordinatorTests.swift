@@ -787,6 +787,65 @@ import os
         #expect(fixture.contents("docs/a.bin") == fixture.netdisk.data(at: job.remoteDirectory + "/docs/a.bin"))
     }
 
+    @Test func incompleteNonemptyTransferRetainsReceiptAndRetriesListingWithoutResubmitting() async throws {
+        let fixture = Fixture(share: ["a.bin": randomData(10), "b.bin": randomData(20)])
+        let coordinator = fixture.makeCoordinator(settings: FerrySettings(cleanupAfterDownload: true))
+        await coordinator.start()
+        let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
+        fixture.netdisk.setNextListing([RemoteFile(path: job.remoteDirectory + "/a.bin", size: 10, fsID: 1)])
+
+        try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
+        let failed = try #require(coordinator.job(job.id))
+        #expect(failed.error == TransferCheckError.incompleteTransfer("b.bin").errorDescription)
+        #expect(failed.transferProgress?.completed == true)
+        #expect(failed.files.isEmpty)
+        #expect(fixture.netdisk.deletes.isEmpty)
+        #expect(fixture.contents("a.bin") == nil)
+        let submissions = fixture.netdisk.operations.filter { if case .transfer = $0 { true } else { false } }.count
+        let opens = fixture.netdisk.operations.filter { $0 == .openShare }.count
+
+        await coordinator.retry(job.id)
+        try await coordinator.waitForPhase(.completed, of: job.id)
+        #expect(coordinator.job(job.id)?.files.count == 2)
+        #expect(fixture.netdisk.operations.filter { if case .transfer = $0 { true } else { false } }.count == submissions)
+        #expect(fixture.netdisk.operations.filter { $0 == .openShare }.count == opens)
+    }
+
+    @Test func transferSizeMismatchDoesNotDownloadOrCleanUp() async throws {
+        let fixture = Fixture(share: ["a.bin": randomData(10)])
+        let coordinator = fixture.makeCoordinator(settings: FerrySettings(cleanupAfterDownload: true))
+        await coordinator.start()
+        let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
+        fixture.netdisk.setNextListing([RemoteFile(path: job.remoteDirectory + "/a.bin", size: 9, fsID: 1)])
+        try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
+        #expect(coordinator.job(job.id)?.error == TransferCheckError.incompleteTransfer("a.bin").errorDescription)
+        #expect(coordinator.job(job.id)?.files.isEmpty == true)
+        #expect(fixture.netdisk.deletes.isEmpty)
+        #expect(fixture.contents("a.bin") == nil)
+    }
+
+    @Test func completedReceiptCannotHideMissingFileInsideSelectedDirectory() async throws {
+        let fixture = Fixture(share: ["docs/a.bin": randomData(10), "docs/b.bin": randomData(20),
+                                      "unselected/large.bin": randomData(30)])
+        let entries = fixture.netdisk.rootEntries().filter { $0.name == "docs" }
+        var job = Job(link: FakeNetdisk.link, password: nil, entries: entries, transferFolder: "/Ferry")
+        job.accountKey = Fixture.account
+        job.transferDirectory = TransferDirectory(reference: .baidu(path: job.remoteDirectory, fsID: 0), name: Job.shortID(job.id))
+        job.transferProgress = TransferProgress(submitted: true, completed: true)
+        // 服务端已经返回完成回执，但只落地 docs/a.bin。
+        try await fixture.netdisk.transfer(FakeNetdisk.session, entries: [RemoteEntry(fsID: 1, name: "a.bin",
+            path: "/share/docs/a.bin", isDirectory: false, size: 10, relativeDirectory: "docs")], to: job.remoteDirectory)
+        try fixture.store.save([job])
+        let coordinator = fixture.makeCoordinator(settings: FerrySettings(cleanupAfterDownload: true))
+        await coordinator.start()
+        await coordinator.retry(job.id)
+        try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
+        #expect(coordinator.job(job.id)?.error == TransferCheckError.incompleteTransfer("docs/b.bin").errorDescription)
+        #expect(coordinator.job(job.id)?.files.isEmpty == true)
+        #expect(fixture.netdisk.deletes.isEmpty)
+        #expect(!fixture.netdisk.operations.contains(.list(job.remoteDirectory + "/unselected")))
+    }
+
     @Test func completesWhenOnlyEmptyDirectoriesAreSelected() async throws {
         let fixture = Fixture(share: ["a.bin": randomData(10)], emptyDirectories: ["empty", "nested/inner"])
         let coordinator = fixture.makeCoordinator()
