@@ -255,6 +255,19 @@ public struct UploadSelection: Codable, Sendable, Hashable {
     }
 }
 
+/// 本轮完整回读的实时投影；不是可恢复摘要状态，暂停或取消后从零重新计算。
+public struct UploadVerificationProgress: Sendable, Hashable {
+    public let fileID: UUID
+    public let relativePath: String
+    public let verifiedBytes: Int64
+    public let totalBytes: Int64
+
+    public init(fileID: UUID, relativePath: String, verifiedBytes: Int64, totalBytes: Int64) {
+        self.fileID = fileID; self.relativePath = relativePath
+        self.verifiedBytes = verifiedBytes; self.totalBytes = totalBytes
+    }
+}
+
 /// 批次仅保存聚合和清单 ID；UploadCoordinator 是唯一运行状态写入方。
 public struct UploadJob: Codable, Sendable, Hashable, Identifiable {
     public let id: UUID
@@ -279,6 +292,14 @@ public struct UploadJob: Codable, Sendable, Hashable, Identifiable {
     public var phase: UploadPhase
     public var error: String?
     public let createdAt: Date
+    /// 仅由 coordinator 合并进列表快照，明确不写入检查点。
+    public var verificationProgress: UploadVerificationProgress? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case id, account, accountName, title, destination, conflictPolicy, priority, isPaused, cancellationRequested
+        case fileIDs, selections, scanCompletedAt, totalBytes, completedBytes, completedCount, failedCount, skippedCount
+        case phase, error, createdAt
+    }
 
     public init(id: UUID = UUID(), account: AccountKey, accountName: String, title: String,
                 destination: RemoteReference, conflictPolicy: UploadConflictPolicy = .keepBoth,

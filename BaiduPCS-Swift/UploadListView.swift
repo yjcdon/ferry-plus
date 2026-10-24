@@ -50,7 +50,16 @@ struct UploadRow: View {
                     Text(job.isPaused ? "已暂停 · \(job.phase.displayName)" : job.phase.displayName)
                         .font(.caption).foregroundStyle(.secondary)
                 }
-                ProgressView(value: Double(job.completedBytes), total: Double(max(1, job.totalBytes)))
+                if let verification = job.verificationProgress {
+                    ProgressView(value: Double(verification.verifiedBytes), total: Double(max(1, verification.totalBytes)))
+                    HStack {
+                        Text("回读校验 · \(verification.relativePath)").lineLimit(1).truncationMode(.middle)
+                        Spacer(minLength: 0)
+                        Text("\(ByteCountFormatter.string(fromByteCount: verification.verifiedBytes, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: verification.totalBytes, countStyle: .file))")
+                    }.font(.caption).foregroundStyle(.secondary)
+                } else {
+                    ProgressView(value: Double(job.completedBytes), total: Double(max(1, job.totalBytes)))
+                }
                 HStack(spacing: 12) {
                     Text("\(job.account.provider.title) · \(job.accountName)")
                     Text("\(ByteCountFormatter.string(fromByteCount: job.completedBytes, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: job.totalBytes, countStyle: .file))")

@@ -34,6 +34,8 @@ public actor UploadCoordinator {
     private let onBatchFinished: (@Sendable (UploadJob) async -> Void)?
     private var jobs: [UUID: UploadJob] = [:]
     private var workers: [UUID: Worker] = [:]
+    /// 每个批次最多一个当前回读文件，只用于快照展示，不保存或恢复增量摘要。
+    private var verificationProgress: [UUID: UploadVerificationProgress] = [:]
     /// 单文件重新定位的完整复核及持久化任务，同样纳入睡眠／退出收尾和资源活动。
     private var relocations: [UUID: Task<Void, Error>] = [:]
     private var observers: [UUID: AsyncStream<[UploadJob]>.Continuation] = [:]
@@ -85,7 +87,13 @@ public actor UploadCoordinator {
     }
 
     /// 摘要来自同一批次状态，不复制一份 UI 执行模型。
-    public func snapshots() -> [UploadJob] { jobs.values.sorted { $0.createdAt < $1.createdAt } }
+    public func snapshots() -> [UploadJob] {
+        jobs.values.sorted { $0.createdAt < $1.createdAt }.map { job in
+            var snapshot = job
+            snapshot.verificationProgress = verificationProgress[job.id]
+            return snapshot
+        }
+    }
 
     /// 明细分页读取，避免展示列表时把整棵目录及所有分片常驻内存。
     public func files(jobID: UUID, offset: Int = 0, limit: Int = 100) async throws -> [UploadFile] {
@@ -668,9 +676,18 @@ public actor UploadCoordinator {
         }
         file.phase = .verifying; file.failedPhase = nil; file.error = nil; try await saveFile(file)
         let size = file.source.size
+        let jobID = file.jobID, fileID = file.id
+        verificationProgress[jobID] = .init(fileID: fileID, relativePath: file.relativePath, verifiedBytes: 0, totalBytes: size)
+        emit()
+        defer { verificationProgress[jobID] = nil; emit() }
         let record = try await integrity.verify(account: env.destination.account, reference: reference,
             expectedSHA256: expectation.digest, size: size, remoteVersion: expectation.remoteVersion, uploadFileID: file.id,
-            resolve: { try await env.resolve(reference, size) })
+            resolve: { try await env.resolve(reference, size) },
+            onProgress: { [weak self] bytes, total in
+                try Task.checkCancellation()
+                guard let self else { throw CancellationError() }
+                try await self.updateVerification(jobID: jobID, fileID: fileID, bytes: bytes, total: total)
+            })
         do { try await integrityStore.save(record) }
         catch { throw UploadCoordinatorError.persistence(error.localizedDescription) }
         file.integrityRecordID = record.id
@@ -750,6 +767,17 @@ public actor UploadCoordinator {
         jobs[id]!.failedCount = failed; jobs[id]!.skippedCount = skipped
         if let firstFailure { jobs[id]!.error = "\(failed) 项失败：\(firstFailure)" }
         try await persistJob(id)
+    }
+
+    /// 服务每读完一个有界范围后回调；只发布本轮单调进度，不触发任务落盘。
+    private func updateVerification(jobID: UUID, fileID: UUID, bytes: Int64, total: Int64) throws {
+        guard let current = verificationProgress[jobID], current.fileID == fileID else { throw CancellationError() }
+        guard total == current.totalBytes, bytes >= current.verifiedBytes, bytes <= total else {
+            throw UploadRecordError.invalid("云端回读校验进度无效")
+        }
+        verificationProgress[jobID] = .init(fileID: fileID, relativePath: current.relativePath,
+                                           verifiedBytes: bytes, totalBytes: total)
+        emit()
     }
 
     private func persistJob(_ id: UUID) async throws {
