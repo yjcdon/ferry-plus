@@ -114,3 +114,11 @@ DownloadKit 增加 `RangeReader`，默认每段 256 KiB、硬上限 1 MiB。先�
 `IntegrityService` 顺序调用有界范围读取，仅在完整范围成功后更新 SHA-256，最后返回 verified 或 mismatch 校验记录。401／403 等刷新短期地址，临时网络及服务端错误有限重试；网络错误不能冒充内容不一致。中断后从文件开头重新计算摘要，零字节使用空对象验证，全程不生成完整磁盘副本。
 
 10 项临时 URLProtocol 验证通过：完整摘要、403 地址刷新、成功范围进度、半段失败重试不重复哈希、错误基准、持续 503 有限结束、空文件、取消及资源释放。证据 `.build/integrity-service-validation/result.txt`。真实网盘文件的统一服务接入及实际 App 验收仍待编排完成。
+
+## 下载引擎共享预算接入
+
+DownloadEngine 增加可选共享预算参数，默认保持原有请求行为。注入预算后，每个实际 HTTP 请求取得连接许可；已知长度且支持 Range 时，按最多 256 KiB 的小范围消费下载额度，再请求并同步写盘，原分片 offset 连续推进。没有新增异步 delegate 数据队列或整文件缓冲。
+
+现有 DownloadEngineTests 新增 6 项预算接入用例，连同此前用例共 52 项通过：`env FERRY_MACOS_SDK=macosx bash Scripts/test-packages.sh --configuration release --filter DownloadEngineTests`。覆盖小范围偏移、未注入时兼容、取消在途／等待连接、取消额度等待、限速及非 Range 流式兼容。日志 `.build/v3-budget-download-tests.log`。
+
+明确边界：非 Range 或未知长度来源目前只共享连接许可，尚不执行字节限速；上传／回读／下载在正式 App 中共用同一实例及设置仍需继续接入，V3-T12 不据此标为完整完成。

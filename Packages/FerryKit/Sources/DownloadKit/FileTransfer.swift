@@ -15,13 +15,16 @@ struct FileTransfer: Sendable {
     let session: URLSession
     let settings: SharedConfiguration
     let store: StateStore
+    let transferBudget: TransferBudget?
     private let links: LinkProvider
 
-    init(record: LiveRecord, source: any DownloadSource, session: URLSession, settings: SharedConfiguration, store: StateStore) {
+    init(record: LiveRecord, source: any DownloadSource, session: URLSession, settings: SharedConfiguration, store: StateStore,
+         transferBudget: TransferBudget? = nil) {
         self.record = record
         self.session = session
         self.settings = settings
         self.store = store
+        self.transferBudget = transferBudget
         links = LinkProvider(source: source, request: record.request)
     }
 
@@ -209,7 +212,7 @@ struct FileTransfer: Sendable {
 
     private func probe(_ link: ResolvedURL) async throws -> (totalBytes: Int64?, acceptsRanges: Bool) {
         let request = makeRequest(link, range: "bytes=0-0")
-        let response = try await DataTaskRunner.run(request, session: session, onResponse: { _ in false })
+        let response = try await DataTaskRunner.run(request, session: session, transferBudget: transferBudget, onResponse: { _ in false })
         switch response.statusCode {
         case 206:
             guard let header = response.value(forHTTPHeaderField: "Content-Range"),
@@ -224,18 +227,36 @@ struct FileTransfer: Sendable {
         }
     }
 
+    /// 已知长度的 Range 请求按 256 KiB 消费共享预算，不增加响应缓冲或 delegate 队列。
+    /// 不支持 Range 或长度未知时保持原流式能力，只共享连接许可，不声称支持速率限制。
     private func fetch(_ index: Int, link: ResolvedURL) async throws {
+        if let transferBudget, record.value.acceptsRanges != false, let end = record.segment(index).end {
+            while record.segment(index).offset < end {
+                try Task.checkCancellation()
+                let start = record.segment(index).offset
+                let length = min(Int64(256 * 1024), end - start)
+                try await transferBudget.consume(Int(length), direction: .download)
+                try await fetchRequest(index, link: link, requestedEnd: start + length)
+            }
+        } else {
+            try await fetchRequest(index, link: link)
+        }
+    }
+
+    /// 同步流式写入一个已获得字节预算的范围；只在实际请求期间取得连接许可。
+    private func fetchRequest(_ index: Int, link: ResolvedURL, requestedEnd: Int64? = nil) async throws {
         let usesRange = record.value.acceptsRanges != false
         if !usesRange {
             record.update { $0.segments![index].received = 0 }
         }
-        let segment = record.segment(index)
+        let original = record.segment(index)
+        let segment = requestedEnd.map { Segment(start: original.offset, end: $0) } ?? original
         let totalBytes = record.value.totalBytes
         let handle = try openTemporaryFile(at: segment.offset, truncating: !usesRange)
         defer { try? handle.close() }
 
         let range = usesRange ? "bytes=\(segment.offset)-\(segment.end.map { String($0 - 1) } ?? "")" : nil
-        try await DataTaskRunner.run(makeRequest(link, range: range), session: session) { response in
+        try await DataTaskRunner.run(makeRequest(link, range: range), session: session, transferBudget: transferBudget) { response in
             try Self.validate(response, for: segment, usesRange: usesRange, totalBytes: totalBytes)
             let tag = response.value(forHTTPHeaderField: "ETag")
             let modified = response.value(forHTTPHeaderField: "Last-Modified")
@@ -262,7 +283,7 @@ struct FileTransfer: Sendable {
         }
 
         let finished = record.segment(index)
-        if let end = finished.end {
+        if let end = segment.end {
             guard finished.offset == end else {
                 throw FetchError.invalidResponse("response is shorter than the requested range")
             }

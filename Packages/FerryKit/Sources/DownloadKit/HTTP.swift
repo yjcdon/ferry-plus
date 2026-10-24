@@ -126,8 +126,24 @@ final class DataTaskRunner: NSObject, URLSessionDataDelegate, Sendable {
     static func run(
         _ request: URLRequest,
         session: URLSession,
+        transferBudget: TransferBudget? = nil,
         onResponse: @escaping ResponseHandler = { _ in true },
         onData: @escaping DataHandler = { _ in }
+    ) async throws -> HTTPURLResponse {
+        if let transferBudget {
+            return try await transferBudget.withPermit {
+                try await runRequest(request, session: session, onResponse: onResponse, onData: onData)
+            }
+        }
+        return try await runRequest(request, session: session, onResponse: onResponse, onData: onData)
+    }
+
+    /// 每个真实 HTTP 请求持有一份连接许可；取消及错误均在请求终止后归还。
+    private static func runRequest(
+        _ request: URLRequest,
+        session: URLSession,
+        onResponse: @escaping ResponseHandler,
+        onData: @escaping DataHandler
     ) async throws -> HTTPURLResponse {
         try Task.checkCancellation()
         let runner = DataTaskRunner(request: request, onResponse: onResponse, onData: onData)

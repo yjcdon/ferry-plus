@@ -23,6 +23,7 @@ public actor DownloadEngine {
     /// 只在 `replaceSession(configuration:)` 中改变。进行中的传输继续用开始时的会话。
     private var session: URLSession
     private var ownsSession: Bool
+    private let transferBudget: TransferBudget?
     private let settings: SharedConfiguration
     private var configuration: DownloadConfiguration { settings.value }
     private var entries: [String: Entry] = [:]
@@ -46,10 +47,11 @@ public actor DownloadEngine {
         stateDirectory: URL,
         source: any DownloadSource,
         configuration: DownloadConfiguration = DownloadConfiguration(),
-        sessionConfiguration: URLSessionConfiguration = DownloadEngine.defaultSessionConfiguration()
+        sessionConfiguration: URLSessionConfiguration = DownloadEngine.defaultSessionConfiguration(),
+        transferBudget: TransferBudget? = nil
     ) {
         self.init(stateDirectory: stateDirectory, source: source, configuration: configuration,
-                  session: URLSession(configuration: sessionConfiguration), ownsSession: true)
+                  session: URLSession(configuration: sessionConfiguration), ownsSession: true, transferBudget: transferBudget)
     }
 
     /// 用于测试注入。引擎不 invalidate 这个会话。
@@ -57,10 +59,11 @@ public actor DownloadEngine {
         stateDirectory: URL,
         source: any DownloadSource,
         configuration: DownloadConfiguration = DownloadConfiguration(),
-        session: URLSession
+        session: URLSession,
+        transferBudget: TransferBudget? = nil
     ) {
         self.init(stateDirectory: stateDirectory, source: source, configuration: configuration,
-                  session: session, ownsSession: false)
+                  session: session, ownsSession: false, transferBudget: transferBudget)
     }
 
     private init(
@@ -68,13 +71,15 @@ public actor DownloadEngine {
         source: any DownloadSource,
         configuration: DownloadConfiguration,
         session: URLSession,
-        ownsSession: Bool
+        ownsSession: Bool,
+        transferBudget: TransferBudget?
     ) {
         store = StateStore(directory: stateDirectory)
         self.source = source
         settings = SharedConfiguration(configuration)
         self.session = session
         self.ownsSession = ownsSession
+        self.transferBudget = transferBudget
     }
 
     deinit {
@@ -321,7 +326,8 @@ public actor DownloadEngine {
             source: source,
             session: session,
             settings: settings,
-            store: store
+            store: store,
+            transferBudget: transferBudget
         )
         entry.state = .running
         entry.meter = SpeedMeter()

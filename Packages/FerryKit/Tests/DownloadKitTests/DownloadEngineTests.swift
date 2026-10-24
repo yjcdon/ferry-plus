@@ -48,6 +48,120 @@ private let megabyte = 1 << 20
         #expect(states.last == .completed(location))
     }
 
+    /// 大逻辑分片在共享预算下拆小请求，连续 offset 不重叠、不跳过末尾。
+    @Test func sharedBudgetSplitsRangesAndPreservesOffsets() async throws {
+        let fixture = Fixture()
+        let data = fixture.addFile("budget.bin", size: megabyte + 17)
+        var configuration = DownloadConfiguration.test(connections: 1)
+        configuration.segmentSize = .fixed(Int64(megabyte))
+        let budget = try TransferBudget(maximumConnections: 1)
+        let engine = DownloadEngine(stateDirectory: fixture.stateDirectory, source: fixture.source,
+            configuration: configuration, session: fixture.session, transferBudget: budget)
+        try await engine.enqueue(fixture.request("budget.bin"))
+        _ = try await engine.waitForCompletion(of: "budget.bin")
+        let ranges = fixture.server.log.compactMap(\.range)
+        #expect(ranges.count == 5)
+        #expect(ranges.map(\.first) == [0, 262144, 524288, 786432, 1048576])
+        #expect(ranges.map { $0.last } == [262143, 524287, 786431, 1048575, 1048592])
+        #expect(fixture.contents("budget.bin") == data)
+        #expect(fixture.server.maxActive == 1)
+        #expect(await budget.snapshot().activeConnections == 0)
+        await engine.shutdown()
+    }
+
+    /// 未注入预算时，已有大分片请求数量和同步流式行为保持不变。
+    @Test func nilSharedBudgetKeepsOriginalRequestShape() async throws {
+        let fixture = Fixture()
+        let data = fixture.addFile("legacy.bin", size: megabyte)
+        var configuration = DownloadConfiguration.test(connections: 1)
+        configuration.segmentSize = .fixed(Int64(megabyte))
+        let engine = DownloadEngine(stateDirectory: fixture.stateDirectory, source: fixture.source,
+            configuration: configuration, session: fixture.session, transferBudget: nil)
+        try await engine.enqueue(fixture.request("legacy.bin"))
+        _ = try await engine.waitForCompletion(of: "legacy.bin")
+        #expect(fixture.server.log.count == 1)
+        #expect(fixture.server.log.first?.headers["Range"] == "bytes=0-1048575")
+        #expect(fixture.contents("legacy.bin") == data)
+        await engine.shutdown()
+    }
+
+    /// 暂停同时撤销排队和在途请求；共享许可须全部归还，后续消费者才能继续。
+    @Test func sharedBudgetCancellationReleasesActiveAndWaitingPermits() async throws {
+        let fixture = Fixture()
+        fixture.addFile("cancel-budget.bin", size: megabyte)
+        fixture.server.setStall(after: 64 * kilobyte)
+        defer { fixture.server.setStall(after: nil) }
+        let budget = try TransferBudget(maximumConnections: 1)
+        let engine = DownloadEngine(stateDirectory: fixture.stateDirectory, source: fixture.source,
+            configuration: .test(connections: 2), session: fixture.session, transferBudget: budget)
+        try await engine.enqueue(fixture.request("cancel-budget.bin"))
+        try await waitUntil("one active and one waiting shared permit") {
+            let state = await budget.snapshot()
+            return state.activeConnections == 1 && state.waitingConnections == 1
+        }
+        await engine.pause(id: "cancel-budget.bin")
+        let state = await budget.snapshot()
+        #expect(state.activeConnections == 0)
+        #expect(state.waitingConnections == 0)
+        try await waitUntil("cancelled server request to finish") { fixture.server.activeRequests == 0 }
+        let lease = try await budget.acquire()
+        await budget.release(lease)
+        await engine.shutdown()
+    }
+
+    /// 取消发生在字节额度等待时不能启动 HTTP，也不能遗留速率定时器。
+    @Test func sharedBudgetCancellationEndsRateWaitBeforeRequest() async throws {
+        let fixture = Fixture()
+        fixture.addFile("rate-wait.bin", size: megabyte)
+        let budget = try TransferBudget(maximumConnections: 1, downloadBytesPerSecond: 1)
+        let engine = DownloadEngine(stateDirectory: fixture.stateDirectory, source: fixture.source,
+            configuration: .test(connections: 1), session: fixture.session, transferBudget: budget)
+        try await engine.enqueue(fixture.request("rate-wait.bin"))
+        try await waitUntil("download byte quota wait") { await budget.snapshot().waitingDownloadBuffers == 1 }
+        await engine.pause(id: "rate-wait.bin")
+        let state = await budget.snapshot()
+        #expect(state.activeConnections == 0)
+        #expect(state.waitingDownloadBuffers == 0)
+        #expect(state.activeRateTimers == 0)
+        #expect(fixture.server.log.isEmpty)
+        await engine.shutdown()
+    }
+
+    /// 请求发出前必须付清当前范围额度，令牌桶初始突发之外的字节确实等待。
+    @Test func sharedBudgetWaitsForDownloadRateBeforeReceivingRange() async throws {
+        let fixture = Fixture()
+        let data = fixture.addFile("rate.bin", size: 64 * kilobyte)
+        let budget = try TransferBudget(maximumConnections: 1, downloadBytesPerSecond: 256 * 1024)
+        let engine = DownloadEngine(stateDirectory: fixture.stateDirectory, source: fixture.source,
+            configuration: .test(connections: 1), session: fixture.session, transferBudget: budget)
+        let clock = ContinuousClock()
+        let start = clock.now
+        try await engine.enqueue(fixture.request("rate.bin"))
+        _ = try await engine.waitForCompletion(of: "rate.bin")
+        #expect(start.duration(to: clock.now) >= .milliseconds(80))
+        #expect(fixture.contents("rate.bin") == data)
+        #expect(await budget.snapshot().waitingDownloadBuffers == 0)
+        #expect(await budget.snapshot().activeConnections == 0)
+        await engine.shutdown()
+    }
+
+    /// 非 Range 来源继续支持原始下载，仅共享连接，不把未实现的字节限速误用于整文件。
+    @Test func sharedBudgetNonRangeKeepsStreamingCompatibility() async throws {
+        let fixture = Fixture()
+        let data = fixture.addFile("no-range.bin", size: 128 * kilobyte)
+        fixture.server.setSupportsRanges(false)
+        let budget = try TransferBudget(maximumConnections: 1, downloadBytesPerSecond: 1)
+        let engine = DownloadEngine(stateDirectory: fixture.stateDirectory, source: fixture.source,
+            configuration: .test(connections: 1), session: fixture.session, transferBudget: budget)
+        try await engine.enqueue(fixture.request("no-range.bin", knownSize: false))
+        _ = try await engine.waitForCompletion(of: "no-range.bin")
+        #expect(fixture.contents("no-range.bin") == data)
+        #expect(fixture.server.log.count == 2)
+        #expect(fixture.server.log.last?.headers["Range"] == nil)
+        #expect(await budget.snapshot().activeConnections == 0)
+        await engine.shutdown()
+    }
+
     @Test func probesSizeWhenUnknown() async throws {
         let fixture = Fixture()
         let data = fixture.addFile("a.bin", size: megabyte + 123)
