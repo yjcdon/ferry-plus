@@ -201,6 +201,8 @@ final class WebLoginSession: NSObject {
         webView.navigationDelegate = nil
         webView.uiDelegate = nil
         webView.stopLoading()
+        // SwiftUI 可能短暂保留关闭窗口的网页；卸载页面，停止其脚本并释放渲染内容。
+        webView.loadHTMLString("", baseURL: nil)
         currentNavigation = nil
         isLoading = false
     }
