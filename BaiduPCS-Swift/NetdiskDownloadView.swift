@@ -68,7 +68,13 @@ struct NetdiskDownloadView: View {
 
     @ViewBuilder
     private var content: some View {
-        if let tree {
+        if provider == nil {
+            ContentUnavailableView {
+                Label("选择网盘", systemImage: "cloud")
+            } description: {
+                Text("选择百度网盘或夸克网盘，浏览并下载账号内的文件。")
+            }
+        } else if let tree {
             NetdiskBrowser(tree: tree, transferFolder: model.settings.transferFolder(for: provider ?? .baidu))
         } else if let errorMessage {
             ContentUnavailableView {
@@ -109,7 +115,7 @@ struct NetdiskDownloadView: View {
         tree = nil
         treeAccount = nil
         guard let provider else {
-            errorMessage = "请选择百度网盘或夸克网盘。"
+            errorMessage = nil
             return
         }
         do {

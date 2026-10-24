@@ -101,12 +101,14 @@ struct Banners: View {
 /// 一条提示条。没有背景：放在 `edgeBar` 中，由它把提示条和内容分开。
 struct Banner<Actions: View>: View {
     let message: String
+    var systemImage = "exclamationmark.triangle.fill"
+    var iconColor: Color = .yellow
     @ViewBuilder let actions: Actions
 
     var body: some View {
         HStack {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(.yellow)
+            Image(systemName: systemImage)
+                .foregroundStyle(iconColor)
                 .accessibilityHidden(true)
             Text(message)
                 .fixedSize(horizontal: false, vertical: true)

@@ -9,6 +9,8 @@ public actor QuarkNetdisk: Netdisk {
         let session: QuarkShareSession
         var entries: [String: QuarkEntry] = [:]
         var relativeDirectories: [String: String] = [:]
+        var directoryListings: [String: [QuarkEntry]] = [:]
+        var listingPaths: [String: String] = [:]
     }
     private var shares: [UUID: ShareState] = [:]
 
@@ -40,12 +42,7 @@ public actor QuarkNetdisk: Netdisk {
             guard let parent = directory.relativeDirectory ?? shares[session.handle]?.relativeDirectories[fid] else { throw QuarkError.invalidSelection }
             parentPath = Self.join(parent, directory.name)
         } else { parentPath = "" }
-        let entries = try await client.listShareDirectory(session: state.session, parentFID: fid)
-        guard shares[session.handle] != nil else { throw QuarkError.invalidSelection }
-        for entry in entries {
-            shares[session.handle]?.entries[entry.fid] = entry
-            shares[session.handle]?.relativeDirectories[entry.fid] = parentPath
-        }
+        let entries = try await shareChildren(session, parentFID: fid, relativePath: parentPath)
         return entries.map { Self.convert($0, relativeDirectory: parentPath) }
     }
 
@@ -146,7 +143,7 @@ public actor QuarkNetdisk: Netdisk {
                 batches[index].submitted = true
                 try await onProgress(Self.progress(batches))
                 let taskID = try await client.submitSave(session: state.session, entries: native, destinationFID: target,
-                    parentFID: native.first?.parentFID ?? "0")
+                    parentFID: batches[index].relativeDirectory.isEmpty ? "0" : (native.first?.parentFID ?? "0"))
                 batches[index].taskID = taskID
                 try await onProgress(Self.progress(batches))
             }
@@ -184,31 +181,76 @@ public actor QuarkNetdisk: Netdisk {
     private static func safeDirectory(_ path: String) -> Bool { path.isEmpty || LocalPath.isSafe(path) }
     private static func join(_ parent: String, _ name: String) -> String { parent.isEmpty ? name : parent + "/" + name }
 
-    /// 重启后旧任务只有 fid；按当前分享重新寻找所选项，令牌不从任务数据恢复。
+    /// 已记录路径时只沿相关前缀恢复令牌；只有缺少路径的旧任务才扫描分享树。
     private func restoreShareEntries(_ session: DiskShareSession, entries: [RemoteEntry]) async throws {
+        try Task.checkCancellation()
         guard let state = shares[session.handle] else { throw QuarkError.invalidSelection }
-        let required = Set(try entries.map { try Self.fid($0.reference) })
-        var expectedDirectories: [String: String] = [:]
-        for entry in entries { if let path = entry.relativeDirectory { expectedDirectories[entry.id] = path } }
-        var missing = required.subtracting(state.entries.keys)
-        guard !missing.isEmpty else { return }
+        var unresolved: [RemoteEntry] = []
+        for entry in entries {
+            let fid = try Self.fid(entry.reference)
+            if let native = state.entries[fid] {
+                if let path = entry.relativeDirectory, state.relativeDirectories[fid] != path { throw QuarkError.invalidSelection }
+                guard native.name == entry.name, native.isDirectory == entry.isDirectory else { throw QuarkError.invalidSelection }
+            } else { unresolved.append(entry) }
+        }
+        let groups = Dictionary(grouping: unresolved.filter { $0.relativeDirectory != nil }, by: { $0.relativeDirectory! })
+        for path in groups.keys.sorted() {
+            guard Self.safeDirectory(path) else { throw QuarkError.invalidSelection }
+            var parentFID = "0"
+            var parentPath = ""
+            for component in path.split(separator: "/") {
+                let children = try await shareChildren(session, parentFID: parentFID, relativePath: parentPath)
+                guard let directory = children.first(where: { $0.isDirectory && $0.name == component }) else { throw QuarkError.invalidSelection }
+                parentFID = directory.fid
+                parentPath = Self.join(parentPath, String(component))
+            }
+            let children = try await shareChildren(session, parentFID: parentFID, relativePath: path)
+            let byID = Dictionary(uniqueKeysWithValues: children.map { ($0.fid, $0) })
+            for selected in groups[path]! {
+                guard let native = byID[selected.id], native.name == selected.name,
+                      native.isDirectory == selected.isDirectory else { throw QuarkError.invalidSelection }
+            }
+        }
+        // 旧记录没有 relativeDirectory，无法从 fid 推断父目录，才使用可取消的兼容扫描。
+        guard let restored = shares[session.handle] else { throw QuarkError.invalidSelection }
+        var missing = Set(unresolved.filter { $0.relativeDirectory == nil }.map(\.id)).subtracting(restored.entries.keys)
         var pending = [("0", "")]
         var visited = Set<String>()
         while !missing.isEmpty, let (parent, path) = pending.popLast() {
             try Task.checkCancellation()
             guard visited.insert(parent).inserted else { continue }
-            let children = try await client.listShareDirectory(session: state.session, parentFID: parent)
-            guard shares[session.handle] != nil else { throw QuarkError.invalidSelection }
+            let children = try await shareChildren(session, parentFID: parent, relativePath: path)
             for child in children {
-                if missing.remove(child.fid) != nil {
-                    if let expected = expectedDirectories[child.fid], expected != path { throw QuarkError.invalidSelection }
-                    shares[session.handle]?.entries[child.fid] = child
-                    shares[session.handle]?.relativeDirectories[child.fid] = path
-                }
+                missing.remove(child.fid)
                 if child.isDirectory, !visited.contains(child.fid) { pending.append((child.fid, Self.join(path, child.name))) }
             }
         }
         guard missing.isEmpty else { throw QuarkError.invalidSelection }
+        guard let finalState = shares[session.handle] else { throw QuarkError.invalidSelection }
+        for entry in unresolved where entry.relativeDirectory == nil {
+            guard let native = finalState.entries[entry.id], native.name == entry.name,
+                  native.isDirectory == entry.isDirectory else { throw QuarkError.invalidSelection }
+        }
+    }
+
+    /// 会话内复用每层完整目录，路径与 fid 同时核对，释放会话后迟到请求不能恢复缓存。
+    private func shareChildren(_ session: DiskShareSession, parentFID: String, relativePath: String) async throws -> [QuarkEntry] {
+        try Task.checkCancellation()
+        guard let state = shares[session.handle], Self.safeDirectory(relativePath) else { throw QuarkError.invalidSelection }
+        if let cached = state.directoryListings[parentFID] {
+            guard state.listingPaths[parentFID] == relativePath else { throw QuarkError.invalidSelection }
+            return cached
+        }
+        let children = try await client.listShareDirectory(session: state.session, parentFID: parentFID)
+        try Task.checkCancellation()
+        guard shares[session.handle] != nil else { throw QuarkError.invalidSelection }
+        shares[session.handle]?.directoryListings[parentFID] = children
+        shares[session.handle]?.listingPaths[parentFID] = relativePath
+        for child in children {
+            shares[session.handle]?.entries[child.fid] = child
+            shares[session.handle]?.relativeDirectories[child.fid] = relativePath
+        }
+        return children
     }
 
     public func deleteDirectory(_ directory: TransferDirectory) async throws {

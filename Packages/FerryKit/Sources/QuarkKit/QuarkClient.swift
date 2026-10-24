@@ -121,6 +121,9 @@ public actor QuarkClient {
 
     private func list(path: String, host: String, query: [(String, String)]) async throws -> [QuarkEntry] {
         let pageSize = 100
+        let requestedParent = query.first(where: { $0.0 == "pdir_fid" })?.1
+        // 分享根 0 是虚拟视图，根条目的 pdir_fid 可为发布者账号中的真实父目录。
+        let isVirtualShareRoot = path == "/share/sharepage/detail" && requestedParent == "0"
         var entries: [QuarkEntry] = []
         var ids = Set<String>()
         for page in 1...10_000 {
@@ -131,9 +134,8 @@ public actor QuarkClient {
             guard let data = response.data else { throw QuarkError.invalidResponse }
             let converted = try data.list.map { try $0.entry() }
             for entry in converted {
-                if let parent = entry.parentFID,
-                   let requested = query.first(where: { $0.0 == "pdir_fid" })?.1,
-                   parent != requested { throw QuarkError.invalidResponse }
+                if !isVirtualShareRoot, let parent = entry.parentFID, let requestedParent,
+                   parent != requestedParent { throw QuarkError.invalidResponse }
                 guard ids.insert(entry.fid).inserted else { throw QuarkError.invalidResponse }
                 entries.append(entry)
             }
@@ -225,6 +227,8 @@ public actor QuarkClient {
         components.host = host
         components.path = path
         components.queryItems = query.isEmpty ? nil : query.map { URLQueryItem(name: $0.0, value: $0.1) }
+        // URLComponents 按 URL 标准保留 +，服务端表单查询解析却会把它当空格。
+        components.percentEncodedQuery = components.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         return components.url!
     }
 

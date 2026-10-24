@@ -18,6 +18,140 @@ import os
         return (session, [readme, report])
     }
 
+    @Test func quarkKnownSelectionPathsAvoidUnrelatedModelTreeAndReuseDirectoryCache() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        stub.state.withLock {
+            $0.shareDirectoryOverrides = [
+                "0": [("comfy", "ComfyUI", true), ("models", "models", true), ("guide", "guide.txt", false)],
+                "comfy": [("nodes", "ComfyUI_GJJ_Nodes", true)],
+                "nodes": [("readme", "README.md", false), ("requirements", "requirements-optional.txt", false)],
+                "models": [("huge-tree", "huge-tree", true)],
+            ]
+        }
+        let disk = stub.makeDisk()
+        let session = try await disk.openShare(DiskShareLink(provider: .quark, code: "test"), password: nil)
+        let entries = [
+            RemoteEntry(reference: .quark(fid: "guide"), name: "guide.txt", isDirectory: false, size: 12, relativeDirectory: ""),
+            RemoteEntry(reference: .quark(fid: "readme"), name: "README.md", isDirectory: false, size: 12, relativeDirectory: "ComfyUI/ComfyUI_GJJ_Nodes"),
+            RemoteEntry(reference: .quark(fid: "requirements"), name: "requirements-optional.txt", isDirectory: false, size: 12, relativeDirectory: "ComfyUI/ComfyUI_GJJ_Nodes"),
+        ]
+        try await disk.prepareTransfer(session, entries: entries)
+        #expect(stub.state.withLock { $0.requestedShareParents } == ["0", "comfy", "nodes"])
+        try await disk.prepareTransfer(session, entries: entries)
+        let result = try await disk.submitTransfer(session, entries: entries,
+            to: TransferDirectory(reference: .quark(fid: "owned"), name: "TASK"), previous: nil) { _ in }
+        await disk.releaseShare(session)
+        #expect(result.completed && result.batches?.count == 2)
+        #expect(stub.state.withLock { $0.requestedShareParents } == ["0", "comfy", "nodes"])
+        #expect(stub.state.withLock { !$0.requestedShareParents.contains("models") })
+    }
+
+    @Test func quarkMissingKnownSelectionPathDoesNotFallBackToScanning() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        let disk = stub.makeDisk()
+        let session = try await disk.openShare(DiskShareLink(provider: .quark, code: "test"), password: nil)
+        do {
+            try await disk.prepareTransfer(session, entries: [RemoteEntry(reference: .quark(fid: "readme"),
+                name: "readme.txt", isDirectory: false, size: 12, relativeDirectory: "missing/subdirectory")])
+            Issue.record("known path mismatch should fail")
+        } catch QuarkError.invalidSelection {}
+        await disk.releaseShare(session)
+        #expect(stub.state.withLock { $0.requestedShareParents } == ["0"])
+        #expect(stub.state.withLock { $0.saves.isEmpty })
+    }
+
+    @Test func quarkLegacySelectionWithoutPathStillRestoresFromShareTree() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        let disk = stub.makeDisk()
+        let session = try await disk.openShare(DiskShareLink(provider: .quark, code: "test"), password: nil)
+        let entry = RemoteEntry(reference: .quark(fid: "report"), name: "readme.txt", isDirectory: false, size: 12)
+        try await disk.prepareTransfer(session, entries: [entry])
+        let result = try await disk.submitTransfer(session, entries: [entry],
+            to: TransferDirectory(reference: .quark(fid: "owned"), name: "TASK"), previous: nil) { _ in }
+        await disk.releaseShare(session)
+        #expect(result.completed && result.batches?.first?.relativeDirectory == "docs/nested")
+        #expect(stub.state.withLock { $0.requestedShareParents } == ["0", "docs", "nested"])
+    }
+
+    @Test func quarkCancelledPreparationDoesNotReadDirectoryTree() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        let disk = stub.makeDisk()
+        let session = try await disk.openShare(DiskShareLink(provider: .quark, code: "test"), password: nil)
+        let entry = RemoteEntry(reference: .quark(fid: "readme"), name: "readme.txt", isDirectory: false, size: 12, relativeDirectory: "docs")
+        let task = Task { try await disk.prepareTransfer(session, entries: [entry]) }
+        task.cancel()
+        do {
+            try await task.value
+            Issue.record("cancelled preparation should stop")
+        } catch is CancellationError {}
+        await disk.releaseShare(session)
+        #expect(stub.state.withLock { $0.requestedShareParents.isEmpty })
+    }
+
+    @Test func quarkVirtualShareRootAcceptsPublisherParentButSavesFromRootZero() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        stub.state.withLock { $0.shareRootParentFID = "publisher-real-parent" }
+        let disk = stub.makeDisk()
+        let session = try await disk.openShare(DiskShareLink(provider: .quark, code: "test"), password: nil)
+        let root = try await disk.listShare(session, directory: nil)
+        #expect(root.count == 2)
+        let file = try #require(root.first { !$0.isDirectory })
+        #expect(file.relativeDirectory == "")
+        let result = try await disk.submitTransfer(session, entries: [file],
+            to: TransferDirectory(reference: .quark(fid: "owned"), name: "TASK"), previous: nil) { _ in }
+        await disk.releaseShare(session)
+        #expect(result.completed)
+        #expect(stub.state.withLock { $0.saveSourceParents } == ["0"])
+    }
+
+    @Test func quarkShareTokenQueryPreservesPlusSlashAndEquals() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        let token = "synthetic+base64/token=="
+        stub.state.withLock { $0.shareToken = token }
+        let disk = stub.makeDisk()
+        let session = try await disk.openShare(DiskShareLink(provider: .quark, code: "test"), password: nil)
+        _ = try await disk.listShare(session, directory: nil)
+        await disk.releaseShare(session)
+        let state = stub.state.withLock { $0 }
+        #expect(state.lastDetailToken == token)
+        #expect(state.lastDetailQuery?.contains("+") == false)
+        #expect(state.lastDetailQuery?.contains("%2B") == true)
+    }
+
+    @Test func quarkShareSubdirectoryStillRejectsForeignParent() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        stub.state.withLock { $0.shareParentOverrides["docs"] = "foreign-parent" }
+        let disk = stub.makeDisk()
+        let session = try await disk.openShare(DiskShareLink(provider: .quark, code: "test"), password: nil)
+        let docs = try #require(try await disk.listShare(session, directory: nil).first { $0.id == "docs" })
+        do {
+            _ = try await disk.listShare(session, directory: docs)
+            Issue.record("foreign share parent must fail")
+        } catch QuarkError.invalidResponse {}
+        await disk.releaseShare(session)
+    }
+
+    @Test func quarkAccountRootStillRejectsForeignParent() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        stub.state.withLock {
+            $0.folders["0"] = [("child", "child")]
+            $0.accountParentOverrides["0"] = "foreign-parent"
+        }
+        let disk = stub.makeDisk()
+        do {
+            _ = try await disk.listDirectory(nil)
+            Issue.record("foreign account parent must fail")
+        } catch QuarkError.invalidResponse {}
+    }
+
     @Test func quarkPartialSelectionPreservesSameNamesInDifferentDirectories() async throws {
         let stub = QuarkAPIStub()
         defer { FileProtocol.removeAPI(stub.id) }
@@ -445,6 +579,8 @@ import os
     @Test func removeCancelsDownloadsAndKeepsCompletedFiles() async throws {
         let fixture = Fixture(share: ["done.bin": Data(), "big.bin": randomData(400_000)])
         let coordinator = fixture.makeCoordinator(settings: FerrySettings(cleanupAfterDownload: true, maxConcurrentFiles: 4))
+        var isRunning = false
+        coordinator.onRunningChanged = { isRunning = $0 }
         await coordinator.start()
         fixture.server.setStalled(true)
 
@@ -462,6 +598,7 @@ import os
         #expect(coordinator.jobs.isEmpty)
         #expect(try fixture.store.load().isEmpty)
         #expect(coordinator.downloads[big.id] == nil)
+        #expect(!isRunning)
         #expect(FileManager.default.fileExists(atPath: fixture.downloads.appending(path: "done.bin").path))
         let leftovers = try FileManager.default.contentsOfDirectory(atPath: fixture.downloads.path)
         #expect(!leftovers.contains { $0.hasSuffix(".ferrydownload") })

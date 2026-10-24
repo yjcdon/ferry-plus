@@ -381,6 +381,15 @@ struct QuarkAPIStub: Sendable {
         var failQueries = Set<String>()
         var loseReceipts = Set<Int>()
         var afterSave: (@Sendable () throws -> Void)?
+        var shareRootParentFID = "0"
+        var shareParentOverrides: [String: String] = [:]
+        var accountParentOverrides: [String: String] = [:]
+        var saveSourceParents: [String] = []
+        var shareToken = "test-only"
+        var lastDetailToken: String?
+        var lastDetailQuery: String?
+        var shareDirectoryOverrides: [String: [(fid: String, name: String, isDirectory: Bool)]] = [:]
+        var requestedShareParents: [String] = []
     }
     let id = UUID().uuidString
     let state = OSAllocatedUnfairLock(initialState: State())
@@ -392,22 +401,36 @@ struct QuarkAPIStub: Sendable {
             let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
             let path = components.path
             let data: Any
-            if path.hasSuffix("/share/sharepage/token") { data = ["stoken": "test-only", "title": "Test share"] }
+            if path.hasSuffix("/share/sharepage/token") { data = state.withLock { ["stoken": $0.shareToken, "title": "Test share"] } }
             else if path.hasSuffix("/share/sharepage/detail") {
+                let encodedQuery = components.percentEncodedQuery
+                state.withLock {
+                    $0.lastDetailToken = query["stoken"]
+                    $0.lastDetailQuery = encodedQuery
+                }
                 let fid = query["pdir_fid"]!
                 let files: [(String, String, Bool)]
-                switch fid {
-                case "0": files = [("docs", "docs", true), ("cover", "cover.txt", false)]
-                case "docs": files = [("readme", "readme.txt", false), ("nested", "nested", true)]
-                case "nested": files = [("report", "readme.txt", false)]
-                default: files = []
+                let overridden = state.withLock { state -> [(fid: String, name: String, isDirectory: Bool)]? in
+                    state.requestedShareParents.append(fid)
+                    return state.shareDirectoryOverrides[fid]
                 }
+                if let overridden { files = overridden }
+                else {
+                    switch fid {
+                    case "0": files = [("docs", "docs", true), ("cover", "cover.txt", false)]
+                    case "docs": files = [("readme", "readme.txt", false), ("nested", "nested", true)]
+                    case "nested": files = [("report", "readme.txt", false)]
+                    default: files = []
+                    }
+                }
+                let realParent = state.withLock { $0.shareParentOverrides[fid] ?? (fid == "0" ? $0.shareRootParentFID : fid) }
                 data = ["list": files.map { item in ["fid": item.0, "file_name": item.1, "dir": item.2,
-                    "size": item.2 ? 0 : 12, "share_fid_token": "test-" + item.0, "pdir_fid": fid] as [String: Any] }]
+                    "size": item.2 ? 0 : 12, "share_fid_token": "test-" + item.0, "pdir_fid": realParent] as [String: Any] }]
             } else if path.hasSuffix("/file/sort") {
                 let parent = query["pdir_fid"]!
                 let children = state.withLock { $0.folders[parent] ?? [] }
-                data = ["list": children.map { ["fid": $0.fid, "file_name": $0.name, "dir": true, "size": 0, "pdir_fid": parent] as [String: Any] }]
+                let realParent = state.withLock { $0.accountParentOverrides[parent] ?? parent }
+                data = ["list": children.map { ["fid": $0.fid, "file_name": $0.name, "dir": true, "size": 0, "pdir_fid": realParent] as [String: Any] }]
             } else if path.hasSuffix("/file") {
                 let body = try FileProtocol.body(request)
                 let parent = body["pdir_fid"] as! String
@@ -422,8 +445,10 @@ struct QuarkAPIStub: Sendable {
                 let body = try FileProtocol.body(request)
                 let fids = body["fid_list"] as! [String]
                 let destination = body["to_pdir_fid"] as! String
+                let sourceParent = body["pdir_fid"] as! String
                 let result = state.withLock { state -> (Int, Bool, (@Sendable () throws -> Void)?) in
                     state.saves.append((fids, destination))
+                    state.saveSourceParents.append(sourceParent)
                     let count = state.saves.count
                     let action = state.afterSave
                     state.afterSave = nil

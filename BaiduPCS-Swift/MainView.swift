@@ -27,10 +27,11 @@ struct MainView: View {
                 .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
         } detail: {
             JobListView(jobs: jobs, category: current, providerFilter: providerFilter, searchText: query, selection: $selection, onRemove: requestRemoval)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .edgeBar(.top) {
                     Banners()
                     if let job = addedJobNotice {
-                        Banner(message: "已添加\(job.provider.title)任务“\(job.title)”") {
+                        Banner(message: "已添加\(job.provider.title)任务“\(job.title)”", systemImage: "checkmark.circle.fill", iconColor: .green) {
                             Button("查看任务") { revealAddedJob(job) }
                             Button("关闭") { addedJobNotice = nil }
                         }
