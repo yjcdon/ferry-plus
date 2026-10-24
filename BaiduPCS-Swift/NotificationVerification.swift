@@ -14,6 +14,7 @@ enum NotificationVerification {
         var matchingCount: Int?
         var titleMatches: Bool?
         var providerMatches: Bool?
+        var unverifiedNotice: Bool?
     }
 
     private struct Filter {
@@ -51,7 +52,13 @@ enum NotificationVerification {
             $0.request.identifier == filter.jobID.uuidString && $0.date >= filter.since
         }
         report.matchingCount = matches.count
-        report.titleMatches = !matches.isEmpty && matches.allSatisfy { $0.request.content.title == "下载完成" }
+        report.titleMatches = !matches.isEmpty && matches.allSatisfy {
+            ["下载完成", "下载完成 · 未验证"].contains($0.request.content.title)
+        }
+        report.unverifiedNotice = !matches.isEmpty && matches.allSatisfy {
+            $0.request.content.title == "下载完成 · 未验证" &&
+            $0.request.content.body.hasSuffix(" · 未验证源文件内容")
+        }
         let prefix = filter.provider.title + " · "
         report.providerMatches = !matches.isEmpty && matches.allSatisfy { $0.request.content.body.hasPrefix(prefix) }
         return report

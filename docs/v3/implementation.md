@@ -512,3 +512,9 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 修复 AppModel 启动等待下载／上传恢复时开始退出，恢复晚返回仍启动账号请求的窗口。启动入口及恢复、剪贴板等待后的边界核对退出标志；既有夸克后台启动任务保存句柄，退出及释放 Model 时取消，任务跨等待只持有会话。百度验证入口与返回后不再于退出中保存凭据或改变账号状态。
 
 旧启动链经确定性等待复现退出后仍调用百度验证。实际 start／revalidate 方法全文提取的 14 项检查通过，包含三处等待边界、正常启动、晚成功／过期、夸克取消及 Model 释放。HTTP、钥匙串为轻量替身，夸克替身沿用正式 revalidate 的返回后取消检查，不冒称真实登录／退出现场。证据 `.build/start-shutdown-validation/{report.md,result.txt,source-hashes.json}`。最终 Release App 构建及固定签名校验通过（`.build/v3-startup-directory-context-app-build.log`）；睡眠唤醒、通知及实际界面验收仍未补齐。
+
+## 下载行与完成通知标明未验证
+
+补齐没有内容基准的下载在列表状态行及完成通知中的标识。两处共用整批已验证判据：文件清单非空，且每个文件已落盘、具有基准、校验通过。缺依据、旧记录或混合批次显示未验证，已全部验证的 SHA-256／MD5 完成保持普通文案。文件详情仍显示各自算法与依据。
+
+实际 Formatting Job 扩展、完整通知方法及 DEBUG 通知检查全文提取验证 103 项通过，涵盖双网盘十种完整性组合、原 CLI 兼容和失败状态。通知中心为内存替身，不把此项当作系统实际送达证据；DEBUG 检查新增 unverifiedNotice（是否含完整未验证标识），不新增参数。Release App 构建／固定签名与该 DEBUG 文件独立真实模块类型检查通过，证据 `.build/download-notice-validation/{report.md,source-hashes.json}`、`.build/v3-download-notice-app-build.log`、`.build/v3-download-notice-debug-typecheck.log`。Mac 锁屏，系统实际通知及最终界面验收仍留 T15／T18。

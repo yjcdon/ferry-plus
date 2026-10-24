@@ -36,6 +36,13 @@ extension JobProgress {
 extension Job {
     var isUnfinished: Bool { phase != .completed }
 
+    /// 只有实际落盘且每个文件都有明确基准和成功校验结果，整批才能展示为已验证。
+    var hasVerifiedContent: Bool {
+        !files.isEmpty && files.allSatisfy {
+            $0.isCompleted && $0.integrityStatus == .verified && $0.integrityExpectation != nil
+        }
+    }
+
     /// 来源是我的网盘。
     var isNetdisk: Bool {
         if case .netdisk = source { true } else { false }
@@ -54,7 +61,7 @@ extension Job {
             }
             return isRunning ? "正在下载" : "等待下载"
         case .completed:
-            return "已完成"
+            return hasVerifiedContent ? "已完成" : "已完成 · 未验证源文件内容"
         case .failed(.transfer):
             return isNetdisk ? "准备失败" : "转存失败"
         case .failed(.download):
