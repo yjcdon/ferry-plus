@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Darwin
 
 /// 可保存的上传身份；授权上下文与短期签名不得写入普通任务记录。
 public struct QuarkUploadSession: Codable, Sendable, Equatable {
@@ -207,7 +208,8 @@ extension QuarkClient {
         url.percentEncodedQuery = url.percentEncodedQuery?.replacingOccurrences(of: "+", with: "%2B")
         guard let endpoint = url.url else { throw QuarkError.invalidResponse }
         var request = URLRequest(url: endpoint)
-        request.httpMethod = method; request.httpBody = body
+        request.httpMethod = method
+        if method != "PUT" { request.httpBody = body }
         request.setValue(auth.data.auth_key, forHTTPHeaderField: "Authorization")
         request.setValue(contentType, forHTTPHeaderField: "Content-Type")
         request.setValue("https://pan.quark.cn/", forHTTPHeaderField: "Referer")
@@ -218,7 +220,14 @@ extension QuarkClient {
         try Task.checkCancellation()
         guard !revoked.withLock({ $0 }) else { throw CancellationError() }
         // 使用禁 Cookie 且禁止自动重定向的客户端会话；不经由带网盘 Cookie 的 send。
-        let (data, response) = try await session.data(for: request)
+        let (data, response): (Data, URLResponse)
+        if method == "PUT" {
+            let bodyFile = try Self.spoolPart(body)
+            defer { _ = unlink(bodyFile.path) }
+            (data, response) = try await session.upload(for: request, fromFile: bodyFile)
+        } else {
+            (data, response) = try await session.data(for: request)
+        }
         guard let http = response as? HTTPURLResponse else { throw QuarkError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {
             throw Self.storageError(status: http.statusCode, data: data,
@@ -226,6 +235,48 @@ extension QuarkClient {
         }
         return (data, http)
     }
+
+    /// 只暂存一个 PUT 分片，避免系统会话长期持有内存体；文件为随机独占 0600。
+    private static func spoolPart(_ data: Data) throws -> URL {
+        try autoreleasepool {
+            _ = orphanPartsCleaned
+            var template = Array((NSTemporaryDirectory() + "ferry-quark-part-\(getpid())-XXXXXX").utf8CString)
+            let descriptor = template.withUnsafeMutableBufferPointer { mkstemp($0.baseAddress!) }
+            guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            let path = template.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+            let file = URL(fileURLWithPath: path)
+            let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+            do {
+                try handle.write(contentsOf: data)
+                try handle.close()
+                return file
+            } catch {
+                try? handle.close()
+                _ = unlink(file.path)
+                throw error
+            }
+        }
+    }
+
+    /// 每个进程首次暂存时回收本用户的已退出实例分片；活进程、旧格式和未知归属均保留。
+    /// PID 被复用时暂不回收，留到后续启动确认该 PID 已退出；不承诺立即清理。
+    private static let orphanPartsCleaned: Void = {
+        let directory = NSTemporaryDirectory()
+        let prefix = "ferry-quark-part-"
+        // 清理是尽力操作，目录无法枚举时不扩大删除范围，也不阻断当前上传。
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory) else { return }
+        for name in names where name.hasPrefix(prefix) {
+            let parts = name.dropFirst(prefix.count).split(separator: "-", omittingEmptySubsequences: false)
+            guard parts.count == 2, let pid = Int32(parts[0]), pid > 0, String(pid) == parts[0],
+                  parts[1].utf8.count == 6,
+                  parts[1].utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) }) else { continue }
+            let path = directory + name
+            var info = stat()
+            guard lstat(path, &info) == 0, info.st_uid == getuid(), info.st_mode & S_IFMT == S_IFREG else { continue }
+            guard kill(pid, 0) == -1, errno == ESRCH else { continue }
+            _ = unlink(path)
+        }
+    }()
 
     /// 网盘时间戳字段只接受整数毫秒；浮点小数会使实际服务端返回 HTTP 500。
     private static func uploadMilliseconds(_ date: Date) throws -> Int64 {

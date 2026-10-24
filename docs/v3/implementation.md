@@ -56,13 +56,13 @@ DownloadKit 新增 `TransferBudget`：可取消的 FIFO 连接许可、异常自
 
 尚未把新预算接入现有下载请求、上传引擎、回读消费者及设置，因此 V3-T12 保持未完成，不能把预算单体验证作为真实混合传输资源验收。
 
-## 当前下一步
+## 当前剩余工作
 
-1. 将已验证的跨进程续传接口接入统一调度，继续补齐服务端缺失分片查询证据。
-2. 接入持久源指纹、完整上传回读、网络预算和失败阶段恢复。
-3. 实现上传窗口、选定网盘后拖动上传和统一列表，重新构建 App 后进行实际 Computer Use 验收。
+基础上传、两家完整回读、再次下载摘要比对、统一传输列表、源重新定位和共享预算均已接入正式 App。T02 状态与命令契约、T03 源扫描及稳定基准完成；其余条目仍按完整验收标准保留未勾选，不表示尚无实现。
 
-安全覆盖仍需要证明并发保护与旧版本恢复同时成立。当前参考接口未提供充分的条件版本更新契约，不能仅凭备份或按 ID 操作就认定已解决；此项按 V3-T01／V3-T09 继续验证，不缩减原定范围。
+实际功能缺口包括活动上传内容重复提醒、上传目标新建目录与按账号最近目录、目录浏览上下文上传、上传分片并发设置、校验记录清理入口及结果定位／阶段速率。生命周期和升级仍有现场验收缺口。
+
+安全覆盖需要同时证明并发保护与旧版本恢复。当前接口未提供充分的条件版本更新契约，此能力仍未实现；百度未知合并／两家建目录的可靠自动核对、服务端列片和过期恢复也需补齐，不能用“不自动重试”冒充完成。最终 3.0 构建产物、交付文档与最终 Review 尚未完成。
 
 ## 正式接口跨进程续传与回读
 
@@ -225,7 +225,7 @@ Computer Use 在进程 28205 通过正式窗口上传专用目录 `FerryPlus-V3-
 
 上传指纹和下载最终摘要循环均改为每轮同步读取、全部摘要更新后立即释放 autoreleasepool，取消检查仍在每轮执行。相同 2 GiB+1 样本独立前后对比：SHA-256 和 103 个分片基准全部正确，最大 RSS 从 2162999296 字节降为 9158656 字节；耗时分别 15.21 秒和 14.72 秒。证据 `.build/source-memory-validation/before-result.txt`、`before-resources.txt`、`after-result.txt`、`after-resources.txt`。原有已知摘要、空文件、分片边界、扫描、源变化和取消检查仍通过。
 
-真实 FileTransfer.run→finalize 对 2 GiB+1 文件同时核对 MD5／SHA-256，峰值 RSS 14532608 字节，证据 `.build/finalize-memory-validation/result.txt`、`resources.txt`。重新构建 App 成功，日志 `.build/v3-memory-fix-app-build.log`；进程 29684 恢复原夸克暂停状态，并为百度重新准备同一大文件，资源采样未再出现整文件量级内存增长，证据 `.build/ui-large-validation/app-29684-resources.jsonl`。大文件完整上传和回读仍在继续，不能提前标为验收完成。
+真实 FileTransfer.run→finalize 对 2 GiB+1 文件同时核对 MD5／SHA-256，峰值 RSS 14532608 字节，证据 `.build/finalize-memory-validation/result.txt`、`resources.txt`。重新构建 App 成功，日志 `.build/v3-memory-fix-app-build.log`；进程 29684 恢复原夸克暂停状态，并为百度重新准备同一大文件，资源采样未再出现整文件量级内存增长，证据 `.build/ui-large-validation/app-29684-resources.jsonl`。本轮完整上传和回读已按用户指示暂停；部分上传证据保留，后续改用短样本验证。
 
 传输设置实测发现限速输入内层 TextField 把占位标题 `0` 也作为行标签展示，导致两个零。隐藏内层标签，保留外层上传／下载限速标题及输入框，避免重复显示。并发设置通过实际 Stepper 从 1 调到 2，并行验证结束后恢复默认 1。
 
@@ -239,4 +239,32 @@ Computer Use 在进程 28205 通过正式窗口上传专用目录 `FerryPlus-V3-
 
 上传明细为已有原始 SHA-256 的待上传失败文件提供重新选择本地文件入口。先停稳原 worker，再计算新文件完整 SHA-256、大小及已有协议摘要；全部一致后更新 URL、授权书签和文件身份，原会话、远端身份、密钥引用及已确认分片回执保持不变。运行时挂起和退出也等待重新定位操作收尾，不遗留后台哈希。
 
-8 项隔离检查通过，覆盖原源移走后同内容恢复、同大小异内容拒绝、原会话只补缺片、暂停意图和挂起收尾；证据 `.build/upload-relocation-validation/result.txt`。正式 Core 编译和全套 307 项包测试通过；界面先经 stub 类型检查，实际 App 操作待后续构建。目录整批映射尚未实现，支持逐文件处理；没有原始摘要的项目必须重新添加，云端校验阶段缺本地源可直接重试。
+8 项隔离检查通过，覆盖原源移走后同内容恢复、同大小异内容拒绝、原会话只补缺片、暂停意图和挂起收尾；证据 `.build/upload-relocation-validation/result.txt`。正式 Core 编译和全套 307 项包测试通过；正式 App 已通过实际操作：8 MiB+1 字节源文件第一片确认后移走，原位置换为同大小异内容文件，任务停止；重新选择正确文件后原会话及第一片回执保留，补传剩余两片并完整回读成功。证据 `.build/ui-spool-validation/relocation-after.json`、`actual-app-results.json`。目录整批映射尚未实现，支持逐文件处理；没有原始摘要的项目必须重新添加，云端校验阶段缺本地源可直接重试。
+
+## 大文件测试按用户指示停止全量等待
+
+2026-10-24 用户表示已上传约 800M 足够，要求继续实施、不等传完。通过 App 的“暂停当前列表”停稳两家测试，百度确认 721420288 字节、夸克确认 419430400 字节，各自总长度 2147483649；检查点与暂停意图保存。结束资源监视，将临时上传并发从 2 恢复为 1，再正常退出 App。证据 `.build/ui-large-validation/stopped-per-user.json`。不再等待该轮全量云端传输，也不宣称已完成两家 2 GiB 全量回读；后续使用短样本继续验证内存修复和功能。
+
+## 2.0 元数据隔离升级验收
+
+基线 `v2.0 = 8349de864f65d77717e797bbd10acb81848096ae`。从历史 `.build/verification-resume` 两家真实暂停记录，先以旧新代码比较账号、引用、context、下载 ID 及首两片各 1 MiB 的偏移，再由原始 2.0 编码器生成明确标识的进行中和完成变体。两家 × 三种状态共 6 例通过：暂停不自动解析，进行中恢复 queued，完成不重复下载且仍为未验证；任务及下载记录的 `.before-v3` 备份逐字节一致、反复保存不覆盖，旧 2.0 解码器可读回。
+
+验证只读历史输入，不接触实际 App 数据、钥匙串或云端。证据 `.build/upgrade-validation/report.md`、`result.jsonl`、`input-manifest.json`、`source-manifest.json`。进行中和完成是基线编码器派生状态，不冒充真实现场；该结果不替代实际安装版回退或跨版本真实账号续传。
+
+
+## 分片发送的系统缓存内存修复
+
+持续上传实测发现，仅释放哈希临时对象仍不足以限制 URLSession 内存请求体的累计占用。两家上传分片改为只暂存当前请求体，使用原会话的 `upload(fromFile:)` 发送；百度 multipart 分段写入，夸克只对 OSS PUT 使用文件体。随机独占文件权限为 0600，发送成功、失败或取消后立即清理；不保留完整源文件副本。文件名标记所属 PID，每进程首次发送时仅回收已确认退出进程、当前用户所有、精确格式的普通文件；活进程和未知归属保留，无常驻清理轮询。孤儿清理边界验证见 `.build/upload-memory-validation/orphan-proof.txt`。
+
+真实本地 HTTP 分别发送 20 MiB ×128 分片，服务端逐字节核对。百度峰值 RSS 44843608 字节，夸克 44958296 字节；成功、503 和取消均无临时文件残留。证据 `.build/upload-memory-validation/baidu-spool-proof.txt`、`quark-spool-proof.txt`。全套 307 项包测试通过，原发送路径日志 `.build/v3-upload-body-file-package-tests.log`；孤儿回收接入后全套仍通过 `.build/v3-spool-orphan-tests.log`，Release App 构建与固定签名通过 `.build/v3-upload-spool-app-build.log`。
+
+重新构建 App 后，两家各 8388609 字节真实上传及完整回读通过，原始与远端 SHA-256 均为 `8a3a82140bb800027ccbca37d73a708373540a7c93f6b66ca5706777be76371e`，校验记录为 verified。证据 `.build/ui-spool-validation/actual-app-results.json`。本地压力发送用于验证系统缓存行为，不冒充云端多 GiB 完整回读。
+
+
+## 独立回读进度
+
+上传发送完成后，列表切换显示当前校验文件及已回读／总字节。进度由 coordinator 运行时投影，不写 JSON；暂停或取消清空，恢复从文件首字节重算，完整 SHA-256 匹配后才写 verified 记录并完成。
+
+Release 全套 307 项通过，日志 `.build/v3-verification-progress-tests.log`。7 项慢速范围回读检查通过初始零进度、单调有界、暂停收尾清理、恢复从零实际请求及最终记录，证据 `.build/upload-verification-progress/result.txt`。新 App 构建与签名通过 `.build/v3-verification-progress-app-build.log`，重开后两家账号保持登录、两条大文件任务保持手动暂停。限速设置实际窗口每行只显示一个数值，默认上传并发仍为 1。
+
+文件体发送版完成两家短上传及完整回读后，空闲 CPU 0.0%，sample 物理占用 99.0 MiB、峰值 153.3 MiB，证据 `.build/ui-spool-validation/idle-sample.txt`。该采样不代替长期负载泄漏验收。

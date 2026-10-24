@@ -75,7 +75,8 @@ extension BaiduClient {
         credential.cookies.merging(session.cookies).filter { !session.deleted.contains($0.name) }
     }
 
-    func send(_ request: BaiduRequest) async throws -> (Data, HTTPURLResponse) {
+    /// 分片可从临时文件发送，避免 URLSession 长期保留内存请求体；其他请求沿用原路径。
+    func send(_ request: BaiduRequest, bodyFile: URL? = nil) async throws -> (Data, HTTPURLResponse) {
         try Task.checkCancellation()
         guard !revoked.withLock({ $0 }) else { throw CancellationError() }
         var urlRequest = URLRequest(url: request.url)
@@ -89,10 +90,12 @@ extension BaiduClient {
         for (name, value) in request.headers {
             urlRequest.setValue(value, forHTTPHeaderField: name)
         }
-        urlRequest.httpBody = request.body
+        if bodyFile == nil { urlRequest.httpBody = request.body }
 
         do {
-            let (data, response) = try await session.data(for: urlRequest)
+            let (data, response): (Data, URLResponse)
+            if let bodyFile { (data, response) = try await session.upload(for: urlRequest, fromFile: bodyFile) }
+            else { (data, response) = try await session.data(for: urlRequest) }
             guard let http = response as? HTTPURLResponse else { throw BaiduError.invalidResponse }
             return (data, http)
         } catch let error as URLError {
@@ -102,8 +105,8 @@ extension BaiduClient {
     }
 
     /// 解析 JSON，不检查错误码。PCS 出错时 HTTP 状态常为 4xx，响应体仍是错误 JSON，所以先解析再看状态。
-    func json(_ request: BaiduRequest) async throws -> (JSON, HTTPURLResponse) {
-        let (data, response) = try await send(request)
+    func json(_ request: BaiduRequest, bodyFile: URL? = nil) async throws -> (JSON, HTTPURLResponse) {
+        let (data, response) = try await send(request, bodyFile: bodyFile)
         guard let json = try? JSON(data: data) else {
             if response.statusCode >= 400 { throw BaiduError.httpStatus(response.statusCode) }
             throw BaiduError.invalidResponse
@@ -123,8 +126,8 @@ extension BaiduClient {
     }
 
     /// PCS 接口：`error_code` 非 0 时抛错。
-    func pcsJSON(_ request: BaiduRequest) async throws -> JSON {
-        let (json, response) = try await json(request)
+    func pcsJSON(_ request: BaiduRequest, bodyFile: URL? = nil) async throws -> JSON {
+        let (json, response) = try await json(request, bodyFile: bodyFile)
         if let code = json["error_code"].int, code != 0 {
             throw BaiduError(code: code, message: json["error_msg"].string, endpoint: request.endpoint)
         }

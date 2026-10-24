@@ -1,5 +1,6 @@
 import Foundation
 import CryptoKit
+import Darwin
 
 /// 百度一次预上传的可恢复信息；不保存 Cookie、bdstoken 或短期签名。
 public struct BaiduUploadSession: Codable, Sendable, Equatable {
@@ -119,21 +120,64 @@ extension BaiduClient {
         let actual = Insecure.MD5.hash(data: data).map { String(format: "%02x", $0) }.joined()
         guard actual == expected else { throw BaiduUploadError.sourceChanged }
         let boundary = "FerryUpload" + UUID().uuidString
-        var body = Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"part.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n".utf8)
-        body.append(data)
-        body.append(Data("\r\n--\(boundary)--\r\n".utf8))
+        let bodyFile = try Self.spoolPart(data, boundary: boundary)
+        defer { _ = unlink(bodyFile.path) }
         let url = URLEncoding.url("https://d.pcs.baidu.com/rest/2.0/pcs/superfile2", [
             ("app_id", Host.panAppID), ("method", "upload"), ("type", "tmpfile"),
             ("path", upload.path), ("uploadid", upload.uploadID), ("partseq", String(index))
         ])
         let reply = try await pcsJSON(BaiduRequest(method: "POST", url: url, endpoint: .pcsFile,
             cookies: cookies(), headers: ["User-Agent": UserAgent.netdisk,
-                "Referer": Host.pan + "/", "Content-Type": "multipart/form-data; boundary=\(boundary)"], body: body))
+                "Referer": Host.pan + "/", "Content-Type": "multipart/form-data; boundary=\(boundary)"]), bodyFile: bodyFile)
         guard let md5 = reply["md5"].string, md5.lowercased() == expected else {
             throw BaiduUploadError.invalidPartReceipt
         }
         return BaiduUploadPartReceipt(index: index, size: data.count, md5: expected)
     }
+
+    /// 只暂存当前分片的 multipart 体；独占随机文件权限为 0600，构造失败立即清理。
+    private static func spoolPart(_ data: Data, boundary: String) throws -> URL {
+        try autoreleasepool {
+            _ = orphanPartsCleaned
+            var template = Array((NSTemporaryDirectory() + "ferry-baidu-part-\(getpid())-XXXXXX").utf8CString)
+            let descriptor = template.withUnsafeMutableBufferPointer { mkstemp($0.baseAddress!) }
+            guard descriptor >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+            let path = template.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+            let file = URL(fileURLWithPath: path)
+            let handle = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+            do {
+                try handle.write(contentsOf: Data("--\(boundary)\r\nContent-Disposition: form-data; name=\"file\"; filename=\"part.bin\"\r\nContent-Type: application/octet-stream\r\n\r\n".utf8))
+                try handle.write(contentsOf: data)
+                try handle.write(contentsOf: Data("\r\n--\(boundary)--\r\n".utf8))
+                try handle.close()
+                return file
+            } catch {
+                try? handle.close()
+                _ = unlink(file.path)
+                throw error
+            }
+        }
+    }
+
+    /// 每个进程首次暂存时回收本用户的已退出实例分片；活进程、旧格式和未知归属均保留。
+    /// PID 被复用时暂不回收，留到后续启动确认该 PID 已退出；不承诺立即清理。
+    private static let orphanPartsCleaned: Void = {
+        let directory = NSTemporaryDirectory()
+        let prefix = "ferry-baidu-part-"
+        // 清理是尽力操作，目录无法枚举时不扩大删除范围，也不阻断当前上传。
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: directory) else { return }
+        for name in names where name.hasPrefix(prefix) {
+            let parts = name.dropFirst(prefix.count).split(separator: "-", omittingEmptySubsequences: false)
+            guard parts.count == 2, let pid = Int32(parts[0]), pid > 0, String(pid) == parts[0],
+                  parts[1].utf8.count == 6,
+                  parts[1].utf8.allSatisfy({ (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) }) else { continue }
+            let path = directory + name
+            var info = stat()
+            guard lstat(path, &info) == 0, info.st_uid == getuid(), info.st_mode & S_IFMT == S_IFREG else { continue }
+            guard kill(pid, 0) == -1, errno == ESRCH else { continue }
+            _ = unlink(path)
+        }
+    }()
 
     /// 合并预上传分片并返回准确远端身份；调用前须保存提交意图，网络失败不能当作未提交。
     public func completeUpload(_ upload: BaiduUploadSession, receipts: [BaiduUploadPartReceipt]) async throws -> NetdiskEntry {
