@@ -28,6 +28,8 @@ struct FileTreeRow<Entry: FileTreeEntry, Badge: View, Columns: View>: View {
     @ViewBuilder let columns: (Entry) -> Columns
     /// 仅目录支持上传入口；默认 nil 保持分享文件树的原有行为。
     var onUpload: ((Entry, [URL]) -> Void)? = nil
+    /// 仅个人账号网盘提供删除；分享树不提供此操作。
+    var onDelete: ((Entry) -> Void)? = nil
     @State private var loadAttempt = 0
 
     var body: some View {
@@ -39,7 +41,7 @@ struct FileTreeRow<Entry: FileTreeEntry, Badge: View, Columns: View>: View {
                     }
                     ForEach(children) { child in
                         FileTreeRow(node: child, tree: tree, isIncluded: isIncluded || tree.isSelected(node),
-                                    badge: badge, columns: columns, onUpload: onUpload)
+                                    badge: badge, columns: columns, onUpload: onUpload, onDelete: onDelete)
                     }
                 } else if let error = node.loadError {
                     HStack {
@@ -75,10 +77,18 @@ struct FileTreeRow<Entry: FileTreeEntry, Badge: View, Columns: View>: View {
     }
 
     @ViewBuilder private var label: some View {
-        if let entry = node.entry, entry.isDirectory, let onUpload {
+        if let entry = node.entry {
             rowLabel
-                .contextMenu { Button("上传到此文件夹") { onUpload(entry, []) } }
+                .contextMenu {
+                    if entry.isDirectory, let onUpload {
+                        Button("上传到此文件夹") { onUpload(entry, []) }
+                    }
+                    if let onDelete {
+                        Button("移到回收站…", role: .destructive) { onDelete(entry) }
+                    }
+                }
                 .dropDestination(for: URL.self) { urls, _ in
+                    guard entry.isDirectory, let onUpload else { return false }
                     let files = urls.filter(\.isFileURL)
                     guard !files.isEmpty else { return false }
                     onUpload(entry, files)

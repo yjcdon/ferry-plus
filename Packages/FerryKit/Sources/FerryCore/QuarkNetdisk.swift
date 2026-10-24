@@ -282,6 +282,13 @@ public actor QuarkNetdisk: Netdisk {
         try await client.delete(fids: [Self.fid(directory.reference)])
     }
 
+    /// 使用准确 fid 与 action_type 1，客户端等待已有服务端任务；之后核对原目录移除结果。
+    public func moveToTrash(entry: RemoteEntry, parent: RemoteReference, account requestingAccount: AccountKey) async throws {
+        try await checkTrashSelection(entry: entry, parent: parent, requestingAccount: requestingAccount)
+        try await client.delete(fids: [Self.fid(entry.reference)])
+        try await confirmTrashRemoval(entry: entry, parent: parent)
+    }
+
     private static func fid(_ reference: RemoteReference) throws -> String {
         guard case .quark(let fid) = reference else { throw CoordinatorError.otherAccount }
         return fid

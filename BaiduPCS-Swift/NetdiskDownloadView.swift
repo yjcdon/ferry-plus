@@ -5,6 +5,8 @@ import UniformTypeIdentifiers
 
 /// 网盘下载和用户明确选择的校验依据在同一次确认中绑定账号、会话及准确远端身份。
 struct NetdiskDownloadView: View {
+    let initialAccount: AccountKey?
+    let initialDirectory: RemoteReference?
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var uploadTarget: UploadTarget?
@@ -15,6 +17,7 @@ struct NetdiskDownloadView: View {
         let account: AccountKey
         let session: ObjectIdentifier
         let trail: [RemoteEntry]
+        let directory: RemoteReference
         let files: [URL]
     }
     @State private var tree: FileTree<RemoteEntry>?
@@ -42,6 +45,25 @@ struct NetdiskDownloadView: View {
     @State private var isImporting = false
     @State private var submission: Submission?
     @State private var integrityError: String?
+    @State private var pendingDeletion: Deletion?
+    @State private var deletion: Deletion?
+    @State private var deletionResult: String?
+
+    private struct Deletion: Identifiable {
+        let id = UUID()
+        let account: AccountKey
+        let session: ObjectIdentifier
+        let entries: [(entry: RemoteEntry, parent: RemoteReference)]
+        let accountName: String
+    }
+    private var isBusy: Bool { isSubmitting || deletion != nil }
+    private var browserRoot: RemoteReference { initialDirectory ?? Self.root(for: provider) }
+
+    init(initialAccount: AccountKey? = nil, initialDirectory: RemoteReference? = nil) {
+        self.initialAccount = initialAccount
+        self.initialDirectory = initialDirectory
+        _provider = State(initialValue: initialAccount?.provider ?? .baidu)
+    }
 
     private enum IntegrityMode: String, Identifiable {
         case none, manual, history, manifest
@@ -86,9 +108,9 @@ struct NetdiskDownloadView: View {
                 ForEach(Provider.allCases) { Text($0.title).tag($0) }
             }
             .pickerStyle(.segmented).labelsHidden()
-            .padding(.horizontal).padding(.bottom).disabled(isSubmitting)
+            .padding(.horizontal).padding(.bottom).disabled(isBusy || initialAccount != nil)
             Divider()
-            content.frame(maxWidth: .infinity, maxHeight: .infinity).disabled(isSubmitting)
+            content.frame(maxWidth: .infinity, maxHeight: .infinity).disabled(isBusy)
             Divider()
             footer.padding()
         }
@@ -100,7 +122,7 @@ struct NetdiskDownloadView: View {
             if model.accountKey(for: target.provider) == target.account,
                model.coordinator.netdisks[target.provider].map({ ObjectIdentifier($0) }) == target.session {
                 UploadView(initialProvider: target.provider,
-                           initialDirectory: target.trail.last?.reference ?? Self.root(for: target.provider),
+                           initialDirectory: target.directory,
                            files: target.files, initialTrail: target.trail) { files, account, destination, policy in
                     try await model.addUpload(files: files, account: account, destination: destination, conflictPolicy: policy)
                     uploadSubmitted = true
@@ -116,6 +138,21 @@ struct NetdiskDownloadView: View {
             }
         }
         .task(id: generation) { await load() }
+        .task(id: deletion?.id) {
+            guard let deletion else { return }
+            await delete(deletion)
+        }
+        .alert("移到网盘回收站？", isPresented: Binding(
+            get: { pendingDeletion != nil }, set: { if !$0 { pendingDeletion = nil } }
+        ), presenting: pendingDeletion) { request in
+            Button("取消", role: .cancel) { pendingDeletion = nil }
+            Button("移到回收站", role: .destructive) { pendingDeletion = nil; deletion = request }
+        } message: { request in
+            Text("\(request.account.provider.title) · \(request.accountName)\n\n\(request.entries.prefix(10).map { $0.entry.name }.joined(separator: "\n"))\n\n共 \(request.entries.count) 项。文件夹及其全部内容将移入该网盘回收站。")
+        }
+        .alert("网盘删除结果", isPresented: Binding(
+            get: { deletionResult != nil }, set: { if !$0 { deletionResult = nil } }
+        )) { Button("好") { deletionResult = nil } } message: { Text(deletionResult ?? "") }
         .task(id: candidate) { await loadCandidates(candidate) }
         .task(id: importRequest?.id) {
             guard let importRequest else { return }
@@ -160,13 +197,17 @@ struct NetdiskDownloadView: View {
 
     private var header: some View {
         HStack {
-            Text("从我的网盘下载").font(.headline)
+            Text(initialDirectory == nil ? "从我的网盘下载" : "上传结果所在目录").font(.headline)
             Spacer()
-            Button { presentUpload(trail: [], files: []) } label: { Label("上传到根目录", systemImage: "arrow.up.doc") }
+            if deletion != nil { ProgressView().controlSize(.small) }
+            Button { prepareDeletion(selectedEntries) } label: { Label("删除选中项目", systemImage: "trash") }
+                .labelStyle(.iconOnly).help("删除选中项目")
+                .disabled(!canPresentUpload || selectedEntries.isEmpty)
+            Button { presentUpload(trail: [], files: []) } label: { Label(initialDirectory == nil ? "上传到根目录" : "上传到当前目录", systemImage: "arrow.up.doc") }
                 .labelStyle(.iconOnly)
-                .help("上传到根目录").disabled(!canPresentUpload)
+                .help(initialDirectory == nil ? "上传到根目录" : "上传到当前目录").disabled(!canPresentUpload)
             Button { generation += 1; resetIntegrity() } label: { Label("重新加载", systemImage: "arrow.clockwise") }
-                .labelStyle(.iconOnly).help("重新加载").disabled(isSubmitting)
+                .labelStyle(.iconOnly).help("重新加载").disabled(isBusy)
         }
     }
 
@@ -175,7 +216,7 @@ struct NetdiskDownloadView: View {
             NetdiskBrowser(tree: tree, transferFolder: model.settings.transferFolder(for: provider), onUpload: { entry, files in
                 guard let trail = directoryTrail(to: entry.reference, in: tree.root) else { return }
                 presentUpload(trail: trail, files: files)
-            }).id(ObjectIdentifier(tree))
+            }, onDelete: { prepareDeletion([$0]) }).id(ObjectIdentifier(tree))
                 .dropDestination(for: URL.self) { urls, _ in
                     let files = urls.filter(\.isFileURL)
                     guard !files.isEmpty, canPresentUpload else { return false }
@@ -194,7 +235,7 @@ struct NetdiskDownloadView: View {
     }
 
     private var canPresentUpload: Bool {
-        !isSubmitting && tree != nil && treeAccount == model.accountKey(for: provider) &&
+        !isBusy && tree != nil && treeAccount == model.accountKey(for: provider) &&
         treeAccount != nil && treeSession == sessionIdentity && treeSession != nil
     }
 
@@ -202,7 +243,8 @@ struct NetdiskDownloadView: View {
     private func presentUpload(trail: [RemoteEntry], files: [URL]) {
         guard canPresentUpload, uploadTarget == nil, let account = treeAccount, let session = treeSession else { return }
         uploadSubmitted = false
-        uploadTarget = .init(provider: provider, account: account, session: session, trail: trail, files: files)
+        uploadTarget = .init(provider: provider, account: account, session: session, trail: trail,
+                             directory: trail.last?.reference ?? browserRoot, files: files)
     }
 
     private func directoryTrail(to reference: RemoteReference, in node: FileNode<RemoteEntry>, ancestors: [RemoteEntry] = []) -> [RemoteEntry]? {
@@ -218,6 +260,50 @@ struct NetdiskDownloadView: View {
         provider == .baidu ? .baidu(path: "/", fsID: 0) : .quark(fid: "0")
     }
 
+    /// 删除范围只来自当前树的精确条目；批量选择已有父级去重，不再递归枚举其内容。
+    private func prepareDeletion(_ entries: [RemoteEntry]) {
+        guard canPresentUpload, !entries.isEmpty, let tree, let account = treeAccount,
+              let session = treeSession else { return }
+        var targets: [(entry: RemoteEntry, parent: RemoteReference)] = []
+        for entry in entries {
+            guard let trail = directoryTrail(to: entry.reference, in: tree.root) else { return }
+            targets.append((entry, trail.dropLast().last?.reference ?? browserRoot))
+        }
+        let name = provider == .baidu ? model.account?.username : model.quark.summary?.name
+        pendingDeletion = .init(account: account, session: session, entries: targets,
+                                accountName: name ?? account.accountID)
+    }
+
+    /// 每项只发送一次；保留部分成功，错误及换号不会转到新账号继续删除。
+    private func delete(_ request: Deletion) async {
+        var confirmed = 0
+        var failures: [String] = []
+        defer {
+            deletion = nil
+            resetIntegrity()
+            generation += 1
+        }
+        for target in request.entries {
+            do {
+                try Task.checkCancellation()
+                guard model.accountKey(for: request.account.provider) == request.account,
+                      model.coordinator.netdisks[request.account.provider].map(ObjectIdentifier.init) == request.session else {
+                    throw UploadRecordError.invalid("网盘账号或登录状态已变化，请刷新后重新操作。")
+                }
+                let disk = try model.netdisk(for: request.account.provider)
+                try await disk.moveToTrash(entry: target.entry, parent: target.parent, account: request.account)
+                confirmed += 1
+            } catch {
+                if Task.isCancelled || error is CancellationError { return }
+                failures.append("\(target.entry.name)：\(error.localizedDescription)")
+                if model.accountKey(for: request.account.provider) != request.account || sessionIdentity != request.session { break }
+            }
+        }
+        if !failures.isEmpty {
+            deletionResult = "已确认移入回收站 \(confirmed) 项，未确认 \(request.entries.count - confirmed) 项。\n\n" + failures.joined(separator: "\n")
+        }
+    }
+
     private var footer: some View {
         VStack(alignment: .leading, spacing: 10) {
             if let tree { FileSelectionSummary(entries: tree.selectedEntries) }
@@ -225,13 +311,13 @@ struct NetdiskDownloadView: View {
             if let folderError { errorLabel(folderError) }
             if let integrityError { errorLabel(integrityError) }
             HStack {
-                DownloadFolderPicker(selection: $selectedFolder, error: $folderError).disabled(isSubmitting)
+                DownloadFolderPicker(selection: $selectedFolder, error: $folderError).disabled(isBusy)
                 Spacer()
                 if isSubmitting { ProgressView().controlSize(.small) }
-                Button("取消", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction)
+                Button("取消", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction).disabled(deletion != nil)
                 Button("下载", action: beginDownload)
                     .keyboardShortcut(.defaultAction)
-                    .disabled((tree?.selection.isEmpty ?? true) || isSubmitting || isImporting || folderError != nil)
+                    .disabled((tree?.selection.isEmpty ?? true) || isBusy || isImporting || folderError != nil)
             }
         }
     }
@@ -258,7 +344,7 @@ struct NetdiskDownloadView: View {
             }
             .padding(.top, 6)
         }
-        .disabled(isSubmitting)
+        .disabled(isBusy)
     }
 
     private var manualInput: some View {
@@ -310,6 +396,7 @@ struct NetdiskDownloadView: View {
     }
 
     private func resetTree() {
+        pendingDeletion = nil
         tree = nil; treeAccount = nil; treeSession = nil; errorMessage = nil
         resetIntegrity(); generation += 1
     }
@@ -326,14 +413,25 @@ struct NetdiskDownloadView: View {
         do {
             let disk = try model.netdisk(for: provider)
             let key = disk.account
+            if let initialAccount, key != initialAccount {
+                throw UploadRecordError.invalid("网盘账号已变化，请登录原任务账号后重新定位。")
+            }
             let session = ObjectIdentifier(disk)
+            // 百度列目录使用路径，打开保存结果前还要核对 fsID，不能误认同路径的新目录。
+            if case .baidu(let path, let fsID) = initialDirectory, fsID > 0 {
+                let siblings = try await disk.listDirectory(.baidu(path: RemotePath.parent(of: path), fsID: 0))
+                guard siblings.contains(where: { $0.reference == initialDirectory && $0.isDirectory }) else {
+                    throw UploadRecordError.invalid("原上传目录已删除或发生变化，请重新浏览网盘。")
+                }
+            }
             try Task.checkCancellation()
-            guard self.provider == provider, generation == requestGeneration else { return }
+            guard self.provider == provider, generation == requestGeneration,
+                  model.accountKey(for: provider) == key, sessionIdentity == session else { return }
             errorMessage = nil
-            let tree = FileTree<RemoteEntry>(initialSelection: .none) { [model] directory in
+            let tree = FileTree<RemoteEntry>(initialSelection: .none) { [model, initialDirectory] directory in
                 guard model.accountKey(for: provider) == key,
                       model.coordinator.netdisks[provider].map(ObjectIdentifier.init) == session else { throw CancellationError() }
-                let entries = try await disk.listDirectory(directory?.reference)
+                let entries = try await disk.listDirectory(directory?.reference ?? initialDirectory)
                 try Task.checkCancellation()
                 guard model.accountKey(for: provider) == key,
                       model.coordinator.netdisks[provider].map(ObjectIdentifier.init) == session else { throw CancellationError() }
@@ -376,7 +474,7 @@ struct NetdiskDownloadView: View {
 
     /// 确认前检查摘要格式及显式历史选择，错误输入不会触发目录枚举或创建任务。
     private func beginDownload() {
-        guard !isSubmitting, !isImporting, !selectedEntries.isEmpty, let key = treeAccount, let session = treeSession,
+        guard !isBusy, !isImporting, !selectedEntries.isEmpty, let key = treeAccount, let session = treeSession,
               key == model.accountKey(for: provider), session == sessionIdentity else { return }
         do {
             let choice: Choice
@@ -460,6 +558,7 @@ private struct NetdiskBrowser: View {
     /// 设置中的转存目录。树中的这个目录显示“转存目录”标签。
     let transferFolder: String
     let onUpload: (RemoteEntry, [URL]) -> Void
+    let onDelete: (RemoteEntry) -> Void
     @ScaledMetric private var dateWidth = 110
     @ScaledMetric private var sizeWidth = 72
     @State private var retryAttempt = 0
@@ -474,7 +573,8 @@ private struct NetdiskBrowser: View {
                     List {
                         Section {
                             ForEach(children) { node in
-                                FileTreeRow(node: node, tree: tree, isIncluded: false, badge: badge, columns: columns, onUpload: onUpload)
+                                FileTreeRow(node: node, tree: tree, isIncluded: false, badge: badge, columns: columns,
+                                            onUpload: onUpload, onDelete: onDelete)
                             }
                         } header: {
                             columnHeaders

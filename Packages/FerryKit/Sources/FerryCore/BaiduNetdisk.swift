@@ -58,6 +58,14 @@ public actor BaiduNetdisk: Netdisk {
         try Task.checkCancellation()
         try await client.delete(paths: [path])
     }
+
+    /// 仅复用已核对 path 与 fsID 的账号对象；PCS 删除将文件或文件夹移入百度回收站。
+    public func moveToTrash(entry: RemoteEntry, parent: RemoteReference, account requestingAccount: AccountKey) async throws {
+        try await checkTrashSelection(entry: entry, parent: parent, requestingAccount: requestingAccount)
+        guard case .baidu(let path, _) = entry.reference else { throw CoordinatorError.otherAccount }
+        try await client.delete(paths: [path])
+        try await confirmTrashRemoval(entry: entry, parent: parent)
+    }
     private static func shareEntry(_ entry: RemoteEntry) throws -> ShareEntry {
         guard case .baidu(let path, let fsID) = entry.reference else { throw CoordinatorError.otherAccount }
         return ShareEntry(fsID: fsID, name: entry.name, path: path, isDirectory: entry.isDirectory, size: entry.size, relativeDirectory: entry.relativeDirectory ?? "")
