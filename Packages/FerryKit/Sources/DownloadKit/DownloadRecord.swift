@@ -25,6 +25,8 @@ struct Segment: Codable, Sendable, Hashable {
 
 /// 一个文件下载的持久化状态，以 JSON 保存在状态目录中。
 struct DownloadRecord: Codable, Sendable {
+    private static let currentVersion = 1
+    private let version: Int
     var request: DownloadRequest
     var createdAt: Date
     var totalBytes: Int64?
@@ -38,15 +40,49 @@ struct DownloadRecord: Codable, Sendable {
     var entityTag: String?
     var lastModified: String?
 
+    private enum CodingKeys: String, CodingKey {
+        case version, request, createdAt, totalBytes, acceptsRanges, segments, isPaused
+        case completedURL, entityTag, lastModified
+    }
+
     init(request: DownloadRequest) {
+        version = Self.currentVersion
         self.request = request
         createdAt = .now
         totalBytes = request.expectedSize
         isPaused = false
     }
 
+    /// 缺少版本键的旧记录保持原格式含义；显式未知版本必须在恢复调度前拒绝，保留原文件与分片。
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.contains(.version) ? container.decode(Int.self, forKey: .version) : Self.currentVersion
+        guard version == Self.currentVersion else {
+            throw DownloadRecordVersionError.unsupported(version)
+        }
+        request = try container.decode(DownloadRequest.self, forKey: .request)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        totalBytes = try container.decodeIfPresent(Int64.self, forKey: .totalBytes)
+        acceptsRanges = try container.decodeIfPresent(Bool.self, forKey: .acceptsRanges)
+        segments = try container.decodeIfPresent([Segment].self, forKey: .segments)
+        isPaused = try container.decode(Bool.self, forKey: .isPaused)
+        completedURL = try container.decodeIfPresent(URL.self, forKey: .completedURL)
+        entityTag = try container.decodeIfPresent(String.self, forKey: .entityTag)
+        lastModified = try container.decodeIfPresent(String.self, forKey: .lastModified)
+    }
+
     var receivedBytes: Int64 {
         segments?.reduce(0) { $0 + $1.received } ?? 0
+    }
+}
+
+private enum DownloadRecordVersionError: LocalizedError {
+    case unsupported(Int)
+
+    var errorDescription: String? {
+        switch self {
+        case .unsupported(let version): "当前应用不支持下载进度格式版本 \(version)，请使用对应版本打开。"
+        }
     }
 }
 

@@ -466,3 +466,11 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 切换专项中，两家正式 UploadCoordinator 批次均已保存原会话且正在上传；两个下载各已确认 32 KiB。等待全部上传／下载 worker 停稳、取消并收尾独立回读，再替换客户端、下载 Session 和校验服务，从代理 A 切换到 B。下载位移不变，两家原上传会话哈希不变、用户暂停标记未改变；同一任务恢复后全部完成并通过 SHA，B 的连接日志确认实际使用新路由。两个新根目录及初次错误书签 fixture 的根目录均准确核对后回收，全部隧道和探针进程已退出。
 
 证据 `.build/v3-proxy-validation/{report.md,result.json,source-and-link-inputs.json}`。源码基线为 `938976f` 构建的正式模块；未操作 App 设置、原任务或全局网络配置。它证明实际网络与正式生命周期 API，设置界面快速切换、物理睡眠和新下载格式变更后的验收仍分别保留。
+
+## 下载记录版本边界与升级兼容收口
+
+复现旧下载解码器会忽略显式 version=999 并恢复任务。新记录现写入 version=1；缺版本的旧记录保持原语义，显式未知版本及无效类型在恢复调度前拒绝，不重写 JSON、不触碰分片。App 保留原文件并显示实际错误，未知整数版本明确提示不支持及对应版本号，避免把所有问题误指为存储权限。
+
+最终源码 92 项隔离检查、61 项 DownloadKit 既有检查通过，覆盖旧设置、旧任务各状态、版本类型、零请求保留分片、上传移除与旧下载／独立校验记录隔离。只用修复后记录解码器重编译当前引擎，原 v2 引擎保持不变，63 项动态升级及回退检查再次通过：两家各暂停／进行中的旧数据在实际本地 HTTP 续传中保留准确位移，完整 8 MiB SHA 一致，原始备份与账号／ID 保持。另以原 v2 解码器只读新版实际 JSON 两例通过，不据此宣称旧版理解新增校验语义。
+
+新旧 App 与既有双账号实际传输 CLI 的 bundle 和固定签名身份一致，凭据服务契约未变；不冒称当前新 GUI 已显示或使用登录。全包 307 项及最终 Release App 构建／签名通过（`.build/v3-record-version-tests.log`、`.build/v3-record-version-actions-app-build.log`）。证据 `.build/t16-closeout-validation/{report.md,result-final.txt,downloadkit-tests-final.txt,upgrade-recheck/result-final.txt}`。T16 自身标准据此勾选，界面回归仍归 T18。

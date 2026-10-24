@@ -211,7 +211,7 @@ public final class JobCoordinator {
             restored = try await engine.restore(contexts: contexts, pausedIDs: pausedIDs, connections: connections)
         } catch {
             logger.error("cannot restore downloads: \(error.localizedDescription)")
-            restorationProblem = "下载进度恢复失败，原文件和分片已保留。请检查存储权限后重新启动。"
+            restorationProblem = "下载进度恢复失败，原文件和分片已保留。\(Self.message(for: error))"
             loadWarning = restorationProblem
             for job in jobs where job.phase == .downloading {
                 update(job.id) { $0.error = restorationProblem; $0.isPaused = true }
