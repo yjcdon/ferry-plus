@@ -10,6 +10,13 @@ public protocol UploadSecretStorage: Sendable {
     func delete(reference: String) async throws
 }
 
+/// 只有准确回执或明确未命中／业务拒绝能解除快速提交意图；传输与解析失败仍以错误保留未知结果。
+public enum UploadRapidResult: Sendable {
+    case created(PreparedUpload)
+    case notMatched
+    case rejected(any Error)
+}
+
 /// 三阶段上传策略不调度队列、不读取 UI 筛选，也不将协议成功当作内容校验成功。
 public protocol UploadDestination: Sendable {
     var account: AccountKey { get }
@@ -18,6 +25,11 @@ public protocol UploadDestination: Sendable {
                  onPrepared: @Sendable (PreparedUpload) async throws -> Void) async throws -> PreparedUpload
     /// 只有可确定没有建立新会话／产物的准备拒绝才允许再次预创建；网络、解析及未知结果默认保留意图。
     func preparationFailureIsDefinitive(_ error: any Error) -> Bool
+    /// nil 表示不支持独立快速上传；非 nil 是请求前必须预算的有界真实证明长度。
+    var rapidUploadProofLength: Int? { get }
+    /// 仅使用已经持久化的原会话；回调先保存提交意图，读取器须核对源身份并返回准确范围。
+    func rapidUpload(_ prepared: PreparedUpload, onSubmitting: @Sendable (Int) async throws -> Void,
+                     readProof: @Sendable (Range<Int64>) async throws -> Data) async throws -> UploadRapidResult
     /// 仅补完准备后的哈希协商；不声称查询或验证服务端已保留分片。
     func finishPreparation(_ prepared: PreparedUpload,
                            onPrepared: @Sendable (PreparedUpload) async throws -> Void) async throws -> PreparedUpload
@@ -32,6 +44,12 @@ public protocol UploadDestination: Sendable {
 }
 
 extension UploadDestination {
+    public var rapidUploadProofLength: Int? { nil }
+    public func rapidUpload(_ prepared: PreparedUpload, onSubmitting: @Sendable (Int) async throws -> Void,
+                            readProof: @Sendable (Range<Int64>) async throws -> Data) async throws -> UploadRapidResult {
+        throw UploadDestinationError.invalidPreparation
+    }
+
     /// 自定义策略未声明准确拒绝语义时，失败不能证明远端没有副作用。
     public func preparationFailureIsDefinitive(_ error: any Error) -> Bool { false }
 
@@ -298,6 +316,35 @@ public struct BaiduUploadDestination: UploadDestination {
              .alreadyExists, .invalidFileName, .invalidNameOrAccessDenied, .accessDenied, .unauthorized:
             return true
         default: return false
+        }
+    }
+
+    public var rapidUploadProofLength: Int? { Int(BaiduRapidUploadChallenge.proofLength) }
+
+    /// 固定账号 UK 与原预创建会话绑定；准确成功转换为无旧会话载荷的秒传准备记录，之后仍须完整回读。
+    public func rapidUpload(_ prepared: PreparedUpload, onSubmitting: @Sendable (Int) async throws -> Void,
+                            readProof: @Sendable (Range<Int64>) async throws -> Data) async throws -> UploadRapidResult {
+        try prepared.validate()
+        guard prepared.account == account, !prepared.isInstant, let uk = UInt64(account.accountID), uk > 0 else {
+            throw UploadDestinationError.otherAccount
+        }
+        do {
+            let result = try await client.rapidUpload(nativeSession(prepared), expectedUK: uk,
+                contentMD5: prepared.source.md5, sliceMD5: prepared.source.first256KiBMD5,
+                onSubmitting: onSubmitting, readProof: readProof)
+            switch result {
+            case .notMatched: return .notMatched
+            case .created(let entry):
+                return .created(try PreparedUpload(account: account, fileID: prepared.fileID,
+                    partSize: prepared.partSize, pendingParts: [], nativeSession: Data(),
+                    remoteReference: .baidu(path: entry.path, fsID: entry.fsID), isInstant: true, source: prepared.source))
+            }
+        } catch let error as BaiduError {
+            // 快速接口仅使用已核实的认证／空间拒绝；+10、HTTP 状态和其他 errno 均不能安全回落。
+            switch error {
+            case .loginExpired, .missingBDUSS, .missingSTOKEN, .server(code: -10, message: _): return .rejected(error)
+            default: throw error
+            }
         }
     }
 

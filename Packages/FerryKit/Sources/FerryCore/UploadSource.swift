@@ -109,6 +109,29 @@ public enum UploadSource {
         return UploadSourceIdentity(value)
     }
 
+    /// 快速上传只读取指定的256KiB真实证明；复用原始身份并核对路径与已打开描述符，不跟随替换符号链接。
+    public static func readProof(of url: URL, expected: UploadSourceIdentity, range: Range<Int64>) throws -> Data {
+        try Task.checkCancellation()
+        guard range.lowerBound >= 0, range.upperBound <= expected.size,
+              range.upperBound - range.lowerBound == 256 * 1024 else { throw UploadSourceError.invalidChunkSize }
+        guard try identity(of: url) == expected else { throw UploadSourceError.changed(url.path) }
+        let handle = try openFile(url)
+        defer { try? handle.close() }
+        guard try descriptorIdentity(handle, url: url) == expected else { throw UploadSourceError.changed(url.path) }
+        try handle.seek(toOffset: UInt64(range.lowerBound))
+        var result = Data(); result.reserveCapacity(256 * 1024)
+        while result.count < 256 * 1024 {
+            try Task.checkCancellation()
+            let part = try autoreleasepool { try handle.read(upToCount: 256 * 1024 - result.count) ?? Data() }
+            guard !part.isEmpty else { throw UploadSourceError.changed(url.path) }
+            result.append(part)
+        }
+        guard try descriptorIdentity(handle, url: url) == expected,
+              try identity(of: url) == expected else { throw UploadSourceError.changed(url.path) }
+        try Task.checkCancellation()
+        return result
+    }
+
     /// 一次流式读取生成全部摘要；checkpoint 用于暂停、取消和调度让步，每 1 MiB 调用一次。
     public static func fingerprint(
         of url: URL,

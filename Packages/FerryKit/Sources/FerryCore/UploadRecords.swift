@@ -60,7 +60,7 @@ public struct UploadPartReceipt: Codable, Sendable, Hashable {
 
 /// 服务端副作用前保存意图，响应丢失保留 pending，恢复时查询而不是盲目重提。
 public struct UploadCommit: Codable, Sendable, Hashable, Identifiable {
-    public enum Kind: String, Codable, Sendable, Hashable { case prepare, createDirectory, merge, replacement }
+    public enum Kind: String, Codable, Sendable, Hashable { case prepare, rapidUpload, createDirectory, merge, replacement }
     public enum Status: String, Codable, Sendable, Hashable { case pending, confirmed, rejected }
     public let id: UUID
     public let kind: Kind
@@ -71,16 +71,18 @@ public struct UploadCommit: Codable, Sendable, Hashable, Identifiable {
     public var originalVersion: String?
     public var finalObject: RemoteReference?
     public var backupObject: RemoteReference?
+    /// 快速上传实际表单字节数；只保存长度，不保存证明内容或凭据。
+    public var requestBodyBytes: Int?
     public let createdAt: Date
 
     public init(id: UUID = UUID(), kind: Kind, status: Status = .pending, taskID: String? = nil,
                 stagingObject: RemoteReference? = nil, originalObject: RemoteReference? = nil,
                 originalVersion: String? = nil, finalObject: RemoteReference? = nil,
-                backupObject: RemoteReference? = nil, createdAt: Date = .now) {
+                backupObject: RemoteReference? = nil, createdAt: Date = .now, requestBodyBytes: Int? = nil) {
         self.id = id; self.kind = kind; self.status = status; self.taskID = taskID
         self.stagingObject = stagingObject; self.originalObject = originalObject
         self.originalVersion = originalVersion; self.finalObject = finalObject
-        self.backupObject = backupObject; self.createdAt = createdAt
+        self.backupObject = backupObject; self.createdAt = createdAt; self.requestBodyBytes = requestBodyBytes
     }
 }
 
@@ -254,6 +256,9 @@ public struct UploadFile: Codable, Sendable, Equatable, Identifiable {
                 }
             }
         }
+        guard commits.allSatisfy({ commit in
+            commit.kind != .rapidUpload || (!isDirectory && (commit.requestBodyBytes ?? 0) > 0)
+        }) else { throw UploadRecordError.invalid("快速上传提交缺少有效表单字节数") }
         guard Set(parts.map(\.index)).count == parts.count else { throw UploadRecordError.invalid("分片回执重复") }
         var end: Int64 = 0
         let orderedParts = parts.sorted { $0.offset < $1.offset }

@@ -432,3 +432,15 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 `/usr/bin/time -l` 测得整轮 31.13 秒，用户 CPU 0.46 秒、系统 CPU 0.28 秒，最大 RSS 31,768,576 字节，无 swap。这仅证明本次独立程序的小文件混合场景，最终 SwiftUI App 资源验收仍待完成。20 ms 采样观测活跃连接峰值为 1，上限配置为 2，不据此声称覆盖所有瞬间的并发峰值。
 
 证据 `.build/v3-mixed-budget-validation/run-27A05F60-12EB-4171-95B0-00962F6603F2/{report.md,build-provenance.json}`、父目录 `current-run.log` 和 `current-resources.log`。本轮二进制不包含后续 Core 秒传接入及 Native token 时序修正，128 KiB 样本未调用秒传能力。
+
+## 百度独立秒传接入正式队列
+
+`BaiduClient.rapidUpload` 已接入 `BaiduUploadDestination` 与正式 UploadCoordinator。普通预创建先保存会话，保留两份策略下大于 256 KiB 且尚未发片的文件可尝试秒传；跳过和阈值以内沿原路径。证明读取固定 256 KiB 并核对源身份，取得上传字节额度和连接后才生成挑战；固定 UK，提前获取 token。提交前独立保存快速上传意图，准确成功原子保存无旧会话载荷的秒传准备回执和远端身份，再完整 SHA-256 回读。明确未命中只确认该尝试并继续同一个 uploadID，未知结果保持 pending，不再次快速提交或预创建。
+
+当前完整 Native、适配器与 Coordinator 的独立编译及 54 项协议／持久化检查通过：命中、404 原会话续传、未知结果重建后取消／移除、账号／源变化、提交意图与成功回执保存失败、取消后晚到成功、额度及连接等待取消、跳过及大小阈值。两项确定性调度竞态重编译通过。Native 官方函数向量及协议边界另有 34 项复验。证据 `.build/rapid-core-validation/{report.md,result.txt,race-result.txt}` 和 `.build/baidu-precreate-contract/rapid/formal-checks-result.txt`。
+
+正式 Coordinator 的真实固定签名程序复用当前登录：新随机 1 MiB seed 发送一片并合并、完整 SHA 通过；保留 seed，再以新名上传同内容，正式记录为 isInstant=true、nativeSession 为空、rapid confirmed 一次、分片及合并均为零。两份完整回读 SHA 与源一致，预算全部释放，专用目录准确核对后已回收，未改 App 任务或两条大任务。证据 `.build/rapid-core-validation/{live-result.txt,real-4896080E-3905-4BAD-85DF-B1EE26A0F015/}`。这是正式编排实证，不替代锁屏后尚未完成的 App 界面操作验收。
+
+夸克非空秒传另已补齐：新随机 1 MiB 首次普通传输，保留原对象后新名同内容命中 instantCompleted，无分片／合并／finish 请求；两个准确 FID 均完整回读并逐范围比较源字节、SHA 一致，预算收尾为零。首次清理响应报错后仅只读确认目录消失，未重发删除。证据 `.build/t08-quark-instant-validation/report.md`。
+
+接入后的全包 307 项既有测试通过（`.build/v3-rapid-tests.log`），Release App 重新构建及签名验证通过（`.build/v3-rapid-md5-app-build.log`）。V3-T06 与 V3-T08 的自身完成标准已有证据，任务清单据此勾选；完整版本和界面验收继续执行。

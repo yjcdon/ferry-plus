@@ -141,3 +141,9 @@ c5bee9ac7f6118d7043171628a9f61bcde0cc1a870c8065e6d65642be3e48697
 2026-10-25，匿名读取[官方主页面](https://pan.baidu.com/disk/main)实际引入的 [home](https://nd-static.bdstatic.com/m-static/v20-main/home/js/home.0192e673.js) 和 [上传 SDK](https://nd-static.bdstatic.com/m-static/v20-main/home/js/chunk-vendors.ba2fd94a.js)。同一个 SDK 的预创建地址为 `/api/precreate`，回调将非零 errno 直接交给该 SDK 的上传错误映射，其中 -10 明确为空间不足，正数 10 为 superfile 创建失败。现只将该准备阶段的 -10 识别为明确容量拒绝；未知码和 HTTP 错误仍保留未决，不猜测文字。
 
 证据 `.build/baidu-precreate-contract/{report.md,manifest.json,evidence-excerpts.json}` 保存 URL、原始哈希和精确字符／字节偏移。此为当前官方网页接口合同核对，没有填满真实网盘；独立 actor 验证确认 -10 修复原因后可以重试，+10 和未知码不重复预创建。
+
+## 非空秒传与完整内容验证
+
+百度当前网页 SDK 的独立快速上传接口为 `/api/rapidupload`，需要先取得普通预创建 uploadID，再提交固定账号 UK、混淆摘要及公式指定的 256 KiB 真实内容证明。新建 1 MiB 随机样本首次上传完整回读并保留后，同目录新名同内容真实命中秒传，准确新 fsID 的完整 SHA-256 与源一致；同名竞态另存后原对象身份与内容保持。只有 HTTP 成功的业务 errno=404 可继续原会话普通上传；未知响应不能据此重发。原始网页合同、精确偏移及实际日志见 `.build/baidu-precreate-contract/rapid/{report.md,real-seeded/journal.jsonl}`。独立 Native 实证与正式 Core 编排验收分别记录，不把探针等同 App 操作。
+
+夸克真实 1 MiB 随机样本首次发送一片、合并并 finish 后完整回读；保留该样本，以新名上传同内容，哈希协商返回 instantCompleted，分片／OSS 合并／finish 请求均为零。两个准确且不同 FID 完整回读并逐范围比较原字节，SHA-256 一致。两轮共享预算且收尾为零。清理首次响应报错，随后仅只读确认原目录已不存在，没有重发删除。证据 `.build/t08-quark-instant-validation/{report.md,run.jsonl,cleanup-inspect.jsonl,source-hashes.json}`。

@@ -783,6 +783,9 @@ public actor UploadCoordinator {
             })
             file = try await store.loadFile(id: file.id, in: jobs[jobID]!)
         }
+        if !prepared.isInstant {
+            prepared = try await rapidUpload(&file, localURL: localURL, environment: env)
+        }
         try Task.checkCancellation()
         if prepared.isInstant, let reference = prepared.remoteReference {
             file.remoteReference = reference; file.phase = .verifying; try await saveFile(file)
@@ -814,6 +817,66 @@ public actor UploadCoordinator {
         }
         try await refreshRemoteName(&file, parent: parent, environment: env)
         try await verify(&file, environment: env)
+    }
+
+    /// 只在原会话未发片时尝试一次快速路径；明确未命中继续原会话，未知提交结果禁止重放。
+    private func rapidUpload(_ file: inout UploadFile, localURL: URL, environment env: UploadEnvironment) async throws -> PreparedUpload {
+        guard let original = file.preparation else { throw UploadDestinationError.invalidPreparation }
+        guard jobs[file.jobID]?.conflictPolicy == .keepBoth,
+              let proofLength = env.destination.rapidUploadProofLength, proofLength == 256 * 1024,
+              original.source.identity.size > Int64(proofLength), file.parts.isEmpty,
+              !file.commits.contains(where: { $0.kind == .rapidUpload && $0.status != .rejected }) else { return original }
+        let jobID = file.jobID, fileID = file.id
+        try await budget.consume(proofLength, direction: .upload)
+        let result = try await budget.withPermit { [weak self] in
+            guard let coordinator = self else { throw CancellationError() }
+            return try await env.destination.rapidUpload(original, onSubmitting: { bytes in
+                try await coordinator.rapidSubmitting(fileID: fileID, jobID: jobID, requestBodyBytes: bytes)
+            }, readProof: { range in
+                try UploadSource.readProof(of: localURL, expected: original.source.identity, range: range)
+            })
+        }
+        guard let job = jobs[jobID], job.account == original.account else { throw UploadDestinationError.otherAccount }
+        file = try await store.loadFile(id: fileID, in: job)
+        let pending = file.commits.lastIndex { $0.kind == .rapidUpload && $0.status == .pending }
+        switch result {
+        case .rejected(let error):
+            if let pending { file.commits[pending].status = .rejected; try await saveFile(file) }
+            throw error
+        case .notMatched:
+            guard let pending else { throw UploadDestinationError.invalidPreparation }
+            file.commits[pending].status = .confirmed
+            try await saveFile(file)
+            return original
+        case .created(let instant):
+            try instant.validate()
+            guard let pending, instant.isInstant, instant.fileID == fileID, instant.account == job.account,
+                  instant.source == original.source, let reference = instant.remoteReference else {
+                throw UploadDestinationError.invalidPreparation
+            }
+            file.preparation = instant; file.remoteReference = reference; file.phase = .verifying
+            file.commits[pending].status = .confirmed; file.commits[pending].finalObject = reference
+            try await saveFile(file)
+            return instant
+        }
+    }
+
+    /// Native 已构造证明与表单，但尚未提交；先持久化独立意图，取消或保存失败不得继续 POST。
+    private func rapidSubmitting(fileID: UUID, jobID: UUID, requestBodyBytes: Int) async throws {
+        try Task.checkCancellation()
+        guard requestBodyBytes > 0, let job = jobs[jobID] else { throw UploadDestinationError.invalidPreparation }
+        var file = try await store.loadFile(id: fileID, in: job)
+        guard let prepared = file.preparation, prepared.account == job.account, !prepared.isInstant,
+              !file.commits.contains(where: { $0.kind == .rapidUpload && $0.status != .rejected }) else {
+            throw UploadDestinationError.invalidPreparation
+        }
+        file.commits.append(UploadCommit(kind: .rapidUpload, requestBodyBytes: requestBodyBytes))
+        try await saveFile(file)
+        if Task.isCancelled {
+            file.commits[file.commits.count - 1].status = .rejected
+            try await saveFile(file)
+            throw CancellationError()
+        }
     }
 
     /// 预创建前先保存意图；无准确回执的失败保留 pending，明确拒绝才允许重新选择名称或显式重试。
@@ -911,8 +974,8 @@ public actor UploadCoordinator {
 
     private func inspect(_ file: inout UploadFile, parent: RemoteReference, environment env: UploadEnvironment) async throws {
         for index in file.commits.indices where file.commits[index].status == .pending {
-            // 预创建未知结果没有可查询的会话 ID；现有合并查询合同不能认领同名对象或解除此意图。
-            guard file.commits[index].kind != .prepare else { throw UploadCoordinatorError.unconfirmedCommit }
+            // 预创建／快速上传未知结果缺少准确产物回执，现有合并查询合同不能认领同名对象或解除意图。
+            guard ![.prepare, .rapidUpload].contains(file.commits[index].kind) else { throw UploadCoordinatorError.unconfirmedCommit }
             switch try await env.inspectCommit(file.commits[index], file, parent) {
             case .unconfirmed: throw UploadCoordinatorError.unconfirmedCommit
             case .rejected(let reason):
