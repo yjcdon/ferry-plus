@@ -135,10 +135,10 @@ struct MainView: View {
         }
     }
 
-    /// 移到废纸篓总是先确认；只移除任务时，有未完成的任务才先确认。
+    /// 菜单和 Delete 共用操作条件；移到废纸篓或含未完成任务时先确认。
     private func requestRemoval(of jobs: [Job], _ removal: JobRemoval) {
-        let jobs = jobs.filter { !model.coordinator.removingJobs.contains($0.id) }
-        guard model.coordinator.isStarted, !jobs.isEmpty else { return }
+        let jobs = jobs.filter { model.canOperate(on: $0) }
+        guard !jobs.isEmpty else { return }
         if removal == .trashingFiles || jobs.contains(where: \.isUnfinished) {
             pendingRemoval = PendingRemoval(jobs: jobs, removal: removal, cleanup: cleanupPlan(for: jobs))
         } else {
