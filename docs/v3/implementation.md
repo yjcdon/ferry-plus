@@ -424,3 +424,11 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 `BaiduClient.capacity()` 复用现有网页登录 Cookie 调用官方网页的 `GET /api/quota`，要求业务码成功且 `total`、`used` 为非负整数字节数。容量权益下降允许已用空间大于总量，预检可用量为 `max(0, total - used)`；无效响应、登录及网络错误保留具体原因，不转换为零容量。AppModel 在查询前后核对同一账号及客户端，避免查询期间换号后沿用旧容量。
 
 正式方法已复用现有登录完成真实只读查询，结果与原始接口一致。独立编译、23 项接口合同和 6 项 AppModel 方法检查通过，覆盖坏字段、业务／HTTP／网络错误、查询期间换号及替换客户端。证据：`.build/baidu-capacity-validation/{report.md,checks.log,bridge-checks.log,live-formal.jsonl}`。Release App 已重新构建并通过签名验证，日志 `.build/v3-capacity-app-build.log`。容量是查询时快照，实际上传仍以服务端结果为准。界面显示尚待解锁后验收。
+
+## 混合传输重新构建复验与资源测量
+
+以 `d0dae0d` 构建的包对象重新编译独立固定签名探针，两家各一个 128 KiB 新上传、一个正式下载及一个独立完整回读，六路共享连接和双向速率预算。四次新上传及两个独立回读均保存完整 SHA-256 一致记录，两个正式下载另核对本地原始摘要。结束时连接、等待和限速定时器均为零，两个专用目录核对身份后移入回收站，两条大任务保持暂停。
+
+`/usr/bin/time -l` 测得整轮 31.13 秒，用户 CPU 0.46 秒、系统 CPU 0.28 秒，最大 RSS 31,768,576 字节，无 swap。这仅证明本次独立程序的小文件混合场景，最终 SwiftUI App 资源验收仍待完成。20 ms 采样观测活跃连接峰值为 1，上限配置为 2，不据此声称覆盖所有瞬间的并发峰值。
+
+证据 `.build/v3-mixed-budget-validation/run-27A05F60-12EB-4171-95B0-00962F6603F2/{report.md,build-provenance.json}`、父目录 `current-run.log` 和 `current-resources.log`。本轮二进制不包含后续 Core 秒传接入及 Native token 时序修正，128 KiB 样本未调用秒传能力。
