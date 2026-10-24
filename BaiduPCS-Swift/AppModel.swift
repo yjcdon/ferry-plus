@@ -721,11 +721,16 @@ final class AppModel {
               quark == nil || installedQuarkClient === quark else { throw UploadDestinationError.otherAccount }
     }
 
-    /// 上传确认前查询可用空间；当前百度客户端无可靠容量字段，nil明确表示未知。
+    /// 上传确认前查询当前账号可用空间；请求前后固定同一客户端，失败交由预检展示具体原因。
     func uploadAvailableBytes(for account: AccountKey) async throws -> Int64? {
         try checkUploadSession(account)
         switch account.provider {
-        case .baidu: return nil
+        case .baidu:
+            guard let client else { throw UploadDestinationError.otherAccount }
+            try checkUploadSession(account, baidu: client)
+            let capacity = try await client.capacity()
+            try checkUploadSession(account, baidu: client)
+            return max(0, capacity.total - capacity.used)
         case .quark:
             guard let client = installedQuarkClient else { throw UploadDestinationError.otherAccount }
             try checkUploadSession(account, quark: client)

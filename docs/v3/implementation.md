@@ -353,7 +353,7 @@ Release 构建 `.build/v3-inspector-final-build.log` 通过。Computer Use 在�
 
 ## 上传确认前预检
 
-选择源文件后只扫描元数据，显示文件数、文件夹数、总大小、可用容量与根项目同名预览，不读取文件正文或缓存完整递归清单。夸克通过当前会话查询容量；百度容量和两家单文件上限在没有可靠字段时显示未知。已知容量不足及源问题阻止提交；跳过策略下目录合并保留空间需求上下界，子目录冲突仍在执行时检查。错误只保存前 20 条及完整计数，整个展开区域限制为 120 点滚动，避免大量问题撑出窗口。
+选择源文件后只扫描元数据，显示文件数、文件夹数、总大小、可用容量与根项目同名预览，不读取文件正文或缓存完整递归清单。百度与夸克均通过当前会话查询容量；请求失败显示未知及具体原因，两家单文件上限没有可靠字段时仍显示未知。已知容量不足及源问题阻止提交；跳过策略下目录合并保留空间需求上下界，子目录冲突仍在执行时检查。错误只保存前 20 条及完整计数，整个展开区域限制为 120 点滚动，避免大量问题撑出窗口。
 
 元数据、重叠选择、隐藏文件、空目录、容量、冲突、符号链接、取消及 2 GiB 稀疏文件等九项隔离检查通过：`.build/upload-preflight-validation/result.txt`。307 项既有测试通过（`.build/v3-preflight-recovery-tests.log`）。最终 Release 构建通过（`.build/v3-preflight-bounded-skip-app-build.log`）；实际 App 两家显示 4 文件、2 文件夹、16 KB，夸克显示真实可用容量；25 个符号链接问题阻止上传，展开后标题和底部取消／上传按钮均可见。检查均取消，没有提交这些无效源。
 
@@ -418,3 +418,9 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 独立完整 Core 与实际 actor 故障矩阵 43 项通过：意图写失败零远端调用、回执写失败、未知结果重建后不重提／不丢记录、登录和两家已确认容量拒绝修复后重试、多回调、旧会话、名称冲突，以及写入意图后尚未调用策略时取消。证据 `.build/prepare-intent-validation/{evidence.md,result.txt,baidu-quota.patch}`；官方源码链及精确偏移见 `.build/baidu-precreate-contract/{report.md,manifest.json,evidence-excerpts.json}`。
 
 最终统一 307 项测试与 Release App 构建通过：`.build/v3-prepare-intent-quota-tests.log`、`.build/v3-prepare-intent-app-build.log`，包含此前移动后回读的编排修复。实际窗口复测仍被系统锁屏阻止。未知预创建的准确查询／幂等合同尚缺，本修复防止重复写入，不据此勾选 T07 自动恢复全项；旧版本未记录的历史操作也不能反推已保存意图。
+
+## 百度容量接入上传预检
+
+`BaiduClient.capacity()` 复用现有网页登录 Cookie 调用官方网页的 `GET /api/quota`，要求业务码成功且 `total`、`used` 为非负整数字节数。容量权益下降允许已用空间大于总量，预检可用量为 `max(0, total - used)`；无效响应、登录及网络错误保留具体原因，不转换为零容量。AppModel 在查询前后核对同一账号及客户端，避免查询期间换号后沿用旧容量。
+
+正式方法已复用现有登录完成真实只读查询，结果与原始接口一致。独立编译、23 项接口合同和 6 项 AppModel 方法检查通过，覆盖坏字段、业务／HTTP／网络错误、查询期间换号及替换客户端。证据：`.build/baidu-capacity-validation/{report.md,checks.log,bridge-checks.log,live-formal.jsonl}`。Release App 已重新构建并通过签名验证，日志 `.build/v3-capacity-app-build.log`。容量是查询时快照，实际上传仍以服务端结果为准。界面显示尚待解锁后验收。
