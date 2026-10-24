@@ -474,3 +474,9 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 最终源码 92 项隔离检查、61 项 DownloadKit 既有检查通过，覆盖旧设置、旧任务各状态、版本类型、零请求保留分片、上传移除与旧下载／独立校验记录隔离。只用修复后记录解码器重编译当前引擎，原 v2 引擎保持不变，63 项动态升级及回退检查再次通过：两家各暂停／进行中的旧数据在实际本地 HTTP 续传中保留准确位移，完整 8 MiB SHA 一致，原始备份与账号／ID 保持。另以原 v2 解码器只读新版实际 JSON 两例通过，不据此宣称旧版理解新增校验语义。
 
 新旧 App 与既有双账号实际传输 CLI 的 bundle 和固定签名身份一致，凭据服务契约未变；不冒称当前新 GUI 已显示或使用登录。全包 307 项及最终 Release App 构建／签名通过（`.build/v3-record-version-tests.log`、`.build/v3-record-version-actions-app-build.log`）。证据 `.build/t16-closeout-validation/{report.md,result-final.txt,downloadkit-tests-final.txt,upgrade-recheck/result-final.txt}`。T16 自身标准据此勾选，界面回归仍归 T18。
+
+## 下载行与详情统一操作范围
+
+修复下载行主按钮、下载详情单选及多选操作直接使用旧任务快照的旁路。它们通过显式回调交回 MainView，与工具栏、菜单、快捷键和右键共用当前可见范围及动作可用性核对；下载方向 ID 明确，AppModel 不承担窗口全局筛选状态。无调用方的旧 JobActionsMenu 已删除，不遗留重复入口。
+
+真实旧回调的红测确认筛选切换后仍可操作隐藏下载。修复后 35 项源码提取检查覆盖四类筛选、四个下载动作、多选、确认后移除、上传每次 await 后重新核对和多任务错误汇总；两家实际 Core 移除 2 项验证保留原文件、独立记录且零云端调用；慢回读 8 项证明发送 100% 仍为校验，完整 SHA 成功才完成。证据 `.build/t14-scope-validation/{report.md,result.txt,retention-result.txt,progress-result.txt,final-source-manifest.json}`。全包 307 项及 Release App 构建通过，T14 自身规则已核对；未把隔离业务验证当作当前锁屏下无法重跑的实际 GUI 验收。

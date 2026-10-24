@@ -7,6 +7,8 @@ import SwiftUI
 /// 详情栏：选中任务的详情和操作。选中多个任务时显示对它们的批量操作。
 struct JobInspector: View {
     let jobs: [Job]
+    /// 动作交回主窗口按当前筛选执行，不由详情保留的任务快照直接调度。
+    let onAction: ([Job], JobAction) -> Void
     /// 请求移除任务。调用方决定是否先确认。
     let onRemove: ([Job], JobRemoval) -> Void
 
@@ -15,11 +17,11 @@ struct JobInspector: View {
         case 0:
             ContentUnavailableView("未选择任务", systemImage: "sidebar.trailing")
         case 1:
-            JobDetail(job: jobs[0], onRemove: { onRemove(jobs, $0) })
+            JobDetail(job: jobs[0], onAction: onAction, onRemove: { onRemove(jobs, $0) })
                 // 换任务时重新滚动到顶部。
                 .id(jobs[0].id)
         default:
-            MultipleSelection(jobs: jobs, onRemove: { onRemove(jobs, $0) })
+            MultipleSelection(jobs: jobs, onAction: onAction, onRemove: { onRemove(jobs, $0) })
         }
     }
 }
@@ -27,6 +29,7 @@ struct JobInspector: View {
 /// 选中多个任务：数量和对这些任务的操作。和单个任务的详情一样，只列出可用的操作。
 private struct MultipleSelection: View {
     let jobs: [Job]
+    let onAction: ([Job], JobAction) -> Void
     let onRemove: (JobRemoval) -> Void
     @Environment(AppModel.self) private var model
 
@@ -39,7 +42,7 @@ private struct MultipleSelection: View {
                     let targets = model.jobs(in: jobs, allowing: action)
                     if !targets.isEmpty {
                         Button {
-                            model.perform(action, on: targets)
+                            onAction(targets, action)
                         } label: {
                             Text(action.title).frame(maxWidth: .infinity)
                         }
@@ -69,6 +72,7 @@ private struct MultipleSelection: View {
 /// 一个任务的详情。
 private struct JobDetail: View {
     let job: Job
+    let onAction: ([Job], JobAction) -> Void
     let onRemove: (JobRemoval) -> Void
     @Environment(AppModel.self) private var model
 
@@ -142,10 +146,10 @@ private struct JobDetail: View {
         .edgeBar(.bottom) {
             HStack {
                 if let action = job.primaryAction, action != .reveal {
-                    JobActionButton(job: job, action: action)
+                    JobActionButton(job: job, action: action, onAction: { onAction([$0], $1) })
                 }
                 if !job.revealURLs.isEmpty {
-                    JobActionButton(job: job, action: .reveal)
+                    JobActionButton(job: job, action: .reveal, onAction: { onAction([$0], $1) })
                 }
                 Spacer(minLength: 0)
                 // 点按钮只移除任务；删除文件在按钮的菜单中，是不常用的破坏性操作。

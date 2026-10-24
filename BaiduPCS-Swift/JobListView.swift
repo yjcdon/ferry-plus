@@ -33,7 +33,10 @@ struct TransferListView: View {
                 ForEach(items, id: \.rowLayoutID) { item in
                     Group {
                         switch item {
-                        case .download(let job): JobRow(job: job)
+                        case .download(let job):
+                            JobRow(job: job, onAction: { job, action in
+                                scope.onAction(TransferAction(action), [.init(direction: .download, id: job.id)])
+                            })
                         case .upload(let job):
                             UploadRow(job: job, onLocateDuplicate: onLocateUpload,
                                       onResumeDuplicate: { scope.onAction(.resume, [item.id]) },
@@ -106,6 +109,15 @@ enum TransferDirectionFilter: String, CaseIterable, Identifiable {
 /// 同一操作按任务方向路由到原下载调度或上传 actor，上传不具有删除本地文件动作。
 enum TransferAction: CaseIterable {
     case pause, resume, retry, prioritize, reconcile, cancel, reveal, copyError
+    /// 下载行和详情复用同一个方向明确的执行入口，旧回调也重新核对当前可见范围。
+    init(_ action: JobAction) {
+        switch action {
+        case .pause: self = .pause
+        case .resume: self = .resume
+        case .retry: self = .retry
+        case .reveal: self = .reveal
+        }
+    }
     var title: String {
         switch self {
         case .pause: "暂停"
@@ -210,6 +222,7 @@ struct TransferActionsMenu: View {
 /// 一个任务：图标、标题、进度条、状态，以及行尾的主要操作。
 struct JobRow: View {
     let job: Job
+    let onAction: (Job, JobAction) -> Void
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -231,57 +244,13 @@ struct JobRow: View {
                 JobNotes(job: job)
             }
             if let action = job.primaryAction {
-                JobActionButton(job: job, action: action)
+                JobActionButton(job: job, action: action, onAction: onAction)
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
                     .imageScale(.large)
             }
         }
         .padding(.vertical, 4)
-    }
-}
-
-/// 对一组任务的操作，用于右键菜单和菜单栏的“任务”菜单。每个操作只作用于其中可以执行它的任务。
-///
-/// 按 HIG，右键菜单隐藏不可用的操作；菜单栏菜单保留它们并显示为不可用。
-struct JobActionsMenu: View {
-    let jobs: [Job]
-    /// 为 true 时显示不可用的操作（菜单栏菜单）。
-    var showsUnavailable = false
-    /// 请求移除任务。调用方决定是否先确认。
-    let onRemove: ([Job], JobRemoval) -> Void
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        ForEach(JobAction.allCases, id: \.self) { action in
-            let targets = model.jobs(in: jobs, allowing: action)
-            if showsUnavailable || !targets.isEmpty {
-                Button {
-                    model.perform(action, on: targets)
-                } label: {
-                    Label(action.title, systemImage: action.systemImage)
-                }
-                .disabled(targets.isEmpty)
-            }
-        }
-        if showsUnavailable || !jobs.isEmpty {
-            Divider()
-            Button(role: .destructive) {
-                onRemove(jobs, .keepingFiles)
-            } label: {
-                Label("移除", systemImage: "xmark")
-            }
-            .disabled(!jobs.contains { model.canOperate(on: $0) })
-            let canTrash = model.canTrashFiles(of: jobs)
-            if showsUnavailable || canTrash {
-                Button(role: .destructive) {
-                    onRemove(jobs, .trashingFiles)
-                } label: {
-                    Label("移除并删除文件…", systemImage: "trash")
-                }
-                .disabled(!canTrash)
-            }
-        }
     }
 }
 
@@ -365,11 +334,12 @@ extension Job {
 struct JobActionButton: View {
     let job: Job
     let action: JobAction
+    let onAction: (Job, JobAction) -> Void
     @Environment(AppModel.self) private var model
 
     var body: some View {
         Button {
-            model.perform(action, on: [job])
+            onAction(job, action)
         } label: {
             Label(action.title, systemImage: action.systemImage)
         }

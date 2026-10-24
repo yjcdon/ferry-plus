@@ -357,7 +357,11 @@ private struct TransferInspector: View {
     }
     var body: some View {
         if scope.selectedItems.isEmpty { ContentUnavailableView("未选择任务", systemImage: "sidebar.trailing") }
-        else if downloads.count == scope.selectedItems.count { JobInspector(jobs: downloads, onRemove: onDownloadRemove) }
+        else if downloads.count == scope.selectedItems.count {
+            JobInspector(jobs: downloads, onAction: { jobs, action in
+                scope.onAction(TransferAction(action), jobs.map { .init(direction: .download, id: $0.id) })
+            }, onRemove: onDownloadRemove)
+        }
         else if scope.selectedItems.count == 1, case .upload(let job) = scope.selectedItems[0] {
             Form {
                 Section {
