@@ -546,3 +546,9 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 移除改为可等待的抛错调用，主窗口成功后才清除选择。先暂停并等候检查点，归档和任务移除持久化成功后才清理分片；归档失败保留原偏移和字节。需要移动本地文件时，先取得独立目录权限，将实际下载位置映射到书签解析后的根目录，保留下载时重命名。退出等待已提交移除的清理结束。
 
 实际 Core 25 项离线检查及历史候选 55 项检查通过，覆盖两家、两种算法、三类来源、错误归属、稳定重试、清单变化、取消、归档失败保留分片、退出交错、书签移动和同名文件保护。证据 `.build/completed-local-integrity/archive-report.md`、`.build/download-history-candidate-validation/report.md`。完整既有 307 项测试通过（`.build/v3-download-retention-tests.log`），当前 Release App 构建及固定签名通过（`.build/v3-netdisk-delete-current-app-build.log`）。整套 App 源码另通过真实 SwiftUI SDK26.5 类型检查。Computer Use 当前仍返回 Mac 锁屏，清单保存窗口及最终界面操作尚未验收，T18 保持未完成。
+
+## 批量下载移除取消时保留先前错误
+
+局部审查发现：前项移除失败，后项等待导出清单时取消，会清空队列却丢失已有错误。正常结束和取消现共用错误汇总方法，发布后清空缓冲；导出真实失败加入同一汇总，用户取消本身不报错。失败任务继续保留，下一批不重复提示旧错误。
+
+提取当前实际队列、移除、取消和错误发布方法的离线验证复现旧版吞错，修复后覆盖确认取消、导出取消、导出真实失败、正常结束、重复取消及下一批操作。证据 `.build/removal-cancellation-{before,fixed}.log`。最终 Release App 构建／固定签名通过（`.build/v3-download-removal-error-app-build.log`），已按完整路径启动实际进程；两条用户要求停止的大上传仍暂停。Mac 锁屏使实际界面操作继续未验收。

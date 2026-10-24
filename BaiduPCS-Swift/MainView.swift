@@ -182,8 +182,8 @@ struct MainView: View {
             case .success:
                 Task { await removeDownload(pending.request, disposition: .exportedManifest(manifest)); await drainDownloadRemovals() }
             case .failure(let error):
+                if (error as NSError).code != NSUserCancelledError { downloadRemovalErrors.append(error.localizedDescription) }
                 cancelDownloadRemoval()
-                if (error as NSError).code != NSUserCancelledError { operationError = error.localizedDescription }
             }
         }, onCancellation: cancelDownloadRemoval)
         .alert("有些文件没有移到废纸篓", isPresented: Binding(
@@ -319,10 +319,7 @@ struct MainView: View {
             }
             await removeDownload(request, disposition: .preserve)
         }
-        if !downloadRemovalErrors.isEmpty {
-            operationError = downloadRemovalErrors.joined(separator: "\n")
-            downloadRemovalErrors = []
-        }
+        publishDownloadRemovalErrors()
     }
 
     /// 真正删除前由 Core 重新核对清单与归档；失败保留列表选择，不把空废纸篓失败数组当作成功。
@@ -345,6 +342,14 @@ struct MainView: View {
         manualIntegrityRemoval = nil
         downloadRemovalQueue = []
         removalManifestDocument = nil
+        publishDownloadRemovalErrors()
+    }
+
+    /// 完成或取消本批次时只发布已经发生的失败；清空缓冲，避免下一次操作重复提示。
+    private func publishDownloadRemovalErrors() {
+        guard !downloadRemovalErrors.isEmpty else { return }
+        operationError = downloadRemovalErrors.joined(separator: "\n")
+        downloadRemovalErrors = []
     }
 
     /// 独立上传 actor 操作按当前范围路由，确认／错误状态由主窗口持有，菜单关闭不丢失。
