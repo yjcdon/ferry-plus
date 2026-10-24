@@ -297,3 +297,12 @@ Release 全套 307 项通过，日志 `.build/v3-verification-progress-tests.log
 307 项正式包测试及 Release App 构建通过：`.build/v3-directories-duplicates-concurrency-tests.log`、`v3-directory-actions-final-build.log`、`v3-nested-upload-return-build.log`。实际窗口通过两家创建专用目录、各 131072 字节上传及完整回读、两家各自最近路径恢复、两家目录右键传入准确账号／路径、取消回浏览，以及提交成功回主列表并选中任务。百度目录为 `FerryPlus-V3-Directory-20261024-2155`，夸克为 `FerryPlus-V3-Directory-Quark-20261024-2208`；实际摘要均为 `59f410ae5e17962412e2aed4f815918f634932f2abf084f00bb638c4db017850`。证据 `.build/ui-directory-validation/duplicate-after-resume.json`、`quark-results.json`。跨应用真实拖入优先级、失效目录及换号矩阵仍未全部验收，不提前勾选 T13／T18。
 
 按用户界面修正，三个主工具栏入口直接平铺且无省略号；上传中间整块选择区可点击，右上角添加按钮移除。实际点击中间空白处打开原生文件选择器，选择后仍可在同一区域继续添加。对应提交 `4e5c5d5`，构建 `.build/v3-flat-actions-app-build.log`。
+
+
+## 详情面板布局与崩溃修复
+
+2026-10-24 的崩溃报告 `Ferry Plus-2026-10-24-223552.ips` 显示主线程因 AppKit 约束更新循环触发 `NSGenericException` / `SIGABRT`。实际打开详情可复现 300 次布局循环；将原生 inspector 移到窗口外层仍可复现，不能作为修复交付。
+
+主窗口详情改为同层水平布局中的固定 320 点面板，不再使用嵌套的原生 inspector 分栏。选择、详情内容与操作仍由原主窗口状态提供；工具栏、View 菜单及 Command-Option-I 共用同一开关，关闭其他窗口时菜单不可用。面板不再提供独立拖拽宽度。三个新增任务入口独立成组，网盘下载采用向下箭头图标。
+
+Release 构建 `.build/v3-inspector-final-build.log` 通过。Computer Use 在最终 App 中完成 12 次连续详情切换、10 次任务选择（包含上传、失败下载和完成下载），并将窗口缩小后恢复。最终进程 PID 42870 未出现同类约束循环日志；中间固定面板版本 PID 42629 同样通过任务选择复测。旧版及失败修复的日志与最终进程分开核对，不能将旧崩溃混入新版本结果。复测期间原 19 个任务保留，大文件任务继续暂停。

@@ -68,7 +68,16 @@ struct MainView: View {
                         jobs: filteredDownloads, uploadJobs: filteredUploads)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
         } detail: {
-            transferContent(items: items, scope: scope)
+            // 固定详情宽度，隔离 SwiftUI inspector 与原生分栏的尺寸反馈循环。
+            HStack(spacing: 0) {
+                transferContent(items: items, scope: scope)
+                if isInspectorPresented {
+                    Divider()
+                    TransferInspector(scope: scope, onDownloadRemove: requestDownloadRemoval)
+                        .frame(width: 320)
+                        .frame(maxHeight: .infinity)
+                }
+            }
         }
         .frame(minWidth: 640, minHeight: 400)
         .dropDestination(for: URL.self) { urls, _ in
@@ -87,6 +96,7 @@ struct MainView: View {
             if sheet == nil { model.presentRequestedNetdiskDownload() }
         }
         .focusedSceneValue(\.transferSelection, scope)
+        .focusedSceneValue(\.transferInspectorPresented, $isInspectorPresented)
         .focusedSceneValue(\.focusTaskSearch, { searchFocusRequest += 1 })
         .onCommand(#selector(NSResponder.selectAll(_:))) { selection = Set(visibleItems.map(\.id)) }
         .onChange(of: items.map(\.id)) { _, ids in selection.formIntersection(ids) }
@@ -135,18 +145,17 @@ struct MainView: View {
             .edgeBar(.bottom) { StatusBar() }
             .navigationTitle(providerFilter.map { "\($0.title) · \(currentCategory.title)" } ?? currentCategory.title)
             .navigationSubtitle("\(items.count) 个任务")
-            .inspector(isPresented: $isInspectorPresented) {
-                TransferInspector(scope: scope, onDownloadRemove: requestDownloadRemoval)
-                    .inspectorColumnWidth(min: 260, ideal: 320, max: 480)
-            }
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button { model.presentAddLink() } label: { Label("添加分享链接", systemImage: "link") }
                         .help("添加分享链接")
-                    Button { model.presentNetdiskDownload() } label: { Label("从我的网盘下载", systemImage: "cloud") }
+                    Button { model.presentNetdiskDownload() } label: { Label("从我的网盘下载", systemImage: "arrow.down.to.line") }
                         .help("从我的网盘下载")
                     Button { model.presentUpload(provider: providerFilter) } label: { Label("上传文件", systemImage: "arrow.up.doc") }
                         .help("上传文件")
+                }
+                if #available(macOS 26.0, *) {
+                    ToolbarSpacer(.fixed, placement: .primaryAction)
                 }
                 ToolbarItem(placement: .primaryAction) { TransferPauseResumeButton(scope: scope) }
                 ToolbarItem(placement: .primaryAction) {
@@ -500,5 +509,16 @@ extension FocusedValues {
     var focusTaskSearch: (() -> Void)? {
         get { self[TaskSearchFocusKey.self] }
         set { self[TaskSearchFocusKey.self] = newValue }
+    }
+}
+
+private struct TransferInspectorPresentedKey: FocusedValueKey {
+    typealias Value = Binding<Bool>
+}
+
+extension FocusedValues {
+    var transferInspectorPresented: Binding<Bool>? {
+        get { self[TransferInspectorPresentedKey.self] }
+        set { self[TransferInspectorPresentedKey.self] = newValue }
     }
 }

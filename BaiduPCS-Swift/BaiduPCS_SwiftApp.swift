@@ -13,7 +13,6 @@ struct FerryApp: App {
         .defaultSize(width: 960, height: 640)
         .commands {
             SidebarCommands()
-            InspectorCommands()
             FerryCommands(model: appDelegate.model)
         }
 
@@ -44,8 +43,16 @@ private struct FerryCommands: Commands {
     @Environment(\.openWindow) private var openWindow
     @FocusedValue(\.transferSelection) private var selection
     @FocusedValue(\.focusTaskSearch) private var focusTaskSearch
+    @FocusedBinding(\.transferInspectorPresented) private var inspectorPresented: Bool?
 
     var body: some Commands {
+        CommandGroup(after: .sidebar) {
+            Button(inspectorPresented == true ? "隐藏详情" : "显示详情") {
+                inspectorPresented?.toggle()
+            }
+            .keyboardShortcut("i", modifiers: [.command, .option])
+            .disabled(inspectorPresented == nil)
+        }
         CommandGroup(after: .textEditing) {
             Button("搜索任务") { focusTaskSearch?() }
                 .keyboardShortcut("f")
