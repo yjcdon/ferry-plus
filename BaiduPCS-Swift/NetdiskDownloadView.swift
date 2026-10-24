@@ -10,11 +10,9 @@ struct NetdiskDownloadView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var tree: FileTree<RemoteEntry>?
-    /// 文件树所属账号的 uk。新任务记录这个账号。
+    /// 文件树所属账号。新任务记录这个账号。
     @State private var treeAccount: AccountKey?
-    @State private var provider: Provider?
-
-    init(provider: Provider? = nil) { _provider = State(initialValue: provider) }
+    @State private var provider: Provider = .baidu
     /// 每次重新加载加一。它变化时 `.task` 取消上一次读取，重新读取。
     @State private var generation = 0
     /// 没有文件树的原因，例如未登录。
@@ -28,6 +26,13 @@ struct NetdiskDownloadView: View {
         VStack(spacing: 0) {
             header
                 .padding()
+            Picker("网盘", selection: $provider) {
+                ForEach(Provider.allCases) { Text($0.title).tag($0) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal)
+            .padding(.bottom)
             Divider()
             content
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -38,12 +43,17 @@ struct NetdiskDownloadView: View {
         .frame(minWidth: 600, idealWidth: 640, minHeight: 460, idealHeight: 540)
         .task(id: generation) { await load() }
         .onChange(of: sessionIdentity) { generation += 1 }
-        .onChange(of: provider) { tree = nil; generation += 1 }
+        .onChange(of: provider) {
+            tree = nil
+            treeAccount = nil
+            errorMessage = nil
+            generation += 1
+        }
     }
 
     /// 同账号重新登录和代理更新也会撤销旧适配器，文件树必须使用新的会话。
     private var sessionIdentity: ObjectIdentifier? {
-        guard let provider, let disk = model.coordinator.netdisks[provider] else { return nil }
+        guard let disk = model.coordinator.netdisks[provider] else { return nil }
         return ObjectIdentifier(disk)
     }
 
@@ -52,10 +62,6 @@ struct NetdiskDownloadView: View {
             Text("从我的网盘下载")
                 .font(.headline)
             Spacer()
-            Picker("网盘", selection: $provider) {
-                Text("选择网盘").tag(Provider?.none)
-                ForEach(Provider.allCases) { Text($0.title).tag(Optional($0)) }
-            }.fixedSize()
             Button {
                 generation += 1
             } label: {
@@ -68,14 +74,8 @@ struct NetdiskDownloadView: View {
 
     @ViewBuilder
     private var content: some View {
-        if provider == nil {
-            ContentUnavailableView {
-                Label("选择网盘", systemImage: "cloud")
-            } description: {
-                Text("选择百度网盘或夸克网盘，浏览并下载账号内的文件。")
-            }
-        } else if let tree {
-            NetdiskBrowser(tree: tree, transferFolder: model.settings.transferFolder(for: provider ?? .baidu))
+        if let tree {
+            NetdiskBrowser(tree: tree, transferFolder: model.settings.transferFolder(for: provider))
                 .id(ObjectIdentifier(tree))
         } else if let errorMessage {
             ContentUnavailableView {
@@ -83,7 +83,7 @@ struct NetdiskDownloadView: View {
             } description: {
                 Text(errorMessage)
             } actions: {
-                if let provider, model.accountKey(for: provider) == nil {
+                if model.accountKey(for: provider) == nil {
                     Button("登录\(provider.title)…") { model.presentLogin(for: provider) }
                 }
             }
@@ -111,14 +111,11 @@ struct NetdiskDownloadView: View {
         }
     }
 
-    /// 窗口固定来源和账号；换号后丢弃旧选择，不能提交给新账号。
+    /// 每棵文件树固定来源和账号；切换 Tab 或换号后丢弃旧选择。
     private func load() async {
         tree = nil
         treeAccount = nil
-        guard let provider else {
-            errorMessage = nil
-            return
-        }
+        let provider = self.provider
         do {
             let disk = try model.netdisk(for: provider)
             let key = disk.account
@@ -195,7 +192,7 @@ private struct NetdiskBrowser: View {
     }
 
     private var columnHeaders: some View {
-        HStack {
+        HStack(spacing: 8) {
             Text("名称")
             Spacer()
             Text("修改日期")
@@ -219,13 +216,19 @@ private struct NetdiskBrowser: View {
     }
 
     private func columns(_ entry: RemoteEntry) -> some View {
-        HStack {
+        HStack(spacing: 8) {
             Text(entry.modifiedAt?.formatted(date: .abbreviated, time: .omitted) ?? "")
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
+                .lineLimit(1)
                 .frame(width: dateWidth, alignment: .leading)
-            FileSizeText(entry: entry)
+            // 目录也保留大小列宽度；EmptyView 会使这一列消失，导致日期右移。
+            Text(entry.isDirectory ? "" : entry.size.byteCount)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+                .lineLimit(1)
                 .frame(width: sizeWidth, alignment: .trailing)
         }
+        .fixedSize(horizontal: true, vertical: false)
     }
 }

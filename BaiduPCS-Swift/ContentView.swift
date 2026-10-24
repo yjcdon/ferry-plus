@@ -20,7 +20,7 @@ struct ContentView: View {
             .sheet(item: $model.sheet) { sheet in
                 switch sheet {
                 case .addLink: AddLinkView()
-                case .netdiskDownload: NetdiskDownloadView(provider: model.netdiskProvider)
+                case .netdiskDownload: NetdiskDownloadView()
                 }
             }
             .onAppear {

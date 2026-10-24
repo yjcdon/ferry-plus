@@ -62,7 +62,7 @@ struct MainView: View {
                                 Label("添加分享链接…", systemImage: "link")
                             }
                             Button {
-                                model.presentNetdiskDownload(provider: providerFilter)
+                                model.presentNetdiskDownload()
                             } label: {
                                 Label("从我的网盘下载…", systemImage: "cloud")
                             }
@@ -93,10 +93,10 @@ struct MainView: View {
         .task { await showDemoSelection() }
         #endif
         .onChange(of: model.hasPendingNetdiskDownloadRequest, initial: true) { _, requested in
-            if requested { model.presentRequestedNetdiskDownload(provider: providerFilter) }
+            if requested { model.presentRequestedNetdiskDownload() }
         }
         .onChange(of: model.sheet) { _, sheet in
-            if sheet == nil { model.presentRequestedNetdiskDownload(provider: providerFilter) }
+            if sheet == nil { model.presentRequestedNetdiskDownload() }
         }
         .focusedSceneValue(\.jobSelection, JobSelection(jobs: selectedJobs, visibleJobs: jobs, providerFilter: providerFilter, onRemove: requestRemoval))
         .focusedSceneValue(\.focusTaskSearch, { searchFocusRequest += 1 })
