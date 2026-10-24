@@ -4,8 +4,7 @@ import Foundation
 import Testing
 @testable import FerryCore
 
-/// 网盘任务：直接下载自己网盘中勾选的条目。Ferry 不删除、不移动、不修改它们，所以这些测试都打开清理开关，
-/// 并检查假网盘没有收到 `delete`。
+/// 网盘任务直接下载勾选条目，清理开启时也不删除源文件；分享任务另验证移除后的清理失败提示和账号边界。
 @MainActor @Suite struct NetdiskJobTests {
     private let disk: [String: Data] = [
         "/资料/2024/报告/摘要.pdf": randomData(200_000),
@@ -277,5 +276,53 @@ import Testing
         await coordinator.retry(interrupted.id)
         try await coordinator.waitForPhase(.completed, of: interrupted.id)
         #expect(fixture.netdisk.operations == [.list("/资料/2024/报告"), .list("/资料/2024/报告/附录")])
+    }
+
+    // MARK: - 分享任务移除后的清理失败
+
+    /// 已移除的分享任务仍保留清理失败位置；未知转存或账号不允许删除，远端失败也不影响已下载文件。
+    @Test(arguments: ["unconfirmedTransfer", "otherAccount", "unknownAccount", "deleteFailure"])
+    func removingShareRetainsCleanupProblemAndCompletedFile(_ failure: String) async throws {
+        let data = randomData(32)
+        let fixture = Fixture(share: ["a.bin": data])
+        var saved = try await fixture.makeTransferredJob()
+        saved.accountName = "原分享账号"
+        saved.phase = .completed
+        let localURL = fixture.downloads.appending(path: "a.bin")
+        try data.write(to: localURL)
+        saved.files[0].localURL = localURL
+        let expectedReason: String
+        switch failure {
+        case "unconfirmedTransfer":
+            saved.phase = .failed(.transfer)
+            saved.transferProgress = TransferProgress(submitted: true)
+            expectedReason = TransferCheckError.unconfirmedTransfer.errorDescription!
+        case "unknownAccount":
+            saved.accountKey = nil
+            expectedReason = CoordinatorError.unknownAccount.errorDescription!
+        case "otherAccount":
+            expectedReason = CoordinatorError.otherAccount.errorDescription!
+        default:
+            fixture.netdisk.failNextDelete()
+            expectedReason = BaiduError.tryLater.errorDescription!
+        }
+        try fixture.store.save([saved])
+        let coordinator = fixture.makeCoordinator(settings: cleanup)
+        if failure == "otherAccount" { coordinator.netdisks[.baidu] = fixture.netdisk.withAccount(2) }
+        await coordinator.start()
+        let remotePaths = fixture.netdisk.remotePaths()
+
+        let failedLocalItems = await coordinator.remove(saved.id, cleanupConfirmed: true)
+
+        #expect(failedLocalItems.isEmpty)
+        #expect(coordinator.job(saved.id) == nil)
+        #expect(try fixture.store.load().isEmpty)
+        #expect(fixture.contents("a.bin") == data)
+        #expect(fixture.netdisk.remotePaths() == remotePaths)
+        #expect(fixture.netdisk.deletes == (failure == "deleteFailure" ? [[saved.remoteDirectory]] : []))
+        let expectedProblem = "百度网盘 · 原分享账号 · \(saved.remoteDirectory)：转存目录未清理，\(expectedReason)"
+        #expect(coordinator.removalProblems == [expectedProblem])
+        await coordinator.shutdown()
+        #expect(coordinator.removalProblems == [expectedProblem])
     }
 }
