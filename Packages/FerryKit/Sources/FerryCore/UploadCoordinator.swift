@@ -27,28 +27,36 @@ public actor UploadCoordinator {
     private let store: UploadStore
     private let integrityStore: IntegrityStore
     private let budget: TransferBudget
-    private let integrity: IntegrityService
+    private var integrity: IntegrityService
     private let secrets: (any UploadSecretStorage)?
     private var maximumConcurrentJobs: Int
     private let environment: @Sendable (AccountKey) async throws -> UploadEnvironment
+    private let onBatchFinished: (@Sendable (UploadJob) async -> Void)?
     private var jobs: [UUID: UploadJob] = [:]
     private var workers: [UUID: Worker] = [:]
     private var observers: [UUID: AsyncStream<[UploadJob]>.Continuation] = [:]
+    private var activityObservers: [UUID: AsyncStream<Bool>.Continuation] = [:]
+    private var lastActivity = false
+    private var globallySuspended = false
+    private var suspendedProviders: Set<Provider> = []
     private var stopping: Set<UUID> = []
     private var closed = false
 
     public init(store: UploadStore, integrityStore: IntegrityStore, budget: TransferBudget,
                 integrity: IntegrityService, secrets: (any UploadSecretStorage)? = nil, maximumConcurrentJobs: Int = 1,
+                onBatchFinished: (@Sendable (UploadJob) async -> Void)? = nil,
                 environment: @escaping @Sendable (AccountKey) async throws -> UploadEnvironment) throws {
         guard (1...4).contains(maximumConcurrentJobs) else { throw UploadRecordError.invalid("同时上传批次数必须为 1～4") }
         self.store = store; self.integrityStore = integrityStore; self.budget = budget; self.integrity = integrity
         self.secrets = secrets
         self.maximumConcurrentJobs = maximumConcurrentJobs; self.environment = environment
+        self.onBatchFinished = onBatchFinished
     }
 
     deinit {
         for worker in workers.values { worker.task.cancel() }
         for observer in observers.values { observer.finish() }
+        for observer in activityObservers.values { observer.finish() }
     }
 
     /// 恢复暂停意图和阶段；完成／失败项保留结果，不自动重复远端提交。
@@ -92,6 +100,44 @@ public actor UploadCoordinator {
             observers[id] = continuation; continuation.yield(snapshots())
             continuation.onTermination = { [weak self] _ in Task { await self?.removeObserver(id) } }
         }
+    }
+
+    /// 执行活动以实际 worker 为准，包括扫描、发送、提交与校验等待；排队和手动暂停不产生活动。
+    public func isExecuting() -> Bool { !workers.isEmpty }
+
+    /// 仅 worker 活动变化时发布，供应用合并下载活动管理防休眠，无常驻轮询。
+    public func activityUpdates() -> AsyncStream<Bool> {
+        let id = UUID()
+        return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
+            activityObservers[id] = continuation; continuation.yield(!workers.isEmpty)
+            continuation.onTermination = { [weak self] _ in Task { await self?.removeActivityObserver(id) } }
+        }
+    }
+
+    /// 运行时阻断先于取消；等待匹配 worker 收尾，不改变用户暂停意图，也不停止另一家网盘。
+    public func suspendExecution(for provider: Provider? = nil) async {
+        if let provider { suspendedProviders.insert(provider) }
+        else { globallySuspended = true }
+        let tasks = workers.compactMap { id, worker -> Task<Void, Never>? in
+            provider == nil || jobs[id]?.account.provider == provider ? worker.task : nil
+        }
+        for task in tasks { task.cancel() }
+        for task in tasks { await task.value }
+        publishActivity()
+    }
+
+    /// 全局与各网盘阻断独立保留；关闭后不放行，不覆盖手动暂停或取消状态。
+    public func resumeExecution(for provider: Provider? = nil) {
+        guard !closed else { return }
+        if let provider { suspendedProviders.remove(provider) }
+        else { globallySuspended = false }
+        schedule()
+    }
+
+    /// 代理切换必须先全局停稳，才能替换持有旧网络会话的校验服务。
+    public func replaceIntegrityService(_ service: IntegrityService) throws {
+        guard !closed, globallySuspended, workers.isEmpty else { throw UploadCoordinatorError.busy }
+        integrity = service
     }
 
     /// 暂停先停止旧 worker，再返回；已收到的分片回执仍优先保存。
@@ -232,11 +278,14 @@ public actor UploadCoordinator {
         for task in tasks { await task.value }
         for observer in observers.values { observer.finish() }
         observers.removeAll()
+        publishActivity()
+        for observer in activityObservers.values { observer.finish() }
+        activityObservers.removeAll()
     }
 
     private func schedule() {
-        guard !closed else { return }
-        let pending = jobs.values.filter { !$0.isPaused && !$0.cancellationRequested && !$0.phase.isTerminal && workers[$0.id] == nil && !stopping.contains($0.id) }
+        guard !closed, !globallySuspended else { return }
+        let pending = jobs.values.filter { !$0.isPaused && !$0.cancellationRequested && !$0.phase.isTerminal && workers[$0.id] == nil && !stopping.contains($0.id) && !suspendedProviders.contains($0.account.provider) }
             .sorted { $0.priority == $1.priority ? $0.createdAt < $1.createdAt : $0.priority > $1.priority }
         for job in pending.prefix(max(0, maximumConcurrentJobs - workers.count)) {
             let token = UUID()
@@ -246,9 +295,11 @@ public actor UploadCoordinator {
             }
             workers[job.id] = Worker(token: token, task: task)
         }
+        publishActivity()
     }
 
     private func run(_ id: UUID, token: UUID) async {
+        var terminal: UploadJob?
         do {
             if jobs[id]?.scanCompletedAt == nil { try await scan(id) }
             try Task.checkCancellation()
@@ -280,15 +331,21 @@ public actor UploadCoordinator {
             else if jobs[id]!.skippedCount == jobs[id]!.fileIDs.count { jobs[id]!.phase = .skipped }
             else { jobs[id]!.phase = .completed }
             try await persistJob(id)
+            terminal = jobs[id]
         } catch {
-            if !(error is CancellationError) && !Task.isCancelled, jobs[id] != nil {
+            // 客户端自行撤销可抛 CancellationError，但当前任务并未被暂停；不能立即重排形成取消死循环。
+            if !Task.isCancelled, let job = jobs[id],
+               !(error is CancellationError) || (!globallySuspended && !suspendedProviders.contains(job.account.provider) && !job.isPaused && !job.cancellationRequested) {
                 jobs[id]!.phase = .failed; jobs[id]!.error = error.localizedDescription
-                do { try await persistJob(id) }
+                do { try await persistJob(id); terminal = jobs[id] }
                 catch { jobs[id]!.error = "\(jobs[id]!.error ?? "上传失败")；错误状态也未能保存：\(error.localizedDescription)" }
             }
         }
         if workers[id]?.token == token { workers[id] = nil }
         emit(); schedule()
+        publishActivity()
+        // 先移除当前 worker，通知回调重入 pause/suspend/shutdown 才不会等待自身。
+        if let terminal, !closed, !terminal.cancellationRequested { await onBatchFinished?(terminal) }
     }
 
     /// 未完成扫描没有任何远端副作用，恢复时可覆盖稳定 ID 对应的本地扫描检查点。
@@ -620,4 +677,11 @@ public actor UploadCoordinator {
     }
     private func emit() { let value = snapshots(); for observer in observers.values { observer.yield(value) } }
     private func removeObserver(_ id: UUID) { observers[id] = nil }
+    private func removeActivityObserver(_ id: UUID) { activityObservers[id] = nil }
+    private func publishActivity() {
+        let active = !workers.isEmpty
+        guard active != lastActivity else { return }
+        lastActivity = active
+        for observer in activityObservers.values { observer.yield(active) }
+    }
 }
