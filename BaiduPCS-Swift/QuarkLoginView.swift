@@ -103,17 +103,17 @@ struct QuarkLoginView: View {
     }
 }
 
-/// 账号二级菜单中的夸克状态及操作，登录状态仍由同一会话维护。
+/// 账号菜单中对应夸克分组的操作，登录状态仍由同一会话维护。
 struct QuarkAccountControls: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
     @State private var errorMessage: String?
 
     var body: some View {
-        if let summary = model.quark.summary {
-            Text(summary.name)
+        switch model.quark.state {
+        case .loggedIn, .loggedOut: EmptyView()
+        default: Text(model.quark.state.title)
         }
-        Text(model.quark.state.title)
         if let problem = model.quark.problem { Text(problem).foregroundStyle(.orange) }
         if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
         if model.quark.account == nil {

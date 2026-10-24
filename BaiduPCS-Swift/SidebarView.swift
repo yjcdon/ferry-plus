@@ -93,28 +93,21 @@ private struct AccountView: View {
     var body: some View {
         Menu {
             if provider == nil || provider == .baidu {
-                Menu {
-                    if let account = model.account {
-                        Text(account.username.isEmpty ? "百度账号" : account.username)
-                        Text(model.isLoginExpired ? "登录已失效" : "已登录")
-                        if model.isLoginExpired {
-                            Button("重新登录…") { model.presentLogin() }
-                        }
-                        Button("退出登录") { isConfirmingLogOut = model.requestLogOut() }
-                    } else {
-                        Text("未登录")
-                        Button("登录…") { model.presentLogin() }
+                Text("百度网盘 · \(model.account.map { $0.username.isEmpty ? "百度账号" : $0.username } ?? "未登录")")
+                if model.account != nil {
+                    if model.isLoginExpired {
+                        Text("登录已失效")
+                        Button("重新登录…") { model.presentLogin() }
                     }
-                } label: {
-                    Label("百度网盘 · \(model.account.map { $0.username.isEmpty ? "百度账号" : $0.username } ?? "未登录")", systemImage: "b.circle")
+                    Button("退出登录") { isConfirmingLogOut = model.requestLogOut() }
+                } else {
+                    Button("登录…") { model.presentLogin() }
                 }
             }
+            if provider == nil { Divider() }
             if provider == nil || provider == .quark {
-                Menu {
-                    QuarkAccountControls()
-                } label: {
-                    Label("夸克网盘 · \(model.quark.summary?.name ?? "未登录")", systemImage: "q.circle")
-                }
+                Text("夸克网盘 · \(model.quark.summary?.name ?? "未登录")")
+                QuarkAccountControls()
             }
             Divider()
             SettingsLink { Text("设置…") }
