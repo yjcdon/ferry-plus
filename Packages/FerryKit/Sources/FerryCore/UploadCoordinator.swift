@@ -34,6 +34,8 @@ public actor UploadCoordinator {
     private let onBatchFinished: (@Sendable (UploadJob) async -> Void)?
     private var jobs: [UUID: UploadJob] = [:]
     private var workers: [UUID: Worker] = [:]
+    /// 单文件重新定位的完整复核及持久化任务，同样纳入睡眠／退出收尾和资源活动。
+    private var relocations: [UUID: Task<Void, Error>] = [:]
     private var observers: [UUID: AsyncStream<[UploadJob]>.Continuation] = [:]
     private var activityObservers: [UUID: AsyncStream<Bool>.Continuation] = [:]
     private var lastActivity = false
@@ -55,6 +57,7 @@ public actor UploadCoordinator {
 
     deinit {
         for worker in workers.values { worker.task.cancel() }
+        for relocation in relocations.values { relocation.cancel() }
         for observer in observers.values { observer.finish() }
         for observer in activityObservers.values { observer.finish() }
     }
@@ -103,13 +106,13 @@ public actor UploadCoordinator {
     }
 
     /// 执行活动以实际 worker 为准，包括扫描、发送、提交与校验等待；排队和手动暂停不产生活动。
-    public func isExecuting() -> Bool { !workers.isEmpty }
+    public func isExecuting() -> Bool { !workers.isEmpty || !relocations.isEmpty }
 
     /// 仅 worker 活动变化时发布，供应用合并下载活动管理防休眠，无常驻轮询。
     public func activityUpdates() -> AsyncStream<Bool> {
         let id = UUID()
         return AsyncStream(bufferingPolicy: .bufferingNewest(1)) { continuation in
-            activityObservers[id] = continuation; continuation.yield(!workers.isEmpty)
+            activityObservers[id] = continuation; continuation.yield(!workers.isEmpty || !relocations.isEmpty)
             continuation.onTermination = { [weak self] _ in Task { await self?.removeActivityObserver(id) } }
         }
     }
@@ -121,8 +124,13 @@ public actor UploadCoordinator {
         let tasks = workers.compactMap { id, worker -> Task<Void, Never>? in
             provider == nil || jobs[id]?.account.provider == provider ? worker.task : nil
         }
+        let relocating = relocations.compactMap { id, task -> Task<Void, Error>? in
+            provider == nil || jobs[id]?.account.provider == provider ? task : nil
+        }
         for task in tasks { task.cancel() }
+        for task in relocating { task.cancel() }
         for task in tasks { await task.value }
+        for task in relocating { _ = try? await task.value }
         publishActivity()
     }
 
@@ -136,7 +144,7 @@ public actor UploadCoordinator {
 
     /// 代理切换必须先全局停稳，才能替换持有旧网络会话的校验服务。
     public func replaceIntegrityService(_ service: IntegrityService) throws {
-        guard !closed, globallySuspended, workers.isEmpty else { throw UploadCoordinatorError.busy }
+        guard !closed, globallySuspended, workers.isEmpty, relocations.isEmpty else { throw UploadCoordinatorError.busy }
         integrity = service
     }
 
@@ -176,6 +184,84 @@ public actor UploadCoordinator {
         jobs[id]!.phase = job.scanCompletedAt == nil ? .preparing : .queued
         jobs[id]!.isPaused = false; jobs[id]!.error = nil
         try await rebuildAggregate(id)
+    }
+
+    /// 原文件移动或授权失效时，先停稳批次，再完整核对新文件；不改变账号、上传会话及分片回执。
+    /// 只有已有原始 SHA-256 的失败文件可重新定位；目录映射或尚无原始摘要的选择须重新添加。
+    public func relocateSource(jobID: UUID, fileID: UUID, to url: URL) async throws {
+        guard let job = jobs[jobID], job.fileIDs.contains(fileID) else { throw UploadCoordinatorError.missingJob }
+        guard !closed, !globallySuspended, !suspendedProviders.contains(job.account.provider),
+              !job.cancellationRequested, !stopping.contains(jobID) else { throw UploadCoordinatorError.busy }
+        guard url.isFileURL else { throw UploadSourceError.nonFileURL }
+        stopping.insert(jobID)
+        let previous = workers[jobID]?.task
+        let operation = Task<Void, Error> { [weak self] in
+            guard let self else { throw CancellationError() }
+            try await self.runRelocation(jobID: jobID, fileID: fileID, to: url, previous: previous)
+        }
+        relocations[jobID] = operation
+        previous?.cancel()
+        publishActivity()
+        try await withTaskCancellationHandler {
+            try await operation.value
+        } onCancel: { operation.cancel() }
+    }
+
+    /// 收尾在被跟踪的任务内完成，确保运行时暂停返回时已清空活动记录。
+    private func runRelocation(jobID: UUID, fileID: UUID, to url: URL, previous: Task<Void, Never>?) async throws {
+        defer {
+            relocations[jobID] = nil
+            stopping.remove(jobID)
+            publishActivity(); schedule()
+        }
+        await previous?.value
+        try Task.checkCancellation()
+        try await relocateStoppedSource(jobID: jobID, fileID: fileID, to: url)
+    }
+
+    /// 只在旧 worker 已退出且批次被 stopping 隔离后修改源定位；完整校验结束前持续持有用户授权。
+    private func relocateStoppedSource(jobID: UUID, fileID: UUID, to url: URL) async throws {
+        guard let job = jobs[jobID] else { throw UploadCoordinatorError.missingJob }
+        var file = try await store.loadFile(id: fileID, in: job)
+        guard !file.isDirectory, file.phase == .failed,
+              let phase = file.failedPhase, [.preparing, .queued, .uploading].contains(phase),
+              file.remoteReference == nil, !file.commits.contains(where: { $0.status == .pending }),
+              let original = file.expectation, original.algorithm == .sha256, original.origin == .localOriginal else {
+            throw UploadRecordError.invalid("只能重新定位已有原始 SHA-256 的待上传失败文件；目录或尚无原始基准的项目请重新添加，云端校验阶段可直接重试")
+        }
+        let accessed = url.startAccessingSecurityScopedResource()
+        defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+        let fingerprint = try await UploadSource.fingerprint(of: url, chunkSize: file.preparation?.partSize ?? 4 * 1024 * 1024)
+        guard fingerprint.identity.size == file.source.size, fingerprint.identity.size == original.size,
+              fingerprint.sha256 == original.digest,
+              file.md5 == nil || file.md5 == fingerprint.md5,
+              file.sha1 == nil || file.sha1 == fingerprint.sha1 else {
+            throw UploadSourceError.contentMismatch(url.path)
+        }
+        let preparation = try file.preparation.map { try $0.bindingFingerprint(fingerprint) }
+        let bookmark = try UploadSource.bookmark(for: url)
+        guard try UploadSource.identity(of: url) == fingerprint.identity else { throw UploadSourceError.changed(url.path) }
+        try Task.checkCancellation()
+        guard !closed, !globallySuspended, !suspendedProviders.contains(job.account.provider),
+              jobs[jobID]?.account == job.account, jobs[jobID]?.cancellationRequested == false else { throw CancellationError() }
+        file.source = UploadLocalSource(url: url, bookmark: bookmark, size: file.source.size,
+            modificationDate: Date(timeIntervalSince1970: Double(fingerprint.identity.modifiedNanoseconds) / 1_000_000_000),
+            resourceIdentifier: try JSONEncoder().encode(fingerprint.identity))
+        file.preparation = preparation
+        file.md5 = fingerprint.md5; file.sha1 = fingerprint.sha1
+        file.phase = phase; file.failedPhase = nil; file.error = nil
+        do {
+            try await saveFile(file)
+            jobs[jobID]!.error = nil
+            try await rebuildAggregate(jobID)
+            jobs[jobID]!.phase = .queued
+            try await persistJob(jobID)
+        } catch {
+            // 新定位可能已经原子写入文件记录；聚合写入失败后停在失败态，由显式重试继续。
+            jobs[jobID]!.phase = .failed; jobs[jobID]!.error = "重新定位检查点未保存完整：\(error.localizedDescription)"
+            emit()
+            throw error
+        }
     }
 
     /// 取消不删除已成功内容；在途提交先收尾，未决结果保留且阻止移除记录。
@@ -274,8 +360,11 @@ public actor UploadCoordinator {
     public func shutdown() async {
         closed = true
         let tasks = workers.values.map(\.task)
+        let relocating = Array(relocations.values)
         for task in tasks { task.cancel() }
+        for task in relocating { task.cancel() }
         for task in tasks { await task.value }
+        for task in relocating { _ = try? await task.value }
         for observer in observers.values { observer.finish() }
         observers.removeAll()
         publishActivity()
@@ -287,7 +376,7 @@ public actor UploadCoordinator {
         guard !closed, !globallySuspended else { return }
         let pending = jobs.values.filter { !$0.isPaused && !$0.cancellationRequested && !$0.phase.isTerminal && workers[$0.id] == nil && !stopping.contains($0.id) && !suspendedProviders.contains($0.account.provider) }
             .sorted { $0.priority == $1.priority ? $0.createdAt < $1.createdAt : $0.priority > $1.priority }
-        for job in pending.prefix(max(0, maximumConcurrentJobs - workers.count)) {
+        for job in pending.prefix(max(0, maximumConcurrentJobs - Set(workers.keys).union(relocations.keys).count)) {
             let token = UUID()
             let task = Task<Void, Never> { [weak self] in
                 guard let self else { return }
@@ -679,7 +768,7 @@ public actor UploadCoordinator {
     private func removeObserver(_ id: UUID) { observers[id] = nil }
     private func removeActivityObserver(_ id: UUID) { activityObservers[id] = nil }
     private func publishActivity() {
-        let active = !workers.isEmpty
+        let active = !workers.isEmpty || !relocations.isEmpty
         guard active != lastActivity else { return }
         lastActivity = active
         for observer in activityObservers.values { observer.yield(active) }

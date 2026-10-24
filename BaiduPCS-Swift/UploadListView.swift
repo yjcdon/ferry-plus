@@ -1,6 +1,7 @@
 import AppKit
 import FerryCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 extension UploadPhase {
     /// 上传发送结束仍有合并、回读和发布阶段，不能用字节进度替代完成状态。
@@ -89,7 +90,17 @@ struct UploadFilesView: View {
     @State private var exportDocument: IntegrityManifestDocument?
     @State private var isExportPresented = false
     @State private var exportError: String?
+    @State private var relocationFileID: UUID?
+    @State private var isRelocationPickerPresented = false
+    @State private var relocationRequest: RelocationRequest?
+    @State private var relocationError: String?
     private let pageSize = 100
+
+    private struct RelocationRequest: Equatable {
+        let id = UUID()
+        let fileID: UUID
+        let url: URL
+    }
 
     private struct PageRequest: Hashable {
         let offset: Int
@@ -140,6 +151,24 @@ struct UploadFilesView: View {
             guard let exportRequest else { return }
             await prepareExport(exportRequest)
         }
+        .task(id: relocationRequest?.id) {
+            guard let request = relocationRequest else { return }
+            await relocate(request)
+        }
+        .fileImporter(isPresented: $isRelocationPickerPresented, allowedContentTypes: [.item],
+                      allowsMultipleSelection: false) { result in
+            guard let fileID = relocationFileID else { return }
+            relocationFileID = nil
+            switch result {
+            case .success(let urls):
+                if let url = urls.first { relocationRequest = .init(fileID: fileID, url: url) }
+            case .failure(let failure):
+                if (failure as? CocoaError)?.code != .userCancelled { relocationError = failure.localizedDescription }
+            }
+        }
+        .alert("无法重新定位源文件", isPresented: Binding(
+            get: { relocationError != nil }, set: { if !$0 { relocationError = nil } }
+        )) { Button("好") { relocationError = nil } } message: { Text(relocationError ?? "") }
         .fileExporter(isPresented: $isExportPresented, document: exportDocument, contentType: .json,
                       defaultFilename: "Ferry-\(jobID.uuidString.prefix(8))-SHA256") { result in
             if case .failure(let failure) = result {
@@ -172,6 +201,22 @@ struct UploadFilesView: View {
                         Text(file.phase.displayName).foregroundStyle(.secondary)
                     }
                     Text(integrityDescription(file)).font(.caption).foregroundStyle(.secondary)
+                    if canRelocate(file) {
+                        HStack {
+                            Button("重新定位源文件…") {
+                                relocationFileID = file.id; isRelocationPickerPresented = true
+                            }.controlSize(.small).disabled(relocationRequest != nil)
+                            if relocationRequest?.fileID == file.id {
+                                ProgressView().controlSize(.small)
+                                Text("正在完整核对原始内容…").font(.caption).foregroundStyle(.secondary)
+                            }
+                        }
+                        Text("源文件移动或授权失效时，可选择同内容文件；完整校验通过后沿用原上传会话。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    } else if file.phase == .failed, file.remoteReference == nil, !file.isDirectory,
+                              file.expectation == nil {
+                        Text("尚无原始内容基准，请重新添加上传。").font(.caption).foregroundStyle(.secondary)
+                    }
                     if let error = file.error {
                         HStack(alignment: .top) {
                             Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
@@ -185,6 +230,27 @@ struct UploadFilesView: View {
                 }.padding(.vertical, 3)
             }
         }
+    }
+
+    /// 仅待发送且已有原始 SHA-256 的失败项可重新选源，校验云端内容时不再依赖本地文件。
+    private func canRelocate(_ file: UploadFile) -> Bool {
+        !file.isDirectory && file.phase == .failed && file.remoteReference == nil &&
+        file.failedPhase.map { [.preparing, .queued, .uploading].contains($0) } == true &&
+        !file.commits.contains { $0.status == .pending } &&
+        file.expectation?.algorithm == .sha256 && file.expectation?.origin == .localOriginal &&
+        job?.cancellationRequested == false
+    }
+
+    /// 选择仅变更本地定位；协调器停稳旧执行器并复核完整摘要，失败保持原记录。
+    private func relocate(_ request: RelocationRequest) async {
+        defer { if relocationRequest?.id == request.id { relocationRequest = nil } }
+        do {
+            guard let coordinator = model.uploadCoordinator else { throw UploadCoordinatorError.missingJob }
+            try await coordinator.relocateSource(jobID: jobID, fileID: request.fileID, to: request.url)
+            try Task.checkCancellation()
+            generation += 1
+        } catch is CancellationError { }
+        catch { relocationError = error.localizedDescription }
     }
 
     private func integrityDescription(_ file: UploadFile) -> String {
