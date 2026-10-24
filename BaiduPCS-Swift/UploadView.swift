@@ -14,6 +14,12 @@ struct UploadView: View {
     @State private var loadedSession: ObjectIdentifier?
     @State private var loadedDirectory: RemoteReference?
     @State private var isLoading = false
+    @State private var recentAttempted: AccountKey?
+    @State private var restoresRecent = true
+    @State private var directoryNotice: String?
+    @State private var showsNewFolder = false
+    @State private var newFolderName = ""
+    @State private var creation: Creation?
     @State private var generation = 0
     @State private var loadError: String?
     @State private var selectionError: String?
@@ -38,6 +44,13 @@ struct UploadView: View {
         let generation: Int
         let session: ObjectIdentifier?
     }
+    private struct Creation: Identifiable {
+        let id = UUID()
+        let name: String
+        let parent: RemoteReference
+        let account: AccountKey
+        let session: ObjectIdentifier
+    }
     private struct Submission: Identifiable {
         let id = UUID()
         let files: [URL]
@@ -45,15 +58,21 @@ struct UploadView: View {
         let directory: RemoteReference
         let policy: UploadConflictPolicy
         let session: ObjectIdentifier
+        let trail: [RemoteEntry]?
     }
 
-    init(initialProvider: Provider? = nil, initialDirectory: RemoteReference? = nil, files: [URL] = [],
+    init(initialProvider: Provider? = nil, initialDirectory: RemoteReference? = nil, files: [URL] = [], initialTrail: [RemoteEntry]? = nil,
          onSubmit: @escaping @MainActor ([URL], AccountKey, RemoteReference, UploadConflictPolicy) async throws -> Void) {
         let provider = initialProvider ?? .baidu
         _provider = State(initialValue: provider)
+        _restoresRecent = State(initialValue: initialDirectory == nil)
         _files = State(initialValue: Self.uniqueLocalURLs(files.filter(\.isFileURL)))
         _selectionError = State(initialValue: files.contains(where: { !$0.isFileURL }) ? "只能上传本地文件或文件夹。" : nil)
-        if let initialDirectory, initialDirectory.provider == provider, initialDirectory != Self.root(for: provider) {
+        if let initialTrail, !initialTrail.isEmpty,
+           initialTrail.allSatisfy({ $0.isDirectory && $0.reference.provider == provider }),
+           initialTrail.last?.reference == initialDirectory {
+            _trail = State(initialValue: initialTrail.map { .init(reference: $0.reference, name: $0.name, hasUnknownAncestors: false) })
+        } else if let initialDirectory, initialDirectory.provider == provider, initialDirectory != Self.root(for: provider) {
             let name: String
             switch initialDirectory {
             case .baidu(let path, _): name = (path as NSString).lastPathComponent
@@ -75,7 +94,7 @@ struct UploadView: View {
             .labelsHidden()
             .padding(.horizontal)
             .padding(.bottom)
-            .disabled(isSubmitting)
+            .disabled(isSubmitting || creation != nil)
             Divider()
             fileSelection.padding()
             Divider()
@@ -96,6 +115,16 @@ struct UploadView: View {
             return urls.contains(where: \.isFileURL)
         } isTargeted: { isDropTarget = $0 }
         .task(id: request) { await load(request) }
+        .alert("新建文件夹", isPresented: $showsNewFolder) {
+            TextField("文件夹名称", text: $newFolderName)
+            Button("取消", role: .cancel) { }
+            Button("新建") { beginCreation() }
+                .disabled(!Self.validFolderName(newFolderName))
+        } message: { Text("在当前目标目录中新建文件夹。") }
+        .task(id: creation?.id) {
+            guard let creation else { return }
+            await createDirectory(creation)
+        }
         .task(id: submission?.id) {
             guard let submission else { return }
             await submit(submission)
@@ -162,7 +191,7 @@ struct UploadView: View {
                 if !trail.isEmpty { trail.removeLast() }
             } label: { Image(systemName: "chevron.left") }
             .help("返回上一层浏览位置")
-            .disabled(trail.isEmpty || isSubmitting)
+            .disabled(trail.isEmpty || isSubmitting || creation != nil)
             ScrollView(.horizontal) {
                 HStack(spacing: 6) {
                     Button("根目录") { trail = [] }
@@ -175,13 +204,19 @@ struct UploadView: View {
                 .buttonStyle(.plain)
                 .lineLimit(1)
             }
-            .disabled(isSubmitting)
+            .disabled(isSubmitting || creation != nil)
             Spacer(minLength: 4)
+            Button {
+                newFolderName = ""; showsNewFolder = true
+            } label: { Image(systemName: "folder.badge.plus") }
+            .help("在当前目录新建文件夹")
+            .disabled(!canUseDirectory)
+            if creation != nil { ProgressView().controlSize(.small) }
             Button {
                 generation += 1
             } label: { Image(systemName: "arrow.clockwise") }
             .help("刷新当前目录")
-            .disabled(isSubmitting || isLoading)
+            .disabled(isSubmitting || isLoading || creation != nil)
         }
     }
 
@@ -217,7 +252,7 @@ struct UploadView: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(isSubmitting)
+                .disabled(isSubmitting || creation != nil)
             }
         }
     }
@@ -243,6 +278,9 @@ struct UploadView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .textSelection(.enabled)
+            if let directoryNotice {
+                Text(directoryNotice).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
             if let submitError { errorLabel(submitError) }
             HStack {
                 Text("上传完成后会校验云端内容。")
@@ -275,18 +313,19 @@ struct UploadView: View {
     }
     private var destinationTitle: String {
         guard !trail.isEmpty else { return "根目录" }
-        return trail.map { ($0.hasUnknownAncestors ? "…/" : "") + $0.name }.joined(separator: "/")
+        return "/" + trail.map { ($0.hasUnknownAncestors ? "…/" : "") + $0.name }.joined(separator: "/")
     }
-    private var canSubmit: Bool {
-        !isSubmitting && !isLoading && !files.isEmpty && loadError == nil &&
+    private var canSubmit: Bool { canUseDirectory && !files.isEmpty && policy != .replace }
+    private var canUseDirectory: Bool {
+        !isSubmitting && creation == nil && !isLoading && loadError == nil &&
         loadedAccount == model.accountKey(for: provider) && loadedAccount != nil &&
-        loadedSession == sessionIdentity && loadedSession != nil && loadedDirectory == currentDirectory && policy != .replace
+        loadedSession == sessionIdentity && loadedSession != nil && loadedDirectory == currentDirectory
     }
 
     /// Tab、换号或客户端会话更新后立即丢弃旧目录，已有本地文件选择仍可继续使用。
     private func resetDirectory() {
         trail = []; directories = []; loadedAccount = nil; loadedSession = nil; loadedDirectory = nil
-        loadError = nil; submitError = nil; generation += 1
+        loadError = nil; submitError = nil; directoryNotice = nil; recentAttempted = nil; restoresRecent = true; generation += 1
     }
 
     /// .task 取消与请求身份双重核对，拒绝换号、切 Tab 和目录切换后的迟到响应。
@@ -297,6 +336,28 @@ struct UploadView: View {
             let disk = try model.netdisk(for: request.provider)
             let key = disk.account
             guard ObjectIdentifier(disk) == request.session else { throw CancellationError() }
+            if recentAttempted != key {
+                if restoresRecent, trail.isEmpty, let remembered = model.recentUploadDirectory(for: key), !remembered.isEmpty {
+                    var parent = Self.root(for: request.provider)
+                    var confirmed: [RemoteEntry] = []
+                    for folder in remembered {
+                        let entries = try await disk.listDirectory(parent)
+                        try Task.checkCancellation()
+                        guard request == loadRequest, model.accountKey(for: request.provider) == key,
+                              sessionIdentity == ObjectIdentifier(disk) else { return }
+                        guard let actual = entries.first(where: { $0.reference == folder.reference && $0.isDirectory }) else { break }
+                        confirmed.append(actual); parent = actual.reference
+                    }
+                    if confirmed.count == remembered.count {
+                        recentAttempted = key
+                        trail = confirmed.map { .init(reference: $0.reference, name: $0.name, hasUnknownAncestors: false) }
+                        return
+                    }
+                    model.forgetUploadDirectory(for: key)
+                    directoryNotice = "最近上传目录已失效，已返回根目录，请重新确认目标。"
+                }
+                recentAttempted = key
+            }
             let entries = try await disk.listDirectory(request.directory)
             try Task.checkCancellation()
             guard request == loadRequest, model.accountKey(for: request.provider) == key,
@@ -313,7 +374,10 @@ struct UploadView: View {
     private func beginSubmission() {
         guard canSubmit, let account = loadedAccount, let session = loadedSession else { return }
         submitError = nil; isSubmitting = true
-        submission = .init(files: files, account: account, directory: currentDirectory, policy: policy, session: session)
+        let remembered = trail.contains(where: \.hasUnknownAncestors) ? nil : trail.map {
+            RemoteEntry(reference: $0.reference, name: $0.name, isDirectory: true, size: 0)
+        }
+        submission = .init(files: files, account: account, directory: currentDirectory, policy: policy, session: session, trail: remembered)
     }
 
     private func submit(_ request: Submission) async {
@@ -324,11 +388,41 @@ struct UploadView: View {
                   sessionIdentity == request.session else { throw UploadDestinationError.otherAccount }
             try await onSubmit(request.files, request.account, request.directory, request.policy)
             try Task.checkCancellation()
+            if let trail = request.trail { model.rememberUploadDirectory(trail, for: request.account) }
             dismiss()
         } catch {
             guard !Task.isCancelled else { return }
             submitError = error.localizedDescription
         }
+    }
+
+    /// 固定父目录和会话后只发一次创建请求；不确定回执必须由用户刷新核对。
+    private func beginCreation() {
+        guard canUseDirectory, Self.validFolderName(newFolderName), let account = loadedAccount,
+              let session = loadedSession else { return }
+        submitError = nil
+        creation = .init(name: newFolderName, parent: currentDirectory, account: account, session: session)
+    }
+
+    private func createDirectory(_ request: Creation) async {
+        defer { creation = nil }
+        do {
+            let entry = try await model.createUploadDirectory(name: request.name, parent: request.parent, account: request.account)
+            try Task.checkCancellation()
+            guard currentDirectory == request.parent, model.accountKey(for: provider) == request.account,
+                  sessionIdentity == request.session else { return }
+            trail.append(.init(reference: entry.reference, name: entry.name, hasUnknownAncestors: false))
+            directoryNotice = nil
+        } catch {
+            guard !Task.isCancelled, currentDirectory == request.parent,
+                  model.accountKey(for: provider) == request.account, sessionIdentity == request.session else { return }
+            submitError = "新建结果未确认：\(error.localizedDescription)。文件夹可能已创建，请刷新核对后再操作。"
+        }
+    }
+
+    private static func validFolderName(_ name: String) -> Bool {
+        !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && name != "." && name != ".." &&
+        !name.contains("/") && !name.contains("\\") && !name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
     }
 
     /// 面板只增加本地项目，不枚举目录、不读文件内容，也不调用网盘写入。

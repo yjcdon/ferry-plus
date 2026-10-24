@@ -26,6 +26,8 @@ struct FileTreeRow<Entry: FileTreeEntry, Badge: View, Columns: View>: View {
     @ViewBuilder let badge: (Entry) -> Badge
     /// 行尾的列。
     @ViewBuilder let columns: (Entry) -> Columns
+    /// 仅目录支持上传入口；默认 nil 保持分享文件树的原有行为。
+    var onUpload: ((Entry, [URL]) -> Void)? = nil
     @State private var loadAttempt = 0
 
     var body: some View {
@@ -37,7 +39,7 @@ struct FileTreeRow<Entry: FileTreeEntry, Badge: View, Columns: View>: View {
                     }
                     ForEach(children) { child in
                         FileTreeRow(node: child, tree: tree, isIncluded: isIncluded || tree.isSelected(node),
-                                    badge: badge, columns: columns)
+                                    badge: badge, columns: columns, onUpload: onUpload)
                     }
                 } else if let error = node.loadError {
                     HStack {
@@ -72,7 +74,20 @@ struct FileTreeRow<Entry: FileTreeEntry, Badge: View, Columns: View>: View {
         }
     }
 
-    private var label: some View {
+    @ViewBuilder private var label: some View {
+        if let entry = node.entry, entry.isDirectory, let onUpload {
+            rowLabel
+                .contextMenu { Button("上传到此文件夹") { onUpload(entry, []) } }
+                .dropDestination(for: URL.self) { urls, _ in
+                    let files = urls.filter(\.isFileURL)
+                    guard !files.isEmpty else { return false }
+                    onUpload(entry, files)
+                    return true
+                }
+        } else { rowLabel }
+    }
+
+    private var rowLabel: some View {
         let entry = node.entry
         return HStack {
             Toggle(isOn: Binding(get: { isIncluded || tree.isSelected(node) }, set: { tree.setSelected(node, $0) })) {

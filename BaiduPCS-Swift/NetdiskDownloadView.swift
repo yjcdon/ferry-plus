@@ -7,6 +7,16 @@ import UniformTypeIdentifiers
 struct NetdiskDownloadView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @State private var uploadTarget: UploadTarget?
+    @State private var uploadSubmitted = false
+    private struct UploadTarget: Identifiable {
+        let id = UUID()
+        let provider: Provider
+        let account: AccountKey
+        let session: ObjectIdentifier
+        let trail: [RemoteEntry]
+        let files: [URL]
+    }
     @State private var tree: FileTree<RemoteEntry>?
     @State private var treeAccount: AccountKey?
     @State private var treeSession: ObjectIdentifier?
@@ -83,6 +93,28 @@ struct NetdiskDownloadView: View {
             footer.padding()
         }
         .frame(minWidth: 600, idealWidth: 680, minHeight: 460, idealHeight: 620)
+        .sheet(item: $uploadTarget, onDismiss: {
+            if uploadSubmitted { dismiss() }
+            else { generation += 1 }
+        }) { target in
+            if model.accountKey(for: target.provider) == target.account,
+               model.coordinator.netdisks[target.provider].map({ ObjectIdentifier($0) }) == target.session {
+                UploadView(initialProvider: target.provider,
+                           initialDirectory: target.trail.last?.reference ?? Self.root(for: target.provider),
+                           files: target.files, initialTrail: target.trail) { files, account, destination, policy in
+                    try await model.addUpload(files: files, account: account, destination: destination, conflictPolicy: policy)
+                    uploadSubmitted = true
+                }
+                .environment(model)
+            } else {
+                ContentUnavailableView {
+                    Label("账号已变化", systemImage: "person.crop.circle.badge.exclamationmark")
+                } description: { Text("请关闭后在当前账号中重新选择上传目录。") } actions: {
+                    Button("关闭") { uploadTarget = nil }
+                }
+                .frame(width: 540, height: 320)
+            }
+        }
         .task(id: generation) { await load() }
         .task(id: candidate) { await loadCandidates(candidate) }
         .task(id: importRequest?.id) {
@@ -130,6 +162,9 @@ struct NetdiskDownloadView: View {
         HStack {
             Text("从我的网盘下载").font(.headline)
             Spacer()
+            Button { presentUpload(trail: [], files: []) } label: { Label("上传到根目录", systemImage: "arrow.up.doc") }
+                .labelStyle(.iconOnly)
+                .help("上传到根目录").disabled(!canPresentUpload)
             Button { generation += 1; resetIntegrity() } label: { Label("重新加载", systemImage: "arrow.clockwise") }
                 .labelStyle(.iconOnly).help("重新加载").disabled(isSubmitting)
         }
@@ -137,7 +172,16 @@ struct NetdiskDownloadView: View {
 
     @ViewBuilder private var content: some View {
         if let tree {
-            NetdiskBrowser(tree: tree, transferFolder: model.settings.transferFolder(for: provider)).id(ObjectIdentifier(tree))
+            NetdiskBrowser(tree: tree, transferFolder: model.settings.transferFolder(for: provider), onUpload: { entry, files in
+                guard let trail = directoryTrail(to: entry.reference, in: tree.root) else { return }
+                presentUpload(trail: trail, files: files)
+            }).id(ObjectIdentifier(tree))
+                .dropDestination(for: URL.self) { urls, _ in
+                    let files = urls.filter(\.isFileURL)
+                    guard !files.isEmpty, canPresentUpload else { return false }
+                    presentUpload(trail: [], files: files)
+                    return true
+                }
         } else if let errorMessage {
             ContentUnavailableView {
                 Label("无法读取网盘", systemImage: "exclamationmark.triangle")
@@ -147,6 +191,31 @@ struct NetdiskDownloadView: View {
                 } else { Button("重试") { generation += 1 } }
             }
         } else { ProgressView("正在读取网盘…") }
+    }
+
+    private var canPresentUpload: Bool {
+        !isSubmitting && tree != nil && treeAccount == model.accountKey(for: provider) &&
+        treeAccount != nil && treeSession == sessionIdentity && treeSession != nil
+    }
+
+    /// 浏览树中的目录引用和祖先来自同一已加载账号；勾选下载不会改变上传目标。
+    private func presentUpload(trail: [RemoteEntry], files: [URL]) {
+        guard canPresentUpload, uploadTarget == nil, let account = treeAccount, let session = treeSession else { return }
+        uploadSubmitted = false
+        uploadTarget = .init(provider: provider, account: account, session: session, trail: trail, files: files)
+    }
+
+    private func directoryTrail(to reference: RemoteReference, in node: FileNode<RemoteEntry>, ancestors: [RemoteEntry] = []) -> [RemoteEntry]? {
+        let trail = ancestors + (node.entry.map { [$0] } ?? [])
+        if node.entry?.reference == reference { return trail }
+        for child in node.children ?? [] {
+            if let result = directoryTrail(to: reference, in: child, ancestors: trail) { return result }
+        }
+        return nil
+    }
+
+    private static func root(for provider: Provider) -> RemoteReference {
+        provider == .baidu ? .baidu(path: "/", fsID: 0) : .quark(fid: "0")
     }
 
     private var footer: some View {
@@ -390,6 +459,7 @@ private struct NetdiskBrowser: View {
     let tree: FileTree<RemoteEntry>
     /// 设置中的转存目录。树中的这个目录显示“转存目录”标签。
     let transferFolder: String
+    let onUpload: (RemoteEntry, [URL]) -> Void
     @ScaledMetric private var dateWidth = 110
     @ScaledMetric private var sizeWidth = 72
     @State private var retryAttempt = 0
@@ -404,7 +474,7 @@ private struct NetdiskBrowser: View {
                     List {
                         Section {
                             ForEach(children) { node in
-                                FileTreeRow(node: node, tree: tree, isIncluded: false, badge: badge, columns: columns)
+                                FileTreeRow(node: node, tree: tree, isIncluded: false, badge: badge, columns: columns, onUpload: onUpload)
                             }
                         } header: {
                             columnHeaders

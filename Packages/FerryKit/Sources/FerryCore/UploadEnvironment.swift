@@ -15,6 +15,11 @@ public struct UploadEnvironment: Sendable {
     let inspectCommit: @Sendable (UploadCommit, UploadFile, RemoteReference) async throws -> UploadCommitInspection
     let releasePreparation: @Sendable (PreparedUpload) async throws -> Void
 
+    /// 在绑定账号的准确父目录下新建目录；失败可能已产生远端副作用，调用方不得自动重试。
+    public func makeDirectory(parent: RemoteReference, name: String) async throws -> RemoteReference {
+        try await createDirectory(parent, name)
+    }
+
     public init(destination: any UploadDestination,
                 listDirectory: @escaping @Sendable (RemoteReference) async throws -> [RemoteEntry],
                 createDirectory: @escaping @Sendable (RemoteReference, String) async throws -> RemoteReference,
