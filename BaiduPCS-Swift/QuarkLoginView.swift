@@ -103,7 +103,7 @@ struct QuarkLoginView: View {
     }
 }
 
-/// 账号菜单与设置共用的夸克状态及操作，避免不同入口各自维护登录。
+/// 账号二级菜单中的夸克状态及操作，登录状态仍由同一会话维护。
 struct QuarkAccountControls: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
@@ -116,20 +116,20 @@ struct QuarkAccountControls: View {
         Text(model.quark.state.title)
         if let problem = model.quark.problem { Text(problem).foregroundStyle(.orange) }
         if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
-        Button(model.quark.account == nil ? "登录夸克网盘…" : "重新登录夸克…") {
-            openWindow(id: QuarkLoginView.windowID)
-        }
-        if model.quark.account != nil {
-            Button("验证夸克登录状态") { Task { await model.quark.revalidate() } }
-                .disabled(isChecking)
-            Button("退出夸克登录") {
+        if model.quark.account == nil {
+            Button("登录…") { openWindow(id: QuarkLoginView.windowID) }
+        } else {
+            if case .expired = model.quark.state {
+                Button("重新登录…") { openWindow(id: QuarkLoginView.windowID) }
+            }
+            if case .problem = model.quark.state {
+                Button("重试") { Task { await model.quark.revalidate() } }
+            }
+            Button("退出登录") {
                 do { try model.quark.logOut(); errorMessage = nil }
                 catch { errorMessage = error.localizedDescription }
             }
         }
     }
 
-    private var isChecking: Bool {
-        if case .checking = model.quark.state { true } else { false }
-    }
 }

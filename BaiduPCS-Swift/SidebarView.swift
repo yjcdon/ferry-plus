@@ -97,11 +97,13 @@ private struct AccountView: View {
                     if let account = model.account {
                         Text(account.username.isEmpty ? "百度账号" : account.username)
                         Text(model.isLoginExpired ? "登录已失效" : "已登录")
-                        Button("重新登录百度…") { model.presentLogin() }
-                        Button("退出百度登录") { isConfirmingLogOut = model.requestLogOut() }
+                        if model.isLoginExpired {
+                            Button("重新登录…") { model.presentLogin() }
+                        }
+                        Button("退出登录") { isConfirmingLogOut = model.requestLogOut() }
                     } else {
                         Text("未登录")
-                        Button("登录百度网盘…") { model.presentLogin() }
+                        Button("登录…") { model.presentLogin() }
                     }
                 } label: {
                     Label("百度网盘 · \(model.account.map { $0.username.isEmpty ? "百度账号" : $0.username } ?? "未登录")", systemImage: "b.circle")

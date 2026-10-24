@@ -302,6 +302,7 @@ private struct AccountSettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openWindow) private var openWindow
     @State private var isConfirmingLogOut = false
+    @State private var quarkLogoutError: String?
 
     var body: some View {
         Form {
@@ -334,7 +335,36 @@ private struct AccountSettingsView: View {
                 Text("百度网盘")
             }
             Section("夸克网盘") {
-                QuarkAccountControls()
+                if let summary = model.quark.summary {
+                    LabeledContent("用户名", value: summary.name)
+                }
+                LabeledContent("状态") {
+                    if case .expired = model.quark.state {
+                        Label(model.quark.state.title, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                    } else {
+                        Text(model.quark.state.title)
+                    }
+                }
+                if let problem = model.quark.problem {
+                    Text(problem).foregroundStyle(.orange)
+                }
+                if let quarkLogoutError {
+                    Text(quarkLogoutError).foregroundStyle(.red)
+                }
+                HStack {
+                    Spacer()
+                    if model.quark.account == nil {
+                        Button("登录…") { openWindow(id: QuarkLoginView.windowID) }
+                    } else {
+                        if case .expired = model.quark.state {
+                            Button("重新登录…") { openWindow(id: QuarkLoginView.windowID) }
+                        } else if case .problem = model.quark.state {
+                            Button("重试") { Task { await model.quark.revalidate() } }
+                        }
+                        Button("退出登录", action: logOutQuark)
+                    }
+                }
             }
         }
         .formStyle(.grouped)
@@ -344,5 +374,13 @@ private struct AccountSettingsView: View {
     private func showLogin() {
         openWindow(id: ContentView.windowID)
         model.presentLogin()
+    }
+
+    /// 退出夸克后保留百度会话；凭据删除失败时在对应账号区域说明原因。
+    private func logOutQuark() {
+        do {
+            try model.quark.logOut()
+            quarkLogoutError = nil
+        } catch { quarkLogoutError = error.localizedDescription }
     }
 }
