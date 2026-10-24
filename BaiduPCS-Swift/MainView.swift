@@ -367,7 +367,7 @@ private struct TransferInspector: View {
                 Section {
                     Text(job.title).font(.headline).textSelection(.enabled)
                     LabeledContent("账号", value: "\(job.account.provider.title) · \(job.accountName)")
-                    LabeledContent("阶段", value: job.isPaused ? "已暂停 · \(job.phase.displayName)" : job.phase.displayName)
+                    LabeledContent("阶段", value: job.batchStatusText)
                     LabeledContent("已完成 / 失败 / 跳过", value: "\(job.completedCount) / \(job.failedCount) / \(job.skippedCount)")
                     if let error = job.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
                 }

@@ -996,7 +996,7 @@ final class AppModel {
         switch job.phase {
         case .completed: content.title = "上传完成"
         case .skipped: content.title = "上传结束，文件已跳过"
-        default: content.title = job.completedCount > 0 ? "上传结束，部分文件未成功" : "上传失败"
+        default: content.title = job.hasPartialFailure ? "上传结束，部分文件未成功" : "上传失败"
         }
         content.body = job.account.provider.title + " · " + job.title +
             " · 完成 \(job.completedCount)，失败 \(job.failedCount)，跳过 \(job.skippedCount)"

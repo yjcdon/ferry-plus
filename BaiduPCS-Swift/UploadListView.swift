@@ -21,6 +21,19 @@ extension UploadPhase {
     }
 }
 
+extension UploadJob {
+    /// 批次已有失败项且另有完成或跳过项时显示部分失败，执行阶段仍保留原 failed 语义。
+    var hasPartialFailure: Bool {
+        phase == .failed && failedCount > 0 && (completedCount > 0 || skippedCount > 0)
+    }
+
+    /// 批次状态在列表、明细及详情栏共用；单个文件仍展示自身阶段。
+    var batchStatusText: String {
+        let title = hasPartialFailure ? "部分失败" : phase.displayName
+        return isPaused ? "已暂停 · \(title)" : title
+    }
+}
+
 /// 上传的可用操作统一供列表、菜单、工具栏和详情使用，实际状态仍由 coordinator 持有。
 enum UploadAction {
     case pause, resume, retry, cancel, remove, prioritize, reconcile
@@ -49,7 +62,7 @@ struct UploadRow: View {
                 HStack {
                     Text(job.title).font(.headline).lineLimit(1).truncationMode(.middle)
                     Spacer()
-                    Text(job.isPaused ? "已暂停 · \(job.phase.displayName)" : job.phase.displayName)
+                    Text(job.batchStatusText)
                         .font(.caption).foregroundStyle(.secondary)
                 }
                 if let verification = job.verificationProgress {
@@ -171,6 +184,9 @@ struct UploadFilesView: View {
         VStack(spacing: 0) {
             HStack {
                 Text(title).font(.headline).lineLimit(1).truncationMode(.middle)
+                if let job {
+                    Text(job.batchStatusText).font(.caption).foregroundStyle(.secondary)
+                }
                 Spacer()
                 if isPreparingExport { ProgressView().controlSize(.small) }
                 Button("导出已校验摘要…") {
