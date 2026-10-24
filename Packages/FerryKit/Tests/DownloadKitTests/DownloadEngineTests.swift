@@ -913,7 +913,9 @@ private let megabyte = 1 << 20
         await engine.pause(id: "manual.bin")
         try await waitUntil("runtime checkpoint bytes") { await engine.snapshot(id: "runtime.bin")?.receivedBytes == Int64(128 * kilobyte) }
         await engine.suspendExecution()
-        #expect(fixture.server.activeRequests == 0)
+        // URLSession 已交付取消完成时，StubServer 的独立线程可能仍在退出 1 ms 停顿循环。
+        // 等它实际归零后再继续，超时仍报错；不把服务器线程调度当成引擎同步返回合同。
+        try await waitUntil("suspended server request to finish") { fixture.server.activeRequests == 0 }
         #expect(await engine.snapshot(id: "runtime.bin")?.state == .queued)
         #expect(await engine.snapshot(id: "manual.bin")?.state == .paused)
         let saved = try #require(try fixture.savedRecords().first { $0.request.id == "runtime.bin" })

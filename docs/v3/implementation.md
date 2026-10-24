@@ -362,3 +362,7 @@ Release 构建 `.build/v3-inspector-final-build.log` 通过。Computer Use 在�
 跳过目录时，其未完成后代同步标记为跳过，不再因缺少目标父目录产生失败，也不再发出远端写入。恢复已保存的跳过目录时应用相同规则；已完成、已跳过及已取消的后代保留原终态。利用扫描的父先子后顺序和祖先组件集合查询，避免逐项扫描所有跳过目录。
 
 独立当前源码验证整棵子树跳过、旧 missingParent 失败重试恢复及 `FooBar` 不受 `Foo/` 影响三项通过，受跳过范围远端写入为零：`.build/v3-directory-skip-validation/report.md`。包含该补丁的 Release App 构建通过：`.build/v3-preflight-bounded-skip-app-build.log`；此前 307 项测试不作为该新增分支的覆盖证据。
+
+## 暂停验收的服务器收尾观察
+
+补跑发现运行时暂停用例偶发在请求取消已完成、StubServer 独立线程尚未退出其 1 ms 停顿循环时，立即读取活动请求数。生产引擎仍等待 worker、URLSession 完成回调及检查点收尾；测试改为复用既有有界 waitUntil，等待服务器线程实际归零，超时仍失败，与现有暂停及共享预算用例保持一致。没有改变生产暂停逻辑或放宽资源数量要求。修改后完整 307 项既有测试通过：`.build/v3-preflight-directory-recheck-tests.log`，首次失败证据保留于 `.build/v3-preflight-directory-tests.log`。
