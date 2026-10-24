@@ -1,31 +1,31 @@
 # Ferry Plus 3.0 架构设计
 
-状态：目标设计，实施进度见执行记录。日期：2026-10-24。初始代码基线：`692acb6`。产品输入为 [3.0 功能清单](features.md) V3-F01～V3-F25。
+状态：目标设计与当前实现对应，实施进度见执行记录。更新日期：2026-10-25。产品输入为 [3.0 功能清单](features.md) V3-F01～V3-F25。
 
 ## 1. 技术结论与当前事实
 
 沿用轻量策略：百度、夸克分别适配上传协议，共用上传调度、持久化、校验和界面投影。保留现有 DownloadKit 与下载 JobCoordinator；上传不伪装为分享转存，不给每家复制一套任务系统。维持当前四个 Swift Package target，新增上传业务放在 FerryCore。
 
-| 当前位置 | 已存在的能力与本版影响 |
+| 当前位置 | 当前职责与事实 |
 | --- | --- |
-| `BaiduPCS-Swift/AppModel.swift`、`QuarkAccountSession.swift` | 双账号和会话生命周期；需要把会话变化传给上传调度，仍由此处持有凭据 |
-| `FerryCore/Netdisk.swift`、两家 Netdisk 适配器 | 分享、目录、转存与清理；增加上传所需目录操作时检查全部调用方，不改变现有下载源的只读规则 |
-| `FerryCore/Job.swift`、`JobCoordinator.swift`、`JobStore.swift` | 当前均围绕下载任务；保留下载身份和恢复路径，新增独立 UploadJob／UploadCoordinator，不扩大现有 Source 为含糊的通用操作枚举 |
-| `DownloadKit/FileTransfer.swift` | 已有 Range、长度和可选 MD5 检查；新增强类型校验依据、SHA-256、校验事件及未验证结果，不能只复用完成状态 |
-| `FerryCore/RoutedDownloadSource.swift` | 账号与会话版本隔离；夸克解析时目前检查大小，需补全校验依据及版本变化处理 |
-| `BaiduKit/Models.swift`、`FerryCore/BaiduNetdisk.swift` | 当前百度列表模型和转换没有传递完整文件校验值，需要核实接口语义后补齐 |
-| `QuarkKit/QuarkClient.swift`、`QuarkNetdisk.swift` | 目录和下载结果具有可选 MD5；仍需核实摘要作用范围和来源，不把任意服务端字段一律视为原始 MD5 |
-| `FerryCore/FerrySettings.swift` | 当前下载连接预算上限为 20；本版将预算覆盖上传与校验回读，保留旧配置语义 |
-| `.build/` 独立上传探针 | 小文件、六分片上传和完整回读通过；不是正式引擎，不证明续传、覆盖、取消等能力已实现 |
+| `BaiduPCS-Swift/AppModel.swift`、`QuarkAccountSession.swift` | 双账号与会话生命周期，向上传调度传递全局／单网盘运行时阻断，凭据仍由此处管理 |
+| `FerryCore/Netdisk.swift`、两家 Netdisk 适配器 | 分享、目录、转存、精确对象移入回收站；下载本身不删除账号内原件 |
+| `FerryCore/Job.swift`、`JobCoordinator.swift`、`JobStore.swift` | 下载身份、恢复和校验依据；独立 UploadJob／UploadCoordinator 处理上传，没有扩大下载 Source 枚举 |
+| `DownloadKit/FileTransfer.swift` | Range、长度、期望 SHA-256／MD5 的最终落盘校验；不把无基准完成当作内容已验证 |
+| `FerryCore/RoutedDownloadSource.swift` | 按账号与会话版本解析地址，检查夸克返回的文件长度；完整内容比对由期望摘要及最终校验处理 |
+| `BaiduKit/Models.swift`、`FerryCore/BaiduNetdisk.swift` | 百度列表不补造缺失的完整文件摘要；可使用关联原上传 SHA-256 或用户提供依据 |
+| `QuarkKit/QuarkClient.swift`、`QuarkNetdisk.swift` | 传递来源明确的可选文件 MD5；OSS 分片 ETag 不用作完整文件基准 |
+| `FerryCore/FerrySettings.swift`、DownloadKit `TransferBudget` | 上传、下载及回读共享连接预算，上传／下载分别限速，保留旧设置语义 |
+| `FerryCore/UploadEngine.swift`、`UploadCoordinator.swift`、`IntegrityService.swift` | 正式分片执行、持久化与完整 SHA-256 回读；未决副作用和安全覆盖仍有明确未完成边界 |
 
-源码目录均位于 `Packages/FerryKit/Sources/`，应用目录除外。详细实测证据见 [上传验证](../upload-validation.md)。
+源码目录均位于 `Packages/FerryKit/Sources/`，应用目录除外。最初协议可行性见 [上传验证](../upload-validation.md)，当前实现和实测证据见 [执行记录](implementation.md)。
 
 ## 2. 职责与依赖
 
 ```mermaid
 flowchart TD
     UI[SwiftUI 与系统命令] --> APP[AppModel：账号与应用操作]
-    APP --> VIEW[TransferController：列表投影与命令路由]
+    APP --> VIEW[MainView／TransferSelection：列表投影与命令路由]
     VIEW --> DOWN[现有 JobCoordinator]
     VIEW --> UP[UploadCoordinator]
     DOWN --> DK[DownloadKit 下载引擎]
@@ -44,9 +44,9 @@ flowchart TD
 | 所有者 | 职责及状态 |
 | --- | --- |
 | AppModel／账号会话 | 登录、Keychain、会话版本、目录授权；所有执行以 AccountKey 为准 |
-| TransferController（FerryCore） | 合并两类只读快照、筛选、选中项及命令分派；不另存一份任务执行状态 |
+| MainView／TransferListItem／TransferSelection（应用层） | 合并两类只读快照、筛选、选中项及命令分派；不另存一份任务执行状态 |
 | UploadCoordinator（FerryCore） | 批次、文件清单、冲突决策、阶段推进、恢复核对、发布和结果；原子保存批次记录 |
-| UploadEngine（FerryCore/Upload） | 文件级分片调度、确认回执、签名刷新、有限重试；只经 UploadDestination 访问网盘 |
+| UploadEngine（FerryCore） | 文件级分片调度、确认回执、签名刷新、有限重试；只经 UploadDestination 访问网盘 |
 | BaiduUploadDestination／QuarkUploadDestination | 公共请求和原生接口之间转换；分页、会话、回执和服务端错误语义属于各自实现 |
 | IntegrityService（FerryCore） | 基准选择、上传回读、校验记录和版本关联；调用现有账号下载地址解析，不往用户下载列表创建隐藏任务 |
 | DownloadKit 通用设施 | 可流式消费的范围读取、摘要计算、资源许可与速率预算；不识别网盘和账号。现有下载消费者仍写临时文件，回读消费者只计算摘要 |
@@ -71,7 +71,7 @@ flowchart TD
 | V3-F11 | 调度与错误分类 | 失败阶段、服务端错误、重试次数 | 已成功文件不重传 |
 | V3-F12 | 冲突／发布流程 | 原对象、暂存对象、替换意图和结果 | 新内容校验失败不破坏旧内容 |
 | V3-F13 | 添加任务与清单索引 | 账号、目标、源身份／摘要 | 同名不同内容不误去重 |
-| V3-F14 | TransferController | 带方向的任务 ID 快照、取消意图 | 操作不越过筛选范围，取消不误删 |
+| V3-F14 | MainView／TransferSelection | 带方向的任务 ID 快照、取消意图 | 操作不越过筛选范围，取消不误删 |
 | V3-F15 | 两种快照与详情 | 阶段、逻辑字节、实际网络流量、计数 | 回读不重复计算上传进度 |
 | V3-F16 | 结果面板 | 本地 bookmark、远端父引用、错误及校验记录 | 打开对应位置，丢失文件有提示 |
 | V3-F17 | 网络配置与共享预算 | 代理 revision、上传／下载速率桶 | 回读受下载限速，重试不绕过预算 |
@@ -205,12 +205,13 @@ UploadCoordinator 在运行时保存当前回读文件、已读字节和总字�
 
 新增上传与校验记录不改动 2.0 下载 ID 和临时路径。升级前备份受影响下载元数据；新格式有独立版本，未知版本明确报错并保留数据。完成记录缺校验依据就标为历史未验证。回退 2.0 只能使用升级前下载备份，不能同时让两个版本写同一状态目录；3.0 上传进度不承诺由 2.0 读取。Keychain 服务名、固定签名和应用身份保持一致。
 
-| 待验证能力 | 已知证据 | 实现／发布门槛 |
+| 能力 | 当前证据 | 剩余实现／发布门槛 |
 | --- | --- | --- |
-| 空文件、空目录、秒传及账号大小限制 | 基础随机样本未覆盖 | 两家分别实测并记录准确语义 |
-| 上传会话查询、跨进程续传与过期 | 已验证分片发送及合并，未验证生产恢复 | 保存真实回执后中断并恢复；过期与未决结果不能误重传 |
-| 安全覆盖与并发冲突 | 未验证替换接口 | 先证明旧版本可恢复及不会误覆盖外部更新，否则报告范围阻断，不偷换为先删后传 |
-| 远端摘要及版本语义 | 夸克有可选字段，百度未接入模型 | 明确算法和作用范围；缺失走未验证状态，不能制造基准 |
-| 限速、资源和大文件 | 仅约 20 MiB 探针 | 正式引擎多 GiB、混合负载及低速链路实测 |
+| 空文件、空目录、非空秒传 | 两家正式上传、完整回读及部分实际 App 验收已通过；非空秒传见 T08 执行记录 | 账号权益和文件上限仍以可获取信息及服务端拒绝为准，不能外推所有大小能力 |
+| 有效会话续传、过期及未知提交 | 两家跨进程复用原会话、只补剩余片并完整回读通过；提交意图和准确对象查询已接入 | 缺失对象不能证明先前未提交；过期自动重建、未知准备／建目录／合并核对及远端 abort 仍待闭环，T07／T10 未完成 |
+| 安全覆盖与并发冲突 | 已验证部分名称冲突拒绝和百度一条更新路径；尚无满足条件版本保护及旧内容恢复的完整证据 | 两家均需证明服务端条件发布和旧内容可恢复；保持发布阻断，不能以保留两份或仅事前查询代替 |
+| 摘要及版本语义 | 已接入原上传 SHA-256、用户基准、来源明确的完整 MD5、冲突拒绝及版本化校验记录 | 无可靠远端版本时保留原始依据并实际比较，不仅凭文件 ID 沿用历史通过结果；无依据明确未验证 |
+| 限速、资源和大文件 | 已有六路实际云端混合传输／代理替换、低速链路、流式内存修复及空闲 App 观测 | 原多 GiB 上传按用户要求保持暂停，不重复等待；完整混合负载峰值、结束资源释放和最终 App／ZIP 仍由 T17／T19 验收 |
+| 实际界面与生命周期 | 两家部分上传、回读、删除、目录及升级验证已有记录；最新修复已构建 | 拖放／换号／浅深色等完整 GUI 与物理睡眠仍未验收；Mac 锁屏阻断实际界面操作，T13／T15／T18 不勾选 |
 
-技术验证按 [任务清单](tasks.md) 执行：先接口门槛，再协议和恢复，再 UI 与资源验收。复用现有会话、已有测试和受控验证入口，不新增测试类；真实文件和目录操作的证据保留供人工复核，不以静态检查代替现场结果。本次文档审查只验证方案一致性，不计入上述能力完成。
+技术验证按 [任务清单](tasks.md) 执行：先接口门槛，再协议和恢复，再 UI 与资源验收。复用现有会话、已有测试和受控验证入口，不新增测试类；真实文件和目录操作的证据保留供人工复核，不以静态检查代替现场结果。静态审查、隔离验证和实际 App 操作各自保留证据范围；完成状态按每项完整验收标准判断。
