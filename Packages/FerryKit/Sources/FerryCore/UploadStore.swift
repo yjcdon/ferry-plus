@@ -1,0 +1,172 @@
+import Foundation
+
+/// 单个批次元数据与每文件检查点分别原子写入；调用方先保存意图，再发服务端请求。
+/// actor 串行化本进程写入，不支持多个应用进程同时写同一状态目录。
+public actor UploadStore {
+    public let directory: URL
+
+    public init(directory: URL = FerryDirectories.applicationSupport.appendingPathComponent("Uploads", isDirectory: true)) {
+        self.directory = directory
+    }
+
+    /// 枚举批次摘要，不载入完整文件清单或分片；有坏记录时显式失败并保留原文件。
+    public func loadJobs() throws -> [UploadJob] {
+        guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
+        let folders = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        var result: [UploadJob] = []
+        for folder in folders where UUID(uuidString: folder.lastPathComponent) != nil {
+            let url = folder.appendingPathComponent("job.json")
+            // 创建未完成的暂存目录没有 manifest，不能作为可恢复批次展示。
+            guard FileManager.default.fileExists(atPath: url.path) else { continue }
+            let job: UploadJob = try UploadDiskRecord.read(at: url)
+            try job.validate()
+            guard folder.lastPathComponent == job.id.uuidString else { throw UploadRecordError.invalid("批次目录与记录 ID 不一致") }
+            result.append(job)
+        }
+        return result.sorted { $0.createdAt < $1.createdAt }
+    }
+
+    public func loadJob(id: UUID) throws -> UploadJob {
+        let job: UploadJob = try UploadDiskRecord.read(at: jobURL(id))
+        try job.validate()
+        guard job.id == id else { throw UploadRecordError.invalid("批次 ID 不一致") }
+        return job
+    }
+
+    /// 扫描时逐项写入；manifest 最后发布，未发布的记录不会进入任务列表。
+    public func stageFile(_ file: UploadFile, account: AccountKey) throws {
+        if FileManager.default.fileExists(atPath: jobURL(file.jobID).path) {
+            let published = try loadJob(id: file.jobID)
+            guard published.account == account else { throw UploadRecordError.invalid("上传文件账号与已发布批次不一致") }
+        }
+        try file.validate(account: account)
+        try UploadDiskRecord.write(file, at: fileURL(jobID: file.jobID, fileID: file.id))
+    }
+
+    /// 发布批次前确认全部文件检查点已经落盘，避免 manifest 指向不存在的记录。
+    public func saveJob(_ job: UploadJob) throws {
+        try job.validate()
+        let existing: UploadJob? = FileManager.default.fileExists(atPath: jobURL(job.id).path) ? try loadJob(id: job.id) : nil
+        if let existing, existing.account != job.account {
+            throw UploadRecordError.invalid("已发布批次不能更换账号")
+        }
+        let existingIDs = Set(existing?.fileIDs ?? [])
+        for id in job.fileIDs where !existingIDs.contains(id) {
+            _ = try readFile(id: id, in: job)
+        }
+        try UploadDiskRecord.write(job, at: jobURL(job.id))
+    }
+
+    /// 每次仅加载一个文件；账号和文件归属在存储边界校验。
+    public func loadFile(id: UUID, in job: UploadJob) throws -> UploadFile {
+        let published = try publishedJob(for: job)
+        return try readFile(id: id, in: published)
+    }
+
+    /// 保存已发布批次的文件状态；不隐式变更聚合，聚合由调度器按检查点重建。
+    public func saveFile(_ file: UploadFile, in job: UploadJob) throws {
+        let published = try publishedJob(for: job)
+        guard file.jobID == published.id, published.fileIDs.contains(file.id) else {
+            throw UploadRecordError.invalid("文件不属于当前批次")
+        }
+        try file.validate(account: published.account)
+        try UploadDiskRecord.write(file, at: fileURL(jobID: published.id, fileID: file.id))
+    }
+
+    /// 仅移除本地任务记录；调用方必须先处理在途请求和未决服务端副作用。
+    /// 校验记录独立存储，源文件与云端文件均不受影响。
+    public func moveJobToTrash(id: UUID) throws {
+        try FileManager.default.trashItem(at: jobDirectory(id), resultingItemURL: nil)
+    }
+
+    /// 调用方快照可以过时，账号归属和文件成员以已落盘 manifest 为准。
+    private func publishedJob(for job: UploadJob) throws -> UploadJob {
+        let published = try loadJob(id: job.id)
+        guard published.account == job.account else { throw UploadRecordError.invalid("上传文件账号与已发布批次不一致") }
+        return published
+    }
+
+    /// 发布 manifest 前也需读取新增文件，故与已发布批次的归属检查分开。
+    private func readFile(id: UUID, in job: UploadJob) throws -> UploadFile {
+        guard job.fileIDs.contains(id) else { throw UploadRecordError.invalid("文件不属于当前批次") }
+        let file: UploadFile = try UploadDiskRecord.read(at: fileURL(jobID: job.id, fileID: id))
+        guard file.id == id, file.jobID == job.id else { throw UploadRecordError.invalid("上传文件 ID 不一致") }
+        try file.validate(account: job.account)
+        return file
+    }
+
+    private func jobDirectory(_ id: UUID) -> URL { directory.appendingPathComponent(id.uuidString, isDirectory: true) }
+    private func jobURL(_ id: UUID) -> URL { jobDirectory(id).appendingPathComponent("job.json") }
+    private func fileURL(jobID: UUID, fileID: UUID) -> URL {
+        jobDirectory(jobID).appendingPathComponent("Files", isDirectory: true).appendingPathComponent(fileID.uuidString + ".json")
+    }
+}
+
+/// 独立校验库可在任务移除后继续用于下载比较；关联必须同时满足账号、精确身份和版本。
+public actor IntegrityStore {
+    public let directory: URL
+
+    public init(directory: URL = FerryDirectories.applicationSupport.appendingPathComponent("Integrity", isDirectory: true)) {
+        self.directory = directory
+    }
+
+    public func save(_ record: IntegrityRecord) throws {
+        try record.validate()
+        try UploadDiskRecord.write(record, at: recordURL(record.id))
+    }
+
+    public func load(id: UUID) throws -> IntegrityRecord {
+        let record: IntegrityRecord = try UploadDiskRecord.read(at: recordURL(id))
+        try record.validate()
+        guard record.id == id else { throw UploadRecordError.invalid("校验记录 ID 不一致") }
+        return record
+    }
+
+    /// 版本未知时不将历史记录自动当作当前原始基准，调用方可展示候选让用户指定。
+    public func matching(account: AccountKey, reference: RemoteReference, remoteVersion: String) throws -> [IntegrityRecord] {
+        guard !remoteVersion.isEmpty else { throw UploadRecordError.invalid("校验关联缺少远端版本") }
+        guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
+        let urls = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+        var matches: [IntegrityRecord] = []
+        for url in urls where url.pathExtension == "json" {
+            let record: IntegrityRecord = try UploadDiskRecord.read(at: url)
+            try record.validate()
+            if record.account == account, record.reference == reference, record.remoteVersion == remoteVersion {
+                matches.append(record)
+            }
+        }
+        return matches
+    }
+
+    /// 明确清理校验依据时才移入废纸篓，不随上传记录删除。
+    public func moveToTrash(id: UUID) throws {
+        try FileManager.default.trashItem(at: recordURL(id), resultingItemURL: nil)
+    }
+
+    private func recordURL(_ id: UUID) -> URL { directory.appendingPathComponent(id.uuidString + ".json") }
+}
+
+private struct UploadDiskRecord<Value: Codable>: Codable {
+    let version: Int
+    let value: Value
+    init(value: Value) { version = 1; self.value = value }
+
+    private enum CodingKeys: String, CodingKey { case version, value }
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        version = try container.decode(Int.self, forKey: .version)
+        guard version == 1 else { throw UploadRecordError.unsupportedVersion(version) }
+        value = try container.decode(Value.self, forKey: .value)
+    }
+
+    static func read(at url: URL) throws -> Value {
+        try JSONDecoder().decode(Self.self, from: Data(contentsOf: url)).value
+    }
+
+    static func write(_ value: Value, at url: URL) throws {
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        try encoder.encode(Self(value: value)).write(to: url, options: .atomic)
+    }
+}
