@@ -12,7 +12,7 @@ Release 已复制到 `/Applications/Ferry Plus.app`，通过 Computer Use 从该
 
 当前安装版磁盘占用 6052 KiB，原版 Ferry 为 8984 KiB；此前安装测量为 6052 KiB，属于重建前产物。架构范围不同，不能把全部差值归因于优化。清理本次测试任务后，支持数据占用 8 KiB，应用 HTTP 存储占用 168 KiB，应用专属 Caches／WebKit 目录不存在。测试下载均通过 App 移到废纸篓，任务列表为空；测试 SOCKS 进程已停止、代理恢复系统模式、测试草稿清空。
 
-本地产物已准备，待 T-18／T-19 最终收口：安装 App 为 `/Applications/Ferry Plus.app`，构建副本为 `.build/Ferry Plus.app`，传输包为 `.build/delivery/Ferry-Plus-1.0-arm64.zip`，校验文件为同目录的 `Ferry-Plus-1.0-arm64.zip.sha256`。ZIP 的 SHA-256 为 `de833d80273fa2d61b333bffdae177141bf17ed7ad1651f147b0c23ad9e23d44`，主可执行文件的 SHA-256 为 `24b55f087569cd3bd3adb0e1ed0c3a06318730bc0170e905c7435b9bc42b78f7`；校验文件使用 ZIP 相对文件名，已在产物目录执行 `shasum -a 256 -c Ferry-Plus-1.0-arm64.zip.sha256` 通过。ZIP 内可执行文件与安装版哈希一致，严格签名校验通过；本地准备不代表已推送或发布。
+按用户要求将版本提升为 2.0 并发布；T-18／T-19 的剩余验证继续保留待验收状态。发布产物：安装 App 为 `/Applications/Ferry Plus.app`，构建副本为 `.build/Ferry Plus.app`，传输包为 `.build/delivery/Ferry-Plus-2.0-arm64.zip`，校验文件为同目录的 `Ferry-Plus-2.0-arm64.zip.sha256`。ZIP 的 SHA-256 为 `6707b4138346e09d6d2f5b496a2d82857d0b3eacc9be228f5e8a713db177c485`，主可执行文件的 SHA-256 为 `14f8b41884d00906564aea06f91780a77bed9c2d7625855a30354a312347cc2c`；校验文件使用 ZIP 相对文件名，已在产物目录执行 `shasum -a 256 -c Ferry-Plus-2.0-arm64.zip.sha256` 通过。ZIP 内可执行文件与安装版哈希一致，严格签名校验通过；本地准备不代表已推送或发布。
 
 安装进程空闲 20 秒、每两秒采样一次，CPU 均为 0.0%，RSS 为 186880～186928 KiB，没有持续增长。此数值是常驻集，不等同于实际独占内存；`leaks` 报告物理占用 83.7 MB、峰值 135.8 MB。工具在受限 Release 进程上报告 185 个、共 8880 字节的 `NSAccessibilityCustomAction` 对象，未报告文件树、客户端或下载任务持有链；受工具限制，不能据此声明绝对零泄漏。重复文件树开关和上述六次登录页开关已检查主进程、WebKit 辅助进程及关闭后的空闲区间，未观察到按打开次数累积的辅助进程或持续 CPU 负载；证据不外推为任意时长、任意任务规模下的资源保证。
 
