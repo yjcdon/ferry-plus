@@ -356,3 +356,9 @@ Release 构建 `.build/v3-inspector-final-build.log` 通过。Computer Use 在�
 选择源文件后只扫描元数据，显示文件数、文件夹数、总大小、可用容量与根项目同名预览，不读取文件正文或缓存完整递归清单。夸克通过当前会话查询容量；百度容量和两家单文件上限在没有可靠字段时显示未知。已知容量不足及源问题阻止提交；跳过策略下目录合并保留空间需求上下界，子目录冲突仍在执行时检查。错误只保存前 20 条及完整计数，整个展开区域限制为 120 点滚动，避免大量问题撑出窗口。
 
 元数据、重叠选择、隐藏文件、空目录、容量、冲突、符号链接、取消及 2 GiB 稀疏文件等九项隔离检查通过：`.build/upload-preflight-validation/result.txt`。307 项既有测试通过（`.build/v3-preflight-recovery-tests.log`）。最终 Release 构建通过（`.build/v3-preflight-bounded-skip-app-build.log`）；实际 App 两家显示 4 文件、2 文件夹、16 KB，夸克显示真实可用容量；25 个符号链接问题阻止上传，展开后标题和底部取消／上传按钮均可见。检查均取消，没有提交这些无效源。
+
+## 同名目录跳过传播
+
+跳过目录时，其未完成后代同步标记为跳过，不再因缺少目标父目录产生失败，也不再发出远端写入。恢复已保存的跳过目录时应用相同规则；已完成、已跳过及已取消的后代保留原终态。利用扫描的父先子后顺序和祖先组件集合查询，避免逐项扫描所有跳过目录。
+
+独立当前源码验证整棵子树跳过、旧 missingParent 失败重试恢复及 `FooBar` 不受 `Foo/` 影响三项通过，受跳过范围远端写入为零：`.build/v3-directory-skip-validation/report.md`。包含该补丁的 Release App 构建通过：`.build/v3-preflight-bounded-skip-app-build.log`；此前 307 项测试不作为该新增分支的覆盖证据。

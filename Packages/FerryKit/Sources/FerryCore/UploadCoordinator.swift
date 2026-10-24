@@ -459,15 +459,30 @@ public actor UploadCoordinator {
             let env = try await environment(job.account)
             guard env.destination.account == job.account else { throw UploadDestinationError.otherAccount }
             var directories: [String: RemoteReference] = ["": job.destination]
+            var skippedDirectories: Set<String> = []
             for fileID in job.fileIDs {
                 try Task.checkCancellation()
                 var file = try await store.loadFile(id: fileID, in: job)
                 if file.isDirectory, let ref = file.remoteReference { directories[file.relativePath] = ref }
+                if file.isDirectory, file.phase == .skipped { skippedDirectories.insert(file.relativePath) }
+                if ![.completed, .skipped, .cancelled].contains(file.phase) {
+                    // 父先子后的扫描顺序保证祖先状态已知；按组件逐层查 Set，不扫描全部跳过目录。
+                    var ancestor = (file.relativePath as NSString).deletingLastPathComponent
+                    while !ancestor.isEmpty {
+                        if skippedDirectories.contains(ancestor) {
+                            file.phase = .skipped; file.failedPhase = nil; file.error = nil
+                            try await saveFile(file)
+                            break
+                        }
+                        ancestor = (ancestor as NSString).deletingLastPathComponent
+                    }
+                }
                 if [.completed, .skipped, .cancelled, .failed].contains(file.phase) { continue }
                 let parentPath = file.relativePath.split(separator: "/").dropLast().joined(separator: "/")
                 do {
                     guard let parent = directories[parentPath] else { throw UploadCoordinatorError.missingParent(parentPath) }
                     try await process(&file, jobID: id, parent: parent, environment: env)
+                    if file.isDirectory, file.phase == .skipped { skippedDirectories.insert(file.relativePath) }
                     if file.isDirectory, let ref = file.remoteReference { directories[file.relativePath] = ref }
                 } catch {
                     if error is CancellationError || Task.isCancelled { throw CancellationError() }
