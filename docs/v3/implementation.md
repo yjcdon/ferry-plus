@@ -63,3 +63,22 @@ DownloadKit 新增 `TransferBudget`：可取消的 FIFO 连接许可、异常自
 3. 实现上传窗口、选定网盘后拖动上传和统一列表，重新构建 App 后进行实际 Computer Use 验收。
 
 安全覆盖仍需要证明并发保护与旧版本恢复同时成立。当前参考接口未提供充分的条件版本更新契约，不能仅凭备份或按 ID 操作就认定已解决；此项按 V3-T01／V3-T09 继续验证，不缩减原定范围。
+
+## 正式接口跨进程续传与回读
+
+2026-10-24 18:39～18:41（Asia/Shanghai），两个独立进程完成真实恢复验证。每家一份新随机 4194305 字节样本：首进程 PID 16105 各发送首片 4194304 字节并退出；次进程 PID 16175 复用原上传会话，不重新预创建，仅发送末片 1 字节，再合并并完整回读。两阶段记录的会话指纹一致，不导出原始 uploadID。
+
+| 网盘 | 首进程／次进程实际分片 | 完整回读 SHA-256 |
+| --- | --- | --- |
+| 百度 | part 0／part 1 | `3772e67bcef0131687baaba62b5386c647381dc983fda6541335c970ca71a32b` |
+| 夸克 | part 1／part 2 | `bedc0be3175dd2930b3873bfddf97c1bd983fa4ccd803b7e3f39c05b4a7add5b` |
+
+256 KiB 范围回读逐段检查 Content-Range 和原始字节，并计算全文件 SHA-256；夸克使用预分配 FID 核对目标。两家同名专用测试目录 `FerryPlus-V3-Resume-33D370BD-5C23-417D-9134-C6DF8AB2249B` 分别核对对象身份后移入回收站，根目录查询确认消失。仅用于此次夸克恢复的 Keychain 临时条目已删除，查询返回不存在。两个进程均退出码 0。
+
+证据：`.build/v3-resume-probe/first.jsonl`、`second.jsonl`、`manifest.json` 和构建／程序源码。此记录证明有效原会话跨进程继续；不证明过期会话永久可续、不证明服务端列片查询或未知提交结果自动核对，正式 UploadCoordinator 仍待接入。
+
+## 首次完整 App 构建复核
+
+使用当前 27.0 SDK 的包构建和测试通过，但 App 编译缺少 `SwiftUIMacros.StateMacro` 插件；未通过修改业务 State 属性规避。改用仓库既定的 26.5 SDK 执行 `env FERRY_BUILD_CONFIGURATION=release bash Scripts/build-app.sh`，完整 App 编译、固定证书签名和严格验签均通过。新 App 为 arm64，目录 7004 KiB；已安装 2.0 为 6052 KiB，本轮增长 952 KiB。
+
+通过 Computer Use 确认安装版没有任务后，正常退出旧进程 7026，再按构建产物完整路径启动新 App，PID 16456。主窗口正常显示零任务，账号菜单恢复百度和夸克原账号，各提供退出登录，没有要求重新登录或钥匙串密码。此次仅是基础改动后的启动／账号回归，不计为上传界面、拖动上传或完整 V3-T18 验收通过。日志：`.build/v3-app-build.log`（27.0 失败原因）、`v3-app-build-26.5.log`（成功）。
