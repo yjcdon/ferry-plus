@@ -30,6 +30,8 @@ final class AppModel {
     /// 上传列表仅是编排器事件的只读投影，执行状态由编排器保存。
     private(set) var uploadJobs: [UploadJob] = []
     var uploadProblem: String?
+    let integrityStore = IntegrityStore()
+    var integrityRecordsRevision = 0
     @ObservationIgnored private let transferBudget: TransferBudget
     @ObservationIgnored private var uploadUpdates: Task<Void, Never>?
     @ObservationIgnored private var uploadActivityUpdates: Task<Void, Never>?
@@ -646,7 +648,7 @@ final class AppModel {
             let session = URLSession(configuration: Self.applying(activeProxy, to: DownloadEngine.defaultSessionConfiguration()))
             uploadReadSession = session
             let integrity = try IntegrityService(reader: RangeReader(session: session, budget: transferBudget))
-            let uploads = try UploadCoordinator(store: UploadStore(), integrityStore: IntegrityStore(),
+            let uploads = try UploadCoordinator(store: UploadStore(), integrityStore: integrityStore,
                 budget: transferBudget, integrity: integrity, secrets: KeychainUploadSecretStorage(),
                 maximumConcurrentJobs: settings.maxConcurrentUploads, maximumConcurrentParts: settings.uploadPartsPerFile,
                 onBatchFinished: { [weak self] job in await self?.notifyUploadCompletion(of: job) },
@@ -957,8 +959,9 @@ final class AppModel {
         }
     }
 
-    /// Core 仅在终态已保存且 worker 移除后调用；这里不等待生命周期 lane 或系统通知授权。
+    /// 终态已保存且 worker 移除后刷新校验记录视图并通知；不等待生命周期 lane 或系统授权。
     private func notifyUploadCompletion(of job: UploadJob) {
+        integrityRecordsRevision += 1
         guard !isShuttingDown else { return }
         let content = UNMutableNotificationContent()
         switch job.phase {

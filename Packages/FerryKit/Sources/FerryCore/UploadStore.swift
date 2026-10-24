@@ -104,6 +104,22 @@ public actor UploadStore {
 
 /// 独立校验库可在任务移除后继续用于下载比较；关联必须同时满足账号、精确身份和版本。
 public actor IntegrityStore {
+    public struct CleanupFailure: Sendable, Hashable {
+        public let fileName: String
+        public let reason: String
+    }
+
+    public struct Inventory: Sendable {
+        public let recordIDs: [UUID]
+        public let failures: [CleanupFailure]
+        public var totalCount: Int { recordIDs.count + failures.count }
+    }
+
+    public struct CleanupResult: Sendable {
+        public let deletedIDs: [UUID]
+        public let failures: [CleanupFailure]
+    }
+
     public let directory: URL
 
     public init(directory: URL = FerryDirectories.applicationSupport.appendingPathComponent("Integrity", isDirectory: true)) {
@@ -159,8 +175,48 @@ public actor IntegrityStore {
         return result.sorted { ($0.verifiedAt ?? .distantPast) > ($1.verifiedAt ?? .distantPast) }
     }
 
-    /// 明确清理校验依据时才移入废纸篓，不随上传记录删除。
+    /// 捕获当前 JSON 清单并验证版本、内容及文件名；无法识别的原始记录保留并逐项报告。
+    public func inventory() throws -> Inventory {
+        guard FileManager.default.fileExists(atPath: directory.path) else {
+            return Inventory(recordIDs: [], failures: [])
+        }
+        let urls = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+        var ids: [UUID] = []
+        var failures: [CleanupFailure] = []
+        for url in urls {
+            do {
+                guard let id = UUID(uuidString: url.deletingPathExtension().lastPathComponent),
+                      url.lastPathComponent == id.uuidString + ".json" else {
+                    throw UploadRecordError.invalid("校验记录文件名不是规范 ID")
+                }
+                _ = try load(id: id)
+                ids.append(id)
+            } catch {
+                failures.append(CleanupFailure(fileName: url.lastPathComponent, reason: error.localizedDescription))
+            }
+        }
+        return Inventory(recordIDs: ids, failures: failures)
+    }
+
+    /// 只处理用户确认的有限 ID 快照；每项删除前重新验证，新记录不加入本轮清理。
+    public func moveToTrash(ids: [UUID]) -> CleanupResult {
+        var deleted: [UUID] = []
+        var failures: [CleanupFailure] = []
+        for id in Set(ids).sorted(by: { $0.uuidString < $1.uuidString }) {
+            do {
+                try moveToTrash(id: id)
+                deleted.append(id)
+            } catch {
+                failures.append(CleanupFailure(fileName: id.uuidString + ".json", reason: error.localizedDescription))
+            }
+        }
+        return CleanupResult(deletedIDs: deleted, failures: failures)
+    }
+
+    /// 明确清理校验依据时才移入废纸篓；未知版本或损坏记录保留，不随上传记录删除。
     public func moveToTrash(id: UUID) throws {
+        _ = try load(id: id)
         try FileManager.default.trashItem(at: recordURL(id), resultingItemURL: nil)
     }
 

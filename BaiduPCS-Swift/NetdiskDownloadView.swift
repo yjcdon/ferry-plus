@@ -352,7 +352,7 @@ struct NetdiskDownloadView: View {
         isLoadingCandidates = true; candidateError = nil
         do {
             try Task.checkCancellation()
-            let result = try await IntegrityStore().candidates(account: request.account, reference: request.reference, size: request.size)
+            let result = try await model.integrityStore.candidates(account: request.account, reference: request.reference, size: request.size)
             try Task.checkCancellation()
             guard candidateRequest == request else { return }
             candidates = result; isLoadingCandidates = false

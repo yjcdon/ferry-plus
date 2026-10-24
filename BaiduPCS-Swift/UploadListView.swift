@@ -120,6 +120,7 @@ struct UploadFilesView: View {
     @State private var files: [UploadFile] = []
     @State private var isLoading = true
     @State private var error: String?
+    @State private var integrityDescriptions: [UUID: String] = [:]
     @State private var exportRequest: UUID?
     @State private var isPreparingExport = false
     @State private var exportDocument: IntegrityManifestDocument?
@@ -140,6 +141,7 @@ struct UploadFilesView: View {
     private struct PageRequest: Hashable {
         let offset: Int
         let generation: Int
+        let integrityRevision: Int
         let count: Int
         let phase: UploadPhase?
         let completedBytes: Int64
@@ -150,7 +152,7 @@ struct UploadFilesView: View {
     }
     private var job: UploadJob? { model.uploadJobs.first { $0.id == jobID } }
     private var request: PageRequest {
-        .init(offset: offset, generation: generation, count: job?.fileIDs.count ?? 0, phase: job?.phase,
+        .init(offset: offset, generation: generation, integrityRevision: model.integrityRecordsRevision, count: job?.fileIDs.count ?? 0, phase: job?.phase,
               completedBytes: job?.completedBytes ?? 0, completedCount: job?.completedCount ?? 0,
               failedCount: job?.failedCount ?? 0, skippedCount: job?.skippedCount ?? 0, error: job?.error)
     }
@@ -290,9 +292,7 @@ struct UploadFilesView: View {
 
     private func integrityDescription(_ file: UploadFile) -> String {
         if file.isDirectory { return "目录项目，不进行文件内容校验" }
-        if file.integrityRecordID != nil {
-            return file.phase == .completed ? "SHA-256 内容校验通过" : "已保留内容校验记录"
-        }
+        if file.integrityRecordID != nil { return integrityDescriptions[file.id] ?? "正在核对校验记录…" }
         return file.phase == .completed ? "已完成，未关联校验记录" : "尚未生成校验记录"
     }
 
@@ -311,7 +311,8 @@ struct UploadFilesView: View {
             guard sourceJob.fileIDs.count <= IntegrityManifest.maximumEntries else {
                 throw UploadRecordError.invalid("一次最多导出 10000 个清单项目，请拆分上传批次")
             }
-            let store = IntegrityStore()
+            let store = model.integrityStore
+            let revision = model.integrityRecordsRevision
             var directoryNames: [String: String] = [:]
             var verified: [ExportFile] = []
             for offset in stride(from: 0, to: sourceJob.fileIDs.count, by: pageSize) {
@@ -326,7 +327,9 @@ struct UploadFilesView: View {
                         continue
                     }
                     guard file.phase == .completed, let id = file.integrityRecordID else { continue }
-                    let record = try await store.load(id: id)
+                    let record: IntegrityRecord
+                    do { record = try await store.load(id: id) }
+                    catch { if Self.isMissingRecord(error) { continue }; throw error }
                     guard record.status == .verified, record.account == sourceJob.account,
                           record.uploadFileID == file.id, record.reference == file.remoteReference,
                           let expectation = record.expectation, expectation.algorithm == .sha256,
@@ -357,6 +360,7 @@ struct UploadFilesView: View {
             let document = try IntegrityManifestDocument(manifest: manifest)
             try Task.checkCancellation()
             guard exportRequest == request, job?.account == sourceJob.account else { throw UploadCoordinatorError.missingJob }
+            guard model.integrityRecordsRevision == revision else { throw UploadRecordError.invalid("校验记录已变化，请重新导出") }
             exportDocument = document; isExportPresented = true
         } catch {
             guard !Task.isCancelled, exportRequest == request else { return }
@@ -364,19 +368,49 @@ struct UploadFilesView: View {
         }
     }
 
+    /// 只有明确不存在的文件才表示已清理；损坏 JSON、未知版本与权限错误必须继续显示错误。
+    private static func isMissingRecord(_ error: any Error) -> Bool {
+        (error as? CocoaError)?.code == .fileReadNoSuchFile
+    }
+
     /// 摘要变化触发按页读取，不做定时轮询，也不让不可见明细常驻完整清单。
     private func load(_ page: PageRequest) async {
         guard page == request else { return }
-        isLoading = true; error = nil; files = []
-        guard let coordinator = model.uploadCoordinator, job != nil else {
+        isLoading = true; error = nil; files = []; integrityDescriptions = [:]
+        guard let coordinator = model.uploadCoordinator, let sourceJob = job else {
             isLoading = false; error = "上传任务或服务尚不可用。"
             return
         }
         do {
             let result = try await coordinator.files(jobID: jobID, offset: page.offset, limit: pageSize)
+            var descriptions: [UUID: String] = [:]
+            for file in result where !file.isDirectory {
+                try Task.checkCancellation()
+                guard let id = file.integrityRecordID else { continue }
+                do {
+                    let record = try await model.integrityStore.load(id: id)
+                    guard record.account == sourceJob.account, record.uploadFileID == file.id,
+                          record.reference == file.remoteReference,
+                          let expected = file.expectation, let evidence = record.expectation,
+                          evidence.algorithm == .sha256, evidence.algorithm == expected.algorithm,
+                          evidence.digest == expected.digest, evidence.origin == expected.origin,
+                          evidence.size == file.source.size else {
+                        throw UploadRecordError.invalid("校验记录与上传文件归属不一致：\(file.relativePath)")
+                    }
+                    descriptions[file.id] = switch record.status {
+                    case .verified: "SHA-256 内容校验通过"
+                    case .mismatch: "内容校验失败"
+                    case .pending: "校验尚未完成"
+                    case .unavailable: "未验证源文件内容"
+                    }
+                } catch {
+                    guard Self.isMissingRecord(error) else { throw error }
+                    descriptions[file.id] = "校验记录已清理"
+                }
+            }
             try Task.checkCancellation()
-            guard page == request else { return }
-            files = result; isLoading = false
+            guard page == request, job?.account == sourceJob.account else { return }
+            integrityDescriptions = descriptions; files = result; isLoading = false
         } catch {
             guard !Task.isCancelled, page == request else { return }
             self.error = error.localizedDescription; isLoading = false
