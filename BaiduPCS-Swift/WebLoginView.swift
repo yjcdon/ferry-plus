@@ -164,13 +164,20 @@ final class WebLoginSession: NSObject {
         webView.customUserAgent = Self.chromeUserAgent
         cookieStore = configuration.websiteDataStore.httpCookieStore
         super.init()
-        webView.navigationDelegate = self
-        webView.uiDelegate = self
     }
 
+    /// 启动观察和网页代理；停止后的会话可重新安装回调再启动。
     func start() {
         guard !isActive else { return }
         isActive = true
+        hasDeliveredCredential = false
+        loadError = nil
+        failedURL = nil
+        isMissingNetdiskSTOKEN = false
+        bdussSeenAt = nil
+        diskMainLoadedAt = nil
+        webView.navigationDelegate = self
+        webView.uiDelegate = self
         cookieStore.add(self)
         webView.load(URLRequest(url: startURL))
         // 登录后 Cookie 变化的通知不一定到达，网盘页面也可能一直不触发加载完成，所以还要定时检查。
@@ -182,14 +189,20 @@ final class WebLoginSession: NSObject {
         }
     }
 
+    /// 关闭窗口时解除 WebKit 的代理和 Cookie 观察，释放导航及轮询任务引用。
     func stop() {
         guard isActive else { return }
         isActive = false
         pollTask?.cancel()
+        pollTask = nil
         onCredential = nil
         onQuarkCredential = nil
         cookieStore.remove(self)
+        webView.navigationDelegate = nil
+        webView.uiDelegate = nil
         webView.stopLoading()
+        currentNavigation = nil
+        isLoading = false
     }
 
     func reload() {
