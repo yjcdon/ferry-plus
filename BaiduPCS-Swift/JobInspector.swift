@@ -255,6 +255,10 @@ private struct FileRow: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                Text(file.integrityDescription)
+                    .font(.caption)
+                    .foregroundStyle(file.integrityStatus == .mismatch ? .red : .secondary)
+                    .help(file.integrityExpectation.map { "\($0.algorithm == .sha256 ? "SHA-256" : "MD5")：\($0.digest)" } ?? "没有明确原始摘要，不能确认与源文件内容一致。")
             }
         }
         .monospacedDigit()

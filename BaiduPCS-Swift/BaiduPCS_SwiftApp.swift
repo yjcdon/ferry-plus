@@ -42,7 +42,7 @@ struct FerryApp: App {
 private struct FerryCommands: Commands {
     let model: AppModel
     @Environment(\.openWindow) private var openWindow
-    @FocusedValue(\.jobSelection) private var selection
+    @FocusedValue(\.transferSelection) private var selection
     @FocusedValue(\.focusTaskSearch) private var focusTaskSearch
 
     var body: some Commands {
@@ -61,17 +61,28 @@ private struct FerryCommands: Commands {
                 openWindow(id: ContentView.windowID)
                 model.requestNetdiskDownload()
             }
+            Button("上传文件…") {
+                let provider = selection?.providerFilter
+                openWindow(id: ContentView.windowID)
+                model.presentUpload(provider: provider)
+            }
+            .keyboardShortcut("u")
         }
         CommandMenu("任务") {
-            // 主窗口不是当前窗口时没有选中的任务，这些操作都不可用。
-            JobActionsMenu(jobs: selection?.jobs ?? [], showsUnavailable: true) { selection?.onRemove($0, $1) }
-                .environment(model)
+            if let selection {
+                TransferActionsMenu(scope: selection, showsUnavailable: true)
+                    .environment(model)
+            } else {
+                Button("未选择传输任务") {}.disabled(true)
+            }
             Divider()
-            let jobs = selection?.visibleJobs ?? []
-            Button("暂停当前列表") { model.pauseAll(jobs) }
-                .disabled(model.pausableJobs(in: jobs).isEmpty)
-            Button("继续当前列表") { model.resumeAll(jobs) }
-                .disabled(model.resumableJobs(in: jobs).isEmpty)
+            let visible = selection?.visibleItems ?? []
+            let pausable = visible.filter { TransferAction.pause.allows($0, model: model) }
+            let resumable = visible.filter { TransferAction.resume.allows($0, model: model) }
+            Button("暂停当前列表") { selection?.onAction(.pause, pausable.map(\.id)) }
+                .disabled(selection?.isBusy != false || pausable.isEmpty)
+            Button("继续当前列表") { selection?.onAction(.resume, resumable.map(\.id)) }
+                .disabled(selection?.isBusy != false || resumable.isEmpty)
         }
         CommandMenu("账号") {
             AccountCommandsView()

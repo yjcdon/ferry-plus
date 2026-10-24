@@ -5,10 +5,10 @@ import SwiftUI
 /// 侧边栏中的任务分类。
 enum JobCategory: String, CaseIterable, Identifiable {
     case all
-    /// 转存中和下载中的任务，包括已暂停的任务。
+    /// 仍有后续阶段的传输任务，包括暂停、合并和校验。
     case active
     case completed
-    /// 转存失败和下载失败。
+    /// 下载或上传失败的任务。
     case failed
 
     var id: String { rawValue }
@@ -25,7 +25,7 @@ enum JobCategory: String, CaseIterable, Identifiable {
     var systemImage: String {
         switch self {
         case .all: "tray.full"
-        case .active: "arrow.down.circle"
+        case .active: "arrow.up.arrow.down.circle"
         case .completed: "checkmark.circle"
         case .failed: "exclamationmark.triangle"
         }

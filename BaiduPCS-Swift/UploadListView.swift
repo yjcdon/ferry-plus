@@ -20,180 +20,19 @@ extension UploadPhase {
     }
 }
 
-/// 仅接收主窗口当前筛选后的上传批次；命令冻结当前可见项，绝不查询隐藏任务作为操作范围。
-struct UploadListView: View {
-    let jobs: [UploadJob]
-    @Environment(AppModel.self) private var model
-    @State private var selection: Set<UUID> = []
-    @State private var command: Command?
-    @State private var removal: [UUID] = []
-    @State private var operationError: String?
-    @State private var detail: DetailRequest?
-
-    private enum Action: String {
-        case pause = "暂停", resume = "继续", retry = "重试失败项", cancel = "取消上传"
-        case remove = "移除记录", prioritize = "优先上传", reconcile = "核对远端结果"
-
-        func allows(_ job: UploadJob) -> Bool {
-            switch self {
-            case .pause: !job.phase.isTerminal && !job.isPaused && !job.cancellationRequested
-            case .resume: job.isPaused && !job.phase.isTerminal && !job.cancellationRequested
-            case .retry: job.phase == .failed && !job.cancellationRequested
-            case .cancel: !job.phase.isTerminal && !job.cancellationRequested
-            case .remove: job.phase.isTerminal || job.isPaused
-            case .prioritize: !job.phase.isTerminal && !job.cancellationRequested
-            case .reconcile: job.phase == .failed || job.isPaused || job.cancellationRequested
-            }
+/// 上传的可用操作统一供列表、菜单、工具栏和详情使用，实际状态仍由 coordinator 持有。
+enum UploadAction {
+    case pause, resume, retry, cancel, remove, prioritize, reconcile
+    func allows(_ job: UploadJob) -> Bool {
+        switch self {
+        case .pause: !job.phase.isTerminal && !job.isPaused && !job.cancellationRequested
+        case .resume: job.isPaused && !job.phase.isTerminal && !job.cancellationRequested
+        case .retry: job.phase == .failed && !job.cancellationRequested
+        case .cancel: !job.phase.isTerminal && !job.cancellationRequested
+        case .remove: job.phase.isTerminal || job.isPaused
+        case .prioritize: !job.phase.isTerminal && !job.cancellationRequested
+        case .reconcile: job.phase == .failed || job.isPaused || job.cancellationRequested
         }
-    }
-    private struct Command: Identifiable {
-        let id = UUID()
-        let action: Action
-        let jobs: [UploadJob]
-    }
-    private struct DetailRequest: Identifiable {
-        let id: UUID
-        let title: String
-    }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            if jobs.isEmpty {
-                ContentUnavailableView("没有上传任务", systemImage: "tray.and.arrow.up")
-            } else {
-                controls.padding(.horizontal).padding(.vertical, 8)
-                Divider()
-                List(jobs, selection: $selection) { job in
-                    UploadRow(job: job)
-                }
-                .contextMenu(forSelectionType: UUID.self) { ids in
-                    actions(for: jobs.filter { ids.contains($0.id) })
-                } primaryAction: { ids in
-                    showDetails(jobs.filter { ids.contains($0.id) })
-                }
-                .onDeleteCommand {
-                    requestRemoval(jobs.filter { selection.contains($0.id) })
-                }
-            }
-        }
-        .onChange(of: jobs.map(\.id)) { selection.formIntersection(jobs.map(\.id)) }
-        .task(id: command?.id) {
-            guard let command else { return }
-            await perform(command)
-        }
-        .confirmationDialog("移除 \(removal.count) 项上传记录？", isPresented: Binding(
-            get: { !removal.isEmpty }, set: { if !$0 { removal = [] } }
-        ), titleVisibility: .visible) {
-            Button("移除记录", role: .destructive) {
-                let ids = Set(removal)
-                removal = []
-                start(.remove, jobs: jobs.filter { ids.contains($0.id) })
-            }
-        } message: {
-            Text("仅移除本地任务记录，保留本地源文件、已上传的云端文件和独立校验记录。未核对的远端操作会阻止移除。")
-        }
-        .alert("上传操作未完成", isPresented: Binding(
-            get: { operationError != nil }, set: { if !$0 { operationError = nil } }
-        )) { Button("好") { operationError = nil } } message: { Text(operationError ?? "") }
-        .sheet(item: $detail) { item in
-            UploadFilesView(jobID: item.id, title: item.title)
-                .environment(model)
-        }
-    }
-
-    private var targets: [UploadJob] {
-        selection.isEmpty ? jobs : jobs.filter { selection.contains($0.id) }
-    }
-    private var isBusy: Bool { command != nil }
-
-    private var controls: some View {
-        HStack {
-            Text(selection.isEmpty ? "当前显示 \(jobs.count) 项" : "已选 \(targets.count) 项")
-                .font(.caption).foregroundStyle(.secondary)
-            Spacer()
-            if isBusy { ProgressView().controlSize(.small) }
-            Button("暂停") { start(.pause, jobs: targets) }
-                .disabled(isBusy || !targets.contains(where: Action.pause.allows))
-            Button("继续") { start(.resume, jobs: targets) }
-                .disabled(isBusy || !targets.contains(where: Action.resume.allows))
-            Menu("更多") { actions(for: targets) }
-                .disabled(isBusy || targets.isEmpty)
-        }
-    }
-
-    @ViewBuilder
-    private func actions(for targets: [UploadJob]) -> some View {
-        ForEach([Action.pause, .resume, .retry, .prioritize, .reconcile, .cancel], id: \.self) { action in
-            if targets.contains(where: action.allows) {
-                Button(action.rawValue) { start(action, jobs: targets) }.disabled(isBusy)
-            }
-        }
-        if !targets.isEmpty {
-            Divider()
-            Button("查看明细…") { showDetails(targets) }.disabled(targets.count != 1)
-            Button("复制错误") { copyErrors(targets) }.disabled(!targets.contains { $0.error != nil })
-            if targets.contains(where: Action.remove.allows) {
-                Divider()
-                Button("移除记录…", role: .destructive) { requestRemoval(targets) }.disabled(isBusy)
-            }
-        }
-    }
-
-    /// 所有入口都再次与当前可见列表相交，右键、删除键和确认弹窗不扩大操作范围。
-    private func start(_ action: Action, jobs requested: [UploadJob]) {
-        guard !isBusy else { return }
-        let ids = Set(requested.map(\.id))
-        let targets = jobs.filter { ids.contains($0.id) && action.allows($0) }
-        guard !targets.isEmpty else { return }
-        command = .init(action: action, jobs: targets)
-    }
-
-    private func requestRemoval(_ targets: [UploadJob]) {
-        guard !isBusy else { return }
-        let visible = Set(jobs.map(\.id))
-        removal = targets.filter { visible.contains($0.id) && Action.remove.allows($0) }.map(\.id)
-    }
-
-    /// 一个批次失败不阻断其他独立选中项，最后集中展示具体任务错误；取消立即停止后续命令。
-    private func perform(_ request: Command) async {
-        defer { command = nil }
-        guard let coordinator = model.uploadCoordinator else {
-            operationError = "上传服务尚未就绪。"
-            return
-        }
-        var failures: [String] = []
-        for job in request.jobs {
-            if Task.isCancelled { return }
-            do {
-                switch request.action {
-                case .pause: try await coordinator.pause(job.id)
-                case .resume: try await coordinator.resume(job.id)
-                case .retry: try await coordinator.retry(job.id)
-                case .cancel: try await coordinator.cancel(job.id)
-                case .remove: try await coordinator.remove(job.id)
-                case .prioritize: try await coordinator.prioritize(job.id)
-                case .reconcile: try await coordinator.reconcile(job.id)
-                }
-            } catch {
-                guard !Task.isCancelled else { return }
-                failures.append("\(job.title)：\(error.localizedDescription)")
-            }
-        }
-        if !failures.isEmpty { operationError = failures.joined(separator: "\n") }
-    }
-
-    private func showDetails(_ targets: [UploadJob]) {
-        guard targets.count == 1, let job = targets.first, jobs.contains(where: { $0.id == job.id }) else { return }
-        detail = .init(id: job.id, title: job.title)
-    }
-    private func copyErrors(_ targets: [UploadJob]) {
-        let visible = Set(jobs.map(\.id))
-        let text = targets.filter { visible.contains($0.id) }.compactMap { job in
-            job.error.map { "\(job.title)：\($0)" }
-        }.joined(separator: "\n")
-        guard !text.isEmpty else { return }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
     }
 }
 
@@ -235,7 +74,7 @@ struct UploadRow: View {
 }
 
 /// 每页最多 100 项；响应代次校验与 .task 取消共同阻止翻页后的迟到内容覆盖。
-private struct UploadFilesView: View {
+struct UploadFilesView: View {
     let jobID: UUID
     let title: String
     @Environment(AppModel.self) private var model
@@ -245,6 +84,11 @@ private struct UploadFilesView: View {
     @State private var files: [UploadFile] = []
     @State private var isLoading = true
     @State private var error: String?
+    @State private var exportRequest: UUID?
+    @State private var isPreparingExport = false
+    @State private var exportDocument: IntegrityManifestDocument?
+    @State private var isExportPresented = false
+    @State private var exportError: String?
     private let pageSize = 100
 
     private struct PageRequest: Hashable {
@@ -271,6 +115,10 @@ private struct UploadFilesView: View {
             HStack {
                 Text(title).font(.headline).lineLimit(1).truncationMode(.middle)
                 Spacer()
+                if isPreparingExport { ProgressView().controlSize(.small) }
+                Button("导出已校验摘要…") {
+                    exportError = nil; isPreparingExport = true; exportRequest = UUID()
+                }.disabled(isPreparingExport || job == nil)
                 Button { generation += 1 } label: { Image(systemName: "arrow.clockwise") }
                     .help("刷新明细").disabled(isLoading)
             }.padding()
@@ -288,6 +136,19 @@ private struct UploadFilesView: View {
         }
         .frame(minWidth: 620, idealWidth: 700, minHeight: 420, idealHeight: 520)
         .task(id: page) { await load(page) }
+        .task(id: exportRequest) {
+            guard let exportRequest else { return }
+            await prepareExport(exportRequest)
+        }
+        .fileExporter(isPresented: $isExportPresented, document: exportDocument, contentType: .json,
+                      defaultFilename: "Ferry-\(jobID.uuidString.prefix(8))-SHA256") { result in
+            if case .failure(let failure) = result {
+                if (failure as? CocoaError)?.code != .userCancelled { exportError = failure.localizedDescription }
+            }
+        }
+        .alert("无法导出摘要清单", isPresented: Binding(
+            get: { exportError != nil }, set: { if !$0 { exportError = nil } }
+        )) { Button("好") { exportError = nil } } message: { Text(exportError ?? "") }
         .onChange(of: job?.fileIDs.count) {
             let count = job?.fileIDs.count ?? 0
             if offset >= count { offset = max(0, ((count - 1) / pageSize) * pageSize) }
@@ -328,8 +189,78 @@ private struct UploadFilesView: View {
 
     private func integrityDescription(_ file: UploadFile) -> String {
         if file.isDirectory { return "目录项目，不进行文件内容校验" }
-        if let id = file.integrityRecordID { return "已关联校验记录 · \(id.uuidString)" }
+        if file.integrityRecordID != nil {
+            return file.phase == .completed ? "SHA-256 内容校验通过" : "已保留内容校验记录"
+        }
         return file.phase == .completed ? "已完成，未关联校验记录" : "尚未生成校验记录"
+    }
+
+    private struct ExportFile {
+        let path: String
+        let remoteName: String
+        let size: Int64
+        let digest: String
+    }
+
+    /// 分页只保留目录命名和摘要，不保留完整 UploadFile／分片；每条基准来自独立校验库。
+    private func prepareExport(_ request: UUID) async {
+        defer { isPreparingExport = false }
+        do {
+            guard let coordinator = model.uploadCoordinator, let sourceJob = job else { throw UploadCoordinatorError.missingJob }
+            guard sourceJob.fileIDs.count <= IntegrityManifest.maximumEntries else {
+                throw UploadRecordError.invalid("一次最多导出 10000 个清单项目，请拆分上传批次")
+            }
+            let store = IntegrityStore()
+            var directoryNames: [String: String] = [:]
+            var verified: [ExportFile] = []
+            for offset in stride(from: 0, to: sourceJob.fileIDs.count, by: pageSize) {
+                try Task.checkCancellation()
+                let page = try await coordinator.files(jobID: jobID, offset: offset, limit: pageSize)
+                let expectedIDs = Array(sourceJob.fileIDs.dropFirst(offset).prefix(pageSize))
+                guard page.map(\.id) == expectedIDs else { throw UploadRecordError.invalid("上传清单已变化，请重新导出") }
+                for file in page {
+                    try Task.checkCancellation()
+                    if file.isDirectory {
+                        if let name = file.remoteName { directoryNames[file.relativePath] = name }
+                        continue
+                    }
+                    guard file.phase == .completed, let id = file.integrityRecordID else { continue }
+                    let record = try await store.load(id: id)
+                    guard record.status == .verified, record.account == sourceJob.account,
+                          record.uploadFileID == file.id, record.reference == file.remoteReference,
+                          let expectation = record.expectation, expectation.algorithm == .sha256,
+                          expectation.origin == .localOriginal, expectation.size == file.source.size,
+                          file.expectation?.algorithm == .sha256, file.expectation?.digest == expectation.digest,
+                          let name = file.remoteName else {
+                        throw UploadRecordError.invalid("文件缺少可确认归属的已验证原始摘要：\(file.relativePath)")
+                    }
+                    verified.append(.init(path: file.relativePath, remoteName: name, size: expectation.size, digest: expectation.digest))
+                }
+            }
+            guard !verified.isEmpty else { throw UploadRecordError.invalid("没有可导出的已校验文件；目录及缺少校验记录的文件不会导出") }
+            let entries = try verified.map { file -> IntegrityManifestEntry in
+                let components = file.path.split(separator: "/").map(String.init)
+                var remote: [String] = []
+                for index in 0..<(components.count - 1) {
+                    let sourcePath = components.prefix(index + 1).joined(separator: "/")
+                    guard let name = directoryNames[sourcePath] else {
+                        throw UploadRecordError.invalid("无法确认已上传目录名称：\(sourcePath)")
+                    }
+                    remote.append(name)
+                }
+                remote.append(file.remoteName)
+                return try IntegrityManifestEntry(relativePath: remote.joined(separator: "/"), size: file.size,
+                                                   algorithm: .sha256, digest: file.digest)
+            }
+            let manifest = try IntegrityManifest(entries: entries)
+            let document = try IntegrityManifestDocument(manifest: manifest)
+            try Task.checkCancellation()
+            guard exportRequest == request, job?.account == sourceJob.account else { throw UploadCoordinatorError.missingJob }
+            exportDocument = document; isExportPresented = true
+        } catch {
+            guard !Task.isCancelled, exportRequest == request else { return }
+            exportError = error.localizedDescription
+        }
     }
 
     /// 摘要变化触发按页读取，不做定时轮询，也不让不可见明细常驻完整清单。

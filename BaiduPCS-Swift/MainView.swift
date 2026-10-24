@@ -2,113 +2,73 @@ import AppKit
 import FerryCore
 import SwiftUI
 
-/// 主窗口的内容：侧边栏（任务分类和账号）、任务列表和详情栏。
+/// 方向、网盘、分类和搜索共同决定可见范围；所有交互共享带方向的选择及父页命令入口。
 struct MainView: View {
     @Environment(AppModel.self) private var model
     @State private var category: JobCategory? = .all
     @State private var providerFilter: Provider?
-    @State private var direction: TransferDirection = .download
-    @State private var addedJobNotice: Job?
-    @State private var selection: Set<Job.ID> = []
+    @State private var direction: TransferDirectionFilter = .all
+    @State private var selection: Set<TransferTaskID> = []
     @SceneStorage("isInspectorPresented") private var isInspectorPresented = false
     @State private var searchText = ""
     @State private var searchFocusRequest = 0
-    /// 等待确认的移除。
-    @State private var pendingRemoval: PendingRemoval?
+    @State private var pendingRemoval: PendingTransferRemoval?
+    @State private var uploadCommand: UploadCommand?
+    @State private var operationError: String?
+    @State private var uploadDetail: UploadDetailRequest?
+    @State private var revealedUploadID: UUID?
+
+    private struct UploadCommand: Identifiable {
+        let id = UUID()
+        let action: UploadAction
+        let jobs: [UploadJob]
+    }
+    private struct UploadDetailRequest: Identifiable {
+        let id: UUID
+        let title: String
+    }
+    private var currentCategory: JobCategory { category ?? .all }
+    private var query: String { searchText.trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// 侧边栏各分类的数字也应用方向、来源和搜索，但不预先套用当前分类。
+    private var filteredDownloads: [Job] {
+        guard direction != .upload else { return [] }
+        return model.coordinator.jobs.filter { job in
+            (providerFilter == nil || job.provider == providerFilter) &&
+            (query.isEmpty || job.matches(query) || job.accountName?.localizedCaseInsensitiveContains(query) == true || job.provider.title.localizedCaseInsensitiveContains(query))
+        }
+    }
+    private var filteredUploads: [UploadJob] {
+        guard direction != .download else { return [] }
+        return model.uploadJobs.filter { job in
+            (providerFilter == nil || job.account.provider == providerFilter) &&
+            (query.isEmpty || job.title.localizedCaseInsensitiveContains(query) || job.accountName.localizedCaseInsensitiveContains(query) || job.account.provider.title.localizedCaseInsensitiveContains(query))
+        }
+    }
+    private var visibleItems: [TransferListItem] {
+        let downloads = filteredDownloads.filter(currentCategory.contains).map(TransferListItem.download)
+        let uploads = filteredUploads.filter(currentCategory.contains).map(TransferListItem.upload)
+        return (downloads + uploads).sorted {
+            if $0.createdAt != $1.createdAt { return $0.createdAt > $1.createdAt }
+            if $0.id.direction != $1.id.direction { return $0.id.direction.rawValue < $1.id.direction.rawValue }
+            return $0.id.id.uuidString < $1.id.id.uuidString
+        }
+    }
+    private var transferScope: TransferSelection {
+        let items = visibleItems
+        return .init(selectedItems: items.filter { selection.contains($0.id) }, visibleItems: items,
+            providerFilter: providerFilter, isBusy: uploadCommand != nil,
+            onAction: perform, onRemove: requestRemoval, onInspect: inspect)
+    }
 
     var body: some View {
-        let current = category ?? .all
-        let providerJobs = direction == .download ? model.coordinator.jobs.filter { providerFilter == nil || $0.provider == providerFilter } : []
-        let providerUploads = direction == .upload ? model.uploadJobs.filter { providerFilter == nil || $0.account.provider == providerFilter } : []
-        let categoryJobs = providerJobs.filter(current.contains)
-        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let jobs = query.isEmpty ? categoryJobs : categoryJobs.filter { $0.matches(query) }
-        let uploads = providerUploads.filter { current.contains($0) && (query.isEmpty || $0.title.localizedCaseInsensitiveContains(query) || $0.accountName.localizedCaseInsensitiveContains(query)) }
-        // 只算列表中显示的任务。切换分类或搜索后，看不到的任务不再算作选中。
-        let selectedJobs = jobs.filter { selection.contains($0.id) }
+        let items = visibleItems
+        let scope = transferScope
         NavigationSplitView {
-            SidebarView(selection: $category, providerFilter: $providerFilter, jobs: providerJobs, uploadJobs: providerUploads)
+            SidebarView(selection: $category, providerFilter: $providerFilter,
+                        jobs: filteredDownloads, uploadJobs: filteredUploads)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
         } detail: {
-            Group {
-                if direction == .upload { UploadListView(jobs: uploads) }
-                else { JobListView(jobs: jobs, category: current, providerFilter: providerFilter, searchText: query, selection: $selection, onRemove: requestRemoval) }
-            }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .edgeBar(.top) {
-                    Picker("传输方向", selection: $direction) {
-                        Text("下载").tag(TransferDirection.download)
-                        Text("上传").tag(TransferDirection.upload)
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
-                    .frame(width: 180)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 8)
-                    Banners()
-                    if let job = addedJobNotice {
-                        HStack(spacing: 8) {
-                            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
-                            Text("已添加\(job.provider.title)任务“\(job.title)”")
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .help(job.title)
-                            Button("查看任务") { revealAddedJob(job) }
-                            Button("关闭") { addedJobNotice = nil }
-                        }
-                        .padding(.horizontal)
-                        .frame(height: 40)
-                    }
-                }
-                .edgeBar(.bottom) { StatusBar() }
-                .navigationTitle(providerFilter.map { "\($0.title) · \(current.title)" } ?? current.title)
-                .navigationSubtitle("\(jobs.count + uploads.count) 个任务")
-                .inspector(isPresented: $isInspectorPresented) {
-                    JobInspector(jobs: selectedJobs, onRemove: requestRemoval)
-                        .inspectorColumnWidth(min: 260, ideal: 320, max: 480)
-                }
-                .toolbar {
-                    ToolbarItem(placement: .primaryAction) {
-                        Menu {
-                            Button {
-                                model.presentAddLink()
-                            } label: {
-                                Label("添加分享链接…", systemImage: "link")
-                            }
-                            Button {
-                                model.presentNetdiskDownload()
-                            } label: {
-                                Label("从我的网盘下载…", systemImage: "cloud")
-                            }
-                            Button {
-                                model.presentUpload(provider: providerFilter)
-                            } label: {
-                                Label("上传文件…", systemImage: "arrow.up.doc")
-                            }
-                        } label: {
-                            Label("添加任务", systemImage: "plus")
-                        }
-                        .help("添加任务")
-                    }
-                    ToolbarItem(placement: .primaryAction) {
-                        if direction == .download { PauseResumeAllButton(jobs: jobs) }
-                        else { UploadPauseResumeAllButton(jobs: uploads) }
-                    }
-                    ToolbarItem(placement: .primaryAction) {
-                        Button {
-                            isInspectorPresented.toggle()
-                        } label: {
-                            Label(isInspectorPresented ? "隐藏详情" : "显示详情", systemImage: "sidebar.trailing")
-                        }
-                        .help(isInspectorPresented ? "隐藏详情" : "显示详情")
-                        .disabled(direction == .upload)
-                    }
-                    ToolbarItem(placement: .primaryAction) {
-                        TaskSearchField(text: $searchText, focusRequest: searchFocusRequest)
-                            .frame(width: 104)
-                    }
-                }
+            transferContent(items: items, scope: scope)
         }
         .frame(minWidth: 640, minHeight: 400)
         .dropDestination(for: URL.self) { urls, _ in
@@ -126,190 +86,277 @@ struct MainView: View {
         .onChange(of: model.sheet) { _, sheet in
             if sheet == nil { model.presentRequestedNetdiskDownload() }
         }
-        .onChange(of: direction) { _, _ in selection = []; isInspectorPresented = false }
-        .onChange(of: model.lastAddedUploadID) { _, id in
-            guard let id, let job = model.uploadJobs.first(where: { $0.id == id }) else { return }
-            direction = .upload; providerFilter = job.account.provider; category = .all; searchText = ""
-        }
-        .focusedSceneValue(\.jobSelection, JobSelection(jobs: selectedJobs, visibleJobs: jobs, providerFilter: providerFilter, onRemove: requestRemoval))
+        .focusedSceneValue(\.transferSelection, scope)
         .focusedSceneValue(\.focusTaskSearch, { searchFocusRequest += 1 })
-        // 文本框优先处理自己的全选；其余主窗口响应只选择当前筛选列表。
-        .onCommand(#selector(NSResponder.selectAll(_:))) {
-            selection = Set(jobs.map(\.id))
-        }
-        .onChange(of: jobs.map(\.id)) { _, ids in selection.formIntersection(ids) }
-        .onChange(of: model.coordinator.jobs.map(\.id)) { _, ids in
-            if let notice = addedJobNotice, !ids.contains(notice.id) { addedJobNotice = nil }
-        }
+        .onCommand(#selector(NSResponder.selectAll(_:))) { selection = Set(visibleItems.map(\.id)) }
+        .onChange(of: items.map(\.id)) { _, ids in selection.formIntersection(ids) }
         .onChange(of: model.lastAddedJobID) { _, id in
             guard let id, let job = model.coordinator.jobs.first(where: { $0.id == id }) else { return }
-            if jobs.contains(where: { $0.id == id }) { selection = [id] } else { addedJobNotice = job }
+            reveal(.download(job))
         }
-        .confirmationDialog(
-            pendingRemoval?.title ?? "",
-            isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
-            presenting: pendingRemoval
-        ) { pending in
-            Button(pending.removal == .trashingFiles ? "移到废纸篓" : "移除", role: .destructive) {
-                remove(pending.jobs, pending.removal, cleanup: pending.cleanup)
+        .onChange(of: model.lastAddedUploadID) { revealNewUpload() }
+        .onChange(of: model.uploadJobs.map(\.id)) { revealNewUpload() }
+        .task(id: uploadCommand?.id) {
+            guard let uploadCommand else { return }
+            await performUpload(uploadCommand)
+        }
+        .confirmationDialog(pendingRemoval?.title ?? "", isPresented: Binding(
+            get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }
+        ), presenting: pendingRemoval) { pending in
+            Button(pending.removal == .trashingFiles ? "移到废纸篓" : "移除记录", role: .destructive) {
+                pendingRemoval = nil
+                remove(pending)
             }
-        } message: { pending in
-            Text(pending.message)
-        }
-        .alert(
-            "有些文件没有移到废纸篓",
-            isPresented: Binding(get: { !model.untrashedItems.isEmpty }, set: { if !$0 { model.untrashedItems = [] } }),
-            presenting: model.untrashedItems
-        ) { items in
+        } message: { pending in Text(pending.message) }
+        .alert("传输操作未完成", isPresented: Binding(
+            get: { operationError != nil }, set: { if !$0 { operationError = nil } }
+        )) { Button("好") { operationError = nil } } message: { Text(operationError ?? "") }
+        .sheet(item: $uploadDetail) { detail in UploadFilesView(jobID: detail.id, title: detail.title) }
+        .alert("有些文件没有移到废纸篓", isPresented: Binding(
+            get: { !model.untrashedItems.isEmpty }, set: { if !$0 { model.untrashedItems = [] } }
+        ), presenting: model.untrashedItems) { items in
             Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting(items) }
             Button("好", role: .cancel) {}
-        } message: { items in
-            Text("\(items.count) 项仍在原来的位置，可以在 Finder 中手动删除。")
+        } message: { items in Text("\(items.count) 项仍在原来的位置，可以在 Finder 中手动删除。") }
+    }
+
+    private func transferContent(items: [TransferListItem], scope: TransferSelection) -> some View {
+        TransferListView(items: items, category: currentCategory, searchText: query, selection: $selection, scope: scope)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .edgeBar(.top) {
+                Picker("传输方向", selection: $direction) {
+                    ForEach(TransferDirectionFilter.allCases) { Text($0.title).tag($0) }
+                }
+                .pickerStyle(.segmented).labelsHidden()
+                .frame(width: 280).frame(maxWidth: .infinity).padding(.vertical, 8)
+                Banners()
+            }
+            .edgeBar(.bottom) { StatusBar() }
+            .navigationTitle(providerFilter.map { "\($0.title) · \(currentCategory.title)" } ?? currentCategory.title)
+            .navigationSubtitle("\(items.count) 个任务")
+            .inspector(isPresented: $isInspectorPresented) {
+                TransferInspector(scope: scope, onDownloadRemove: requestDownloadRemoval)
+                    .inspectorColumnWidth(min: 260, ideal: 320, max: 480)
+            }
+            .toolbar {
+                ToolbarItem(placement: .primaryAction) { addMenu }
+                ToolbarItem(placement: .primaryAction) { TransferPauseResumeButton(scope: scope) }
+                ToolbarItem(placement: .primaryAction) {
+                    Button { isInspectorPresented.toggle() } label: {
+                        Label(isInspectorPresented ? "隐藏详情" : "显示详情", systemImage: "sidebar.trailing")
+                    }
+                    .help(isInspectorPresented ? "隐藏详情" : "显示详情")
+                }
+                ToolbarItem(placement: .primaryAction) {
+                    TaskSearchField(text: $searchText, focusRequest: searchFocusRequest).frame(width: 104)
+                }
+            }
+    }
+
+    private var addMenu: some View {
+        Menu {
+            Button { model.presentAddLink() } label: { Label("添加分享链接…", systemImage: "link") }
+            Button { model.presentNetdiskDownload() } label: { Label("从我的网盘下载…", systemImage: "cloud") }
+            Button { model.presentUpload(provider: providerFilter) } label: { Label("上传文件…", systemImage: "arrow.up.doc") }
+        } label: { Label("添加任务", systemImage: "plus") }
+        .help("添加任务")
+    }
+
+    /// 即使菜单携带旧快照，执行入口也只接收当前仍可见的同方向身份。
+    private func perform(_ action: TransferAction, _ ids: [TransferTaskID]) {
+        guard uploadCommand == nil else { return }
+        let wanted = Set(ids)
+        let targets = visibleItems.filter { wanted.contains($0.id) && action.allows($0, model: model) }
+        if action == .copyError {
+            let text = targets.compactMap { item in item.error.map { "\(item.title)：\($0)" } }.joined(separator: "\n")
+            guard !text.isEmpty else { return }
+            NSPasteboard.general.clearContents(); NSPasteboard.general.setString(text, forType: .string)
+            return
+        }
+        if let downloadAction = action.downloadAction {
+            let downloads = targets.compactMap { item -> Job? in if case .download(let job) = item { return job }; return nil }
+            model.perform(downloadAction, on: model.jobs(in: downloads, allowing: downloadAction))
+        }
+        if let uploadAction = action.uploadAction {
+            let uploads = targets.compactMap { item -> UploadJob? in if case .upload(let job) = item { return job }; return nil }
+            if !uploads.isEmpty { uploadCommand = .init(action: uploadAction, jobs: uploads) }
         }
     }
 
-    /// 菜单和 Delete 共用操作条件；移到废纸篓或含未完成任务时先确认。
-    private func requestRemoval(of jobs: [Job], _ removal: JobRemoval) {
-        let jobs = jobs.filter { model.canOperate(on: $0) }
-        guard !jobs.isEmpty else { return }
-        if removal == .trashingFiles || jobs.contains(where: \.isUnfinished) {
-            pendingRemoval = PendingRemoval(jobs: jobs, removal: removal, cleanup: cleanupPlan(for: jobs))
-        } else {
-            remove(jobs, removal, cleanup: cleanupPlan(for: jobs))
-        }
+    /// 下载详情保持原操作语义，但隐藏任务和上传身份不能通过此入口被误操作。
+    private func requestDownloadRemoval(_ jobs: [Job], _ removal: JobRemoval) {
+        requestRemoval(jobs.map { TransferTaskID(direction: .download, id: $0.id) }, removal)
     }
 
-    /// 发起移除时固定远端清理选择，设置变化不会扩大本次清理。
-    private func cleanupPlan(for jobs: [Job]) -> [Job.ID: Bool] {
-        Dictionary(uniqueKeysWithValues: jobs.map {
+    private func requestRemoval(_ ids: [TransferTaskID], _ removal: JobRemoval) {
+        guard uploadCommand == nil else { return }
+        let wanted = Set(ids)
+        let targets = visibleItems.filter { wanted.contains($0.id) }
+        let downloads = targets.compactMap { item -> Job? in
+            if case .download(let job) = item, model.canOperate(on: job) { return job }; return nil
+        }
+        let uploads = targets.compactMap { item -> UploadJob? in
+            if case .upload(let job) = item, UploadAction.remove.allows(job) { return job }; return nil
+        }
+        guard !downloads.isEmpty || !uploads.isEmpty else { return }
+        guard removal != .trashingFiles || uploads.isEmpty else {
+            operationError = "上传任务没有删除本地源文件的操作，请分别选择下载任务。"
+            return
+        }
+        let cleanup = Dictionary(uniqueKeysWithValues: downloads.map {
             ($0.id, $0.hasJobDirectory && !$0.isCleanedUp && model.settings.cleanupAfterDownload(for: $0.provider))
         })
+        let pending = PendingTransferRemoval(downloads: downloads, uploads: uploads, removal: removal, cleanup: cleanup)
+        if removal == .trashingFiles || !uploads.isEmpty || downloads.contains(where: \.isUnfinished) { pendingRemoval = pending }
+        else { remove(pending) }
     }
 
-    /// 任务仍存在时切到其来源并清除筛选；已移除时只关闭过期提示。
-    private func revealAddedJob(_ job: Job) {
-        addedJobNotice = nil
-        guard let currentJob = model.coordinator.jobs.first(where: { $0.id == job.id }) else { return }
-        providerFilter = currentJob.provider
-        category = .all
-        searchText = ""
-        selection = [currentJob.id]
-    }
-
-    private func remove(_ jobs: [Job], _ removal: JobRemoval, cleanup: [Job.ID: Bool]) {
-        for job in jobs {
-            selection.remove(job.id)
-            model.remove(job, trashingFiles: removal == .trashingFiles, cleanupConfirmed: cleanup[job.id])
+    /// 固定本次远端清理选择；确认后再次与当前可见范围相交，避免筛选改变扩大删除范围。
+    private func remove(_ pending: PendingTransferRemoval) {
+        let visible = Set(visibleItems.map(\.id))
+        for job in pending.downloads where visible.contains(.init(direction: .download, id: job.id)) {
+            selection.remove(.init(direction: .download, id: job.id))
+            model.remove(job, trashingFiles: pending.removal == .trashingFiles, cleanupConfirmed: pending.cleanup[job.id])
         }
+        let uploads = pending.uploads.filter { visible.contains(.init(direction: .upload, id: $0.id)) }
+        if !uploads.isEmpty { uploadCommand = .init(action: .remove, jobs: uploads) }
+    }
+
+    /// 独立上传 actor 操作按当前范围路由，确认／错误状态由主窗口持有，菜单关闭不丢失。
+    private func performUpload(_ request: UploadCommand) async {
+        defer { uploadCommand = nil }
+        guard let coordinator = model.uploadCoordinator else { operationError = "上传服务尚未就绪。"; return }
+        var failures: [String] = []
+        for requested in request.jobs {
+            if Task.isCancelled { return }
+            let key = TransferTaskID(direction: .upload, id: requested.id)
+            guard visibleItems.contains(where: { $0.id == key }),
+                  let job = model.uploadJobs.first(where: { $0.id == requested.id }), request.action.allows(job) else { continue }
+            do {
+                switch request.action {
+                case .pause: try await coordinator.pause(job.id)
+                case .resume: try await coordinator.resume(job.id)
+                case .retry: try await coordinator.retry(job.id)
+                case .cancel: try await coordinator.cancel(job.id)
+                case .remove: try await coordinator.remove(job.id)
+                case .prioritize: try await coordinator.prioritize(job.id)
+                case .reconcile: try await coordinator.reconcile(job.id)
+                }
+            } catch {
+                guard !Task.isCancelled else { return }
+                failures.append("\(job.title)：\(error.localizedDescription)")
+            }
+        }
+        if !failures.isEmpty { operationError = failures.joined(separator: "\n") }
+    }
+
+    private func inspect(_ ids: [TransferTaskID]) {
+        let wanted = Set(ids)
+        let targets = visibleItems.filter { wanted.contains($0.id) }
+        guard !targets.isEmpty else { return }
+        selection = Set(targets.map(\.id))
+        if targets.count == 1, case .upload(let job) = targets[0] { uploadDetail = .init(id: job.id, title: job.title) }
+        else { isInspectorPresented = true }
+    }
+
+    /// 新增任务定位原来源，清理会遮住它的筛选；全部传输视图保持全部，不强迫切换方向。
+    private func reveal(_ item: TransferListItem) {
+        switch item {
+        case .download(let job):
+            if direction == .upload { direction = .download }
+            providerFilter = job.provider
+        case .upload(let job):
+            if direction == .download { direction = .upload }
+            providerFilter = job.account.provider
+        }
+        category = .all; searchText = ""; selection = [item.id]
+    }
+    private func revealNewUpload() {
+        guard let id = model.lastAddedUploadID, id != revealedUploadID,
+              let job = model.uploadJobs.first(where: { $0.id == id }) else { return }
+        revealedUploadID = id; reveal(.upload(job))
     }
 
     #if DEBUG
-    /// 演示模式：按启动参数选中分类和任务。
     private func showDemoSelection() async {
         guard DemoData.isEnabled else { return }
         while !model.coordinator.isStarted {
-            do {
-                try await Task.sleep(for: .milliseconds(50))
-            } catch {
-                return
-            }
+            do { try await Task.sleep(for: .milliseconds(50)) } catch { return }
         }
-        if let value = DemoData.category.flatMap(JobCategory.init(rawValue:)) {
-            category = value
-        }
+        if let value = DemoData.category.flatMap(JobCategory.init(rawValue:)) { category = value }
         if let title = DemoData.selectedTitle, let job = model.coordinator.jobs.first(where: { $0.title == title }) {
-            selection = [job.id]
-            isInspectorPresented = true
+            selection = [.init(direction: .download, id: job.id)]; isInspectorPresented = true
         }
     }
     #endif
 }
 
-/// 等待确认的移除：要移除的任务和怎样处理已下载的文件。
-private struct PendingRemoval {
-    let jobs: [Job]
+private struct PendingTransferRemoval {
+    let downloads: [Job]
+    let uploads: [UploadJob]
     let removal: JobRemoval
-    let cleanup: [Job.ID: Bool]
-
+    let cleanup: [UUID: Bool]
     var title: String {
-        let subject = jobs.count == 1 ? "移除“\(jobs[0].title)”" : "移除 \(jobs.count) 个任务"
-        return removal == .trashingFiles ? subject + "并删除文件？" : subject + "？"
+        let count = downloads.count + uploads.count
+        return removal == .trashingFiles ? "移除 \(count) 个任务并删除下载文件？" : "移除 \(count) 个任务记录？"
     }
-
-    /// 按发起时固定的清理计划说明两家的移除范围。
     var message: String {
-        var message: String
-        switch removal {
-        case .keepingFiles:
-            message = "未完成的下载会取消，并删除已下载的部分。已完成的文件保留在本地。"
-        case .trashingFiles:
-            message = "已下载的文件会移到废纸篓。"
-            if jobs.contains(where: \.isUnfinished) {
-                message += "未完成的下载会取消，并删除已下载的部分。"
+        var lines: [String] = []
+        if !downloads.isEmpty {
+            lines.append(removal == .trashingFiles ? "下载：已下载文件移到废纸篓；未完成的下载取消并删除已下载部分。" : "下载：保留已完成文件；未完成的下载取消并删除已下载部分。")
+            for provider in Provider.allCases {
+                let targets = downloads.filter { $0.provider == provider }
+                guard !targets.isEmpty else { continue }
+                let count = targets.count { $0.hasJobDirectory && !$0.isCleanedUp && cleanup[$0.id] == true }
+                lines.append("\(provider.title)：清理 \(count) 个任务转存目录。")
             }
         }
-        for provider in Provider.allCases {
-            let targets = jobs.filter { $0.provider == provider }
-            guard !targets.isEmpty else { continue }
-            let directories = targets.count { $0.hasJobDirectory && !$0.isCleanedUp && cleanup[$0.id] == true }
-            message += "\n\(provider.title)：\(targets.count) 个任务；清理 \(directories) 个任务转存目录。"
-        }
-        return message
+        if !uploads.isEmpty { lines.append("上传：仅移除本地任务记录，保留本地源文件、已上传云端文件和独立校验记录。未核对的远端操作会阻止移除。") }
+        return lines.joined(separator: "\n")
     }
 }
 
-/// 当前列表有可暂停任务时优先暂停，否则继续已暂停任务；无目标时禁用。
-private struct PauseResumeAllButton: View {
-    let jobs: [Job]
+private struct TransferPauseResumeButton: View {
+    let scope: TransferSelection
     @Environment(AppModel.self) private var model
-
     var body: some View {
-        if model.pausableJobs(in: jobs).isEmpty, !model.resumableJobs(in: jobs).isEmpty {
-            Button {
-                model.resumeAll(jobs)
-            } label: {
-                Label("继续当前列表", systemImage: "play.fill")
-            }
-            .help("继续当前列表的 \(model.resumableJobs(in: jobs).count) 个任务")
-        } else {
-            Button {
-                model.pauseAll(jobs)
-            } label: {
-                Label("暂停当前列表", systemImage: "pause.fill")
-            }
-            .help("暂停当前列表的 \(model.pausableJobs(in: jobs).count) 个任务")
-            .disabled(model.pausableJobs(in: jobs).isEmpty)
+        let paused = scope.visibleItems.filter { TransferAction.pause.allows($0, model: model) }
+        let resumed = scope.visibleItems.filter { TransferAction.resume.allows($0, model: model) }
+        let action: TransferAction = paused.isEmpty ? .resume : .pause
+        let targets = paused.isEmpty ? resumed : paused
+        Button { scope.onAction(action, targets.map(\.id)) } label: {
+            Label(action == .pause ? "暂停当前列表" : "继续当前列表", systemImage: action == .pause ? "pause.fill" : "play.fill")
         }
+        .disabled(scope.isBusy || targets.isEmpty)
+        .help("\(action == .pause ? "暂停" : "继续")当前列表的 \(targets.count) 个传输任务")
     }
 }
 
-/// 仅操作当前网盘、分类及搜索结果中的上传任务。
-private struct UploadPauseResumeAllButton: View {
-    let jobs: [UploadJob]
-    @Environment(AppModel.self) private var model
-
+private struct TransferInspector: View {
+    let scope: TransferSelection
+    let onDownloadRemove: ([Job], JobRemoval) -> Void
+    private var downloads: [Job] {
+        scope.selectedItems.compactMap { if case .download(let job) = $0 { return job }; return nil }
+    }
     var body: some View {
-        let active = jobs.filter { !$0.phase.isTerminal && !$0.isPaused && !$0.cancellationRequested }
-        let paused = jobs.filter { !$0.phase.isTerminal && $0.isPaused && !$0.cancellationRequested }
-        let shouldResume = active.isEmpty
-        let targets = shouldResume ? paused : active
-        Button {
-            Task {
-                guard let coordinator = model.uploadCoordinator else { return }
-                var problems: [String] = []
-                for job in targets {
-                    do {
-                        if shouldResume { try await coordinator.resume(job.id) }
-                        else { try await coordinator.pause(job.id) }
-                    } catch { problems.append("\(job.title)：\(error.localizedDescription)") }
+        if scope.selectedItems.isEmpty { ContentUnavailableView("未选择任务", systemImage: "sidebar.trailing") }
+        else if downloads.count == scope.selectedItems.count { JobInspector(jobs: downloads, onRemove: onDownloadRemove) }
+        else if scope.selectedItems.count == 1, case .upload(let job) = scope.selectedItems[0] {
+            Form {
+                Section {
+                    Text(job.title).font(.headline).textSelection(.enabled)
+                    LabeledContent("账号", value: "\(job.account.provider.title) · \(job.accountName)")
+                    LabeledContent("阶段", value: job.isPaused ? "已暂停 · \(job.phase.displayName)" : job.phase.displayName)
+                    LabeledContent("已完成 / 失败 / 跳过", value: "\(job.completedCount) / \(job.failedCount) / \(job.skippedCount)")
+                    if let error = job.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
                 }
-                if !problems.isEmpty { model.uploadProblem = problems.joined(separator: "\n") }
-            }
-        } label: {
-            Label(shouldResume ? "继续当前列表" : "暂停当前列表", systemImage: shouldResume ? "play.fill" : "pause.fill")
+                Section("操作") { TransferActionsMenu(scope: scope) }
+            }.formStyle(.grouped)
+        } else {
+            ContentUnavailableView {
+                Label("已选择 \(scope.selectedItems.count) 个传输任务", systemImage: "square.stack")
+            } actions: { VStack { TransferActionsMenu(scope: scope) }.buttonStyle(.bordered) }
         }
-        .disabled(targets.isEmpty)
-        .help("\(shouldResume ? "继续" : "暂停")当前列表的 \(targets.count) 个上传任务")
     }
 }
 
@@ -320,6 +367,10 @@ private struct StatusBar: View {
 
     var body: some View {
         let jobs = model.coordinator.jobs
+        let uploads = model.uploadJobs
+        let uploadedBytes = uploads.reduce(Int64(0)) { $0 + $1.completedBytes }
+        let uploadTotalBytes = uploads.reduce(Int64(0)) { $0 + $1.totalBytes }
+        let uploadSummary = "上传 \(ByteCountFormatter.string(fromByteCount: uploadedBytes, countStyle: .file)) / \(ByteCountFormatter.string(fromByteCount: uploadTotalBytes, countStyle: .file))"
         let activities = jobs.map { model.coordinator.activity(of: $0.id) }
         let progress = JobProgress(
             receivedBytes: activities.reduce(0) { $0 + $1.progress.receivedBytes },
@@ -329,15 +380,14 @@ private struct StatusBar: View {
         let completedFiles = activities.reduce(0) { $0 + $1.completedFileCount }
         let preparing = jobs.count { $0.phase == .transferring }
         let summary = preparing == 0 ? progress.summary : [progress.sizeSummary, progress.speedText].compactMap { $0 }.joined(separator: " · ")
-        if !jobs.isEmpty {
+        if !jobs.isEmpty || !uploads.isEmpty {
             HStack {
-                Label("全部网盘", systemImage: "arrow.down")
+                Label("全部传输", systemImage: "arrow.up.arrow.down")
                     .fixedSize()
-                Text(summary)
+                Text([jobs.isEmpty ? nil : "下载 " + summary, uploads.isEmpty ? nil : uploadSummary].compactMap { $0 }.joined(separator: " · "))
                     .truncationMode(.tail)
-                    .help(summary)
                 Spacer(minLength: 0)
-                Text("\(completedFiles)/\(totalFiles) 文件")
+                Text(uploads.isEmpty ? "\(completedFiles)/\(totalFiles) 文件" : "上传 \(uploads.count) 批次")
                     .fixedSize()
                 Button {
                     showsStatistics.toggle()
@@ -345,11 +395,15 @@ private struct StatusBar: View {
                     Image(systemName: "info.circle")
                 }
                 .buttonStyle(.plain)
-                .help("全部网盘下载统计")
-                .accessibilityLabel("全部网盘下载统计")
+                .help("全部网盘传输统计")
+                .accessibilityLabel("全部网盘传输统计")
                 .popover(isPresented: $showsStatistics) {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("全部网盘").font(.headline)
+                        Text("全部网盘传输").font(.headline)
+                        if !uploads.isEmpty {
+                            LabeledContent("上传已确认 / 总大小", value: uploadSummary)
+                            LabeledContent("上传批次", value: "\(uploads.filter { $0.phase == .completed }.count) 完成 / \(uploads.count) 总计")
+                        }
                         ProgressView(value: progress.fractionCompleted)
                         LabeledContent("已下载 / 已确定总大小", value: progress.sizeSummary)
                         LabeledContent("总速度", value: progress.speedText ?? "—")
