@@ -32,6 +32,57 @@ import Testing
         #expect(backup.request.context == Data(file.remotePath.utf8))
         #expect(backup.receivedBytes == 10_000)
     }
+
+    /// 缺少原账号时保留已有字节和分片位移；恢复同一账号后沿原文件 ID 继续，不覆盖已下载前缀。
+    @Test func missingAccountPreservesPartialAndResumesOriginalFileAfterLogin() async throws {
+        let prefixSize = 10_000
+        let remote = randomData(50_000)
+        let prefix = Data(remote.prefix(prefixSize))
+        let fixture = Fixture(share: ["a.bin": remote])
+        let job = try await fixture.makeTransferredJob()
+        let file = try #require(job.files.first)
+        try fixture.store.save([job])
+        let context = try DownloadContext(account: Fixture.account,
+            reference: .baidu(path: file.remotePath, fsID: 0), size: file.size).encoded()
+        let request = DownloadRequest(id: file.id, destination: fixture.downloads.appending(path: file.relativePath),
+            expectedSize: file.size, context: context, connections: 1)
+        try prefix.write(to: request.temporaryURL)
+        var record = DownloadRecord(request: request)
+        record.acceptsRanges = true
+        record.segments = [Segment(start: 0, end: file.size, received: Int64(prefixSize))]
+        let state = StateStore(directory: fixture.stateDirectory)
+        try state.save(record)
+        let coordinator = fixture.makeCoordinator()
+        coordinator.netdisks[.baidu] = nil
+
+        await coordinator.start()
+        try await coordinator.waitForPhase(.failed(.download), of: job.id)
+
+        #expect(coordinator.job(job.id)?.error?.contains(CoordinatorError.notLoggedIn.errorDescription!) == true)
+        #expect(coordinator.job(job.id)?.accountKey == Fixture.account)
+        #expect(coordinator.job(job.id)?.files.first?.id == file.id)
+        #expect(try Data(contentsOf: request.temporaryURL) == prefix)
+        let retained = try JSONDecoder().decode(DownloadRecord.self, from: Data(contentsOf: state.fileURL(for: file.id)))
+        #expect(retained.request.id == file.id)
+        #expect(retained.request.context == context)
+        #expect(retained.segments == record.segments)
+        #expect(retained.receivedBytes == Int64(prefixSize))
+        #expect(fixture.server.resolves(for: file.remotePath) == 0)
+        #expect(fixture.server.requests(for: file.remotePath) == 0)
+
+        coordinator.netdisks[.baidu] = fixture.netdisk
+        await coordinator.retry(job.id)
+        try await coordinator.waitForPhase(.completed, of: job.id)
+
+        let completed = try #require(coordinator.job(job.id)?.files.first)
+        #expect(completed.id == file.id)
+        #expect(try Data(contentsOf: #require(completed.localURL)) == remote)
+        #expect(fixture.server.resolves(for: file.remotePath) == 1)
+        #expect(fixture.server.requests(for: file.remotePath) == 1)
+        #expect(fixture.server.requestedRanges(for: file.remotePath) == ["bytes=10000-49999"])
+        await coordinator.shutdown()
+    }
+
     @Test func corruptDownloadRecordStopsRestorationWithoutOverwritingProgress() async throws {
         let fixture = Fixture(share: ["a.bin": randomData(10)])
         let job = try await fixture.makeTransferredJob()

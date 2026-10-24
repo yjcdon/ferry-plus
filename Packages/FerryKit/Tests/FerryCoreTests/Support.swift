@@ -238,12 +238,17 @@ final class FileServer: Sendable {
     }
 
     private let resolveLog = OSAllocatedUnfairLock<[String]>(initialState: [])
+    private let rangeLog = OSAllocatedUnfairLock<[(path: String, range: String?)]>(initialState: [])
 
     var log: [String] { state.withLock { $0.log } }
     func requests(for path: String) -> Int { log.count { $0 == path } }
     /// `FileServerSource` 为这个网盘路径获取下载链接的次数。
     func resolves(for path: String) -> Int { resolveLog.withLock { $0.count { $0 == path } } }
     func recordResolve(_ path: String) { resolveLog.withLock { $0.append(path) } }
+    /// 指定文件的实际 HTTP Range 请求，用于核对重启后没有重新请求已保存的前缀。
+    func requestedRanges(for path: String) -> [String?] {
+        rangeLog.withLock { $0.filter { $0.path == path }.map(\.range) }
+    }
     /// 停住所有响应，直到设为 false 或请求被取消。
     func setStalled(_ stalled: Bool) { state.withLock { $0.stalled = stalled } }
     /// 只停住以这些后缀结尾的路径。
@@ -262,6 +267,7 @@ final class FileServer: Sendable {
     func serve(_ request: URLRequest, on connection: FileProtocol) {
         let url = request.url!
         let path = url.path(percentEncoded: false)
+        rangeLog.withLock { $0.append((path, request.value(forHTTPHeaderField: "Range"))) }
         let isFailing = state.withLock { state in
             state.log.append(path)
             return state.failing.contains { path.hasSuffix($0) }
