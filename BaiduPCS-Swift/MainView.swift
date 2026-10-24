@@ -17,6 +17,13 @@ struct MainView: View {
     @State private var operationError: String?
     @State private var uploadDetail: UploadDetailRequest?
     @State private var revealedUploadID: UUID?
+    @State private var localVerification: LocalVerificationRequest?
+
+    private struct LocalVerificationRequest: Identifiable {
+        let jobID: UUID
+        let file: JobFile
+        var id: String { "\(jobID)-\(file.id)" }
+    }
 
     private struct UploadCommand: Identifiable {
         let id = UUID()
@@ -73,7 +80,8 @@ struct MainView: View {
                 transferContent(items: items, scope: scope)
                 if isInspectorPresented {
                     Divider()
-                    TransferInspector(scope: scope, onDownloadRemove: requestDownloadRemoval)
+                    TransferInspector(scope: scope, onDownloadRemove: requestDownloadRemoval,
+                        onVerify: { jobID, file in localVerification = .init(jobID: jobID, file: file) })
                         .frame(width: 320)
                         .frame(maxHeight: .infinity)
                 }
@@ -121,6 +129,10 @@ struct MainView: View {
         .alert("传输操作未完成", isPresented: Binding(
             get: { operationError != nil }, set: { if !$0 { operationError = nil } }
         )) { Button("好") { operationError = nil } } message: { Text(operationError ?? "") }
+        // 复验会改变任务分类；Sheet 归主窗口持有，不能随已完成列表中的行消失而取消。
+        .sheet(item: $localVerification) { request in
+            CompletedFileVerificationSheet(jobID: request.jobID, file: request.file)
+        }
         .sheet(item: $uploadDetail) { detail in UploadFilesView(jobID: detail.id, title: detail.title) }
         .alert("有些文件没有移到废纸篓", isPresented: Binding(
             get: { !model.untrashedItems.isEmpty }, set: { if !$0 { model.untrashedItems = [] } }
@@ -352,6 +364,7 @@ private struct TransferPauseResumeButton: View {
 private struct TransferInspector: View {
     let scope: TransferSelection
     let onDownloadRemove: ([Job], JobRemoval) -> Void
+    let onVerify: (UUID, JobFile) -> Void
     private var downloads: [Job] {
         scope.selectedItems.compactMap { if case .download(let job) = $0 { return job }; return nil }
     }
@@ -360,7 +373,7 @@ private struct TransferInspector: View {
         else if downloads.count == scope.selectedItems.count {
             JobInspector(jobs: downloads, onAction: { jobs, action in
                 scope.onAction(TransferAction(action), jobs.map { .init(direction: .download, id: $0.id) })
-            }, onRemove: onDownloadRemove)
+            }, onRemove: onDownloadRemove, onVerify: onVerify)
         }
         else if scope.selectedItems.count == 1, case .upload(let job) = scope.selectedItems[0] {
             Form {

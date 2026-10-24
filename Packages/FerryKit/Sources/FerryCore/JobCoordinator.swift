@@ -137,6 +137,156 @@ public final class JobCoordinator {
         }
     }
 
+    /// 已完成任务的本地复验状态。它只用于界面，恢复仍依据文件上保存的 pending／mismatch。
+    public private(set) var verifyingLocalFiles: Set<String> = []
+    @ObservationIgnored private var localVerifications: [String: LocalVerification] = [:]
+    private struct LocalVerification {
+        let token: UUID
+        let jobID: UUID
+        let task: Task<Void, Error>
+    }
+
+    /// 后补用户摘要，或复验原有可信摘要。纠正用户原先输入的摘要必须显式确认。
+    /// 全部文件必须已有本地完成位置；复验不访问网盘，也不触发下载完成收尾。
+    public func verifyCompletedFile(jobID: UUID, fileID: String, algorithm: IntegrityAlgorithm, digest: String,
+                                    replacingUserProvided: Bool = false) async throws {
+        await waitUntilStarted()
+        try Task.checkCancellation()
+        guard let job = activeJob(jobID), !job.files.isEmpty, job.files.allSatisfy(\.isCompleted),
+              job.phase == .completed || job.phase == .failed(.download),
+              let file = job.files.first(where: { $0.id == fileID }), let localURL = file.localURL else {
+            throw LocalFileIntegrityError.unavailable
+        }
+        guard !localVerifications.values.contains(where: { $0.jobID == jobID }) else { throw LocalFileIntegrityError.alreadyRunning }
+        let expectation = try IntegrityExpectation(algorithm: algorithm, digest: digest.trimmingCharacters(in: .whitespacesAndNewlines),
+                                                   origin: .userProvided, size: file.size, reference: file.remoteReference)
+        let basis: IntegrityExpectation
+        if let original = file.integrityExpectation {
+            let same = original.algorithm == expectation.algorithm && original.digest == expectation.digest
+            guard same || original.origin == .userProvided && replacingUserProvided else { throw LocalFileIntegrityError.basisConflict }
+            basis = same ? original : expectation
+        } else { basis = expectation }
+        if basis.algorithm == .md5, let remoteMD5 = file.md5?.lowercased(),
+           IntegrityExpectation.isDigest(remoteMD5, algorithm: .md5), remoteMD5 != basis.digest {
+            throw LocalFileIntegrityError.basisConflict
+        }
+        // 独立获取权限，避免下载 finish 交回自己的 openedFolders 时打断本地复验。
+        let recordedFolder = job.downloadFolder ?? downloadFolder
+        let opened = try folderAccess.open(recordedFolder)
+        let readURL: URL
+        do {
+            let base = recordedFolder.url.standardizedFileURL.pathComponents
+            let path = localURL.standardizedFileURL.pathComponents
+            guard path.count > base.count, zip(base, path).allSatisfy({ $0 == $1 }),
+                  let destination = LocalPath.destination(for: path.dropFirst(base.count).joined(separator: "/"), in: opened.url) else {
+                throw LocalFileIntegrityError.unavailable
+            }
+            readURL = destination
+            try persistLocalChange(jobID: jobID, fileID: fileID) { job, file in
+                file.integrityExpectation = basis
+                file.integrityStatus = .pending
+                file.integrityVerifiedAt = nil
+                job.phase = .failed(.download)
+                job.error = "本地内容校验尚未完成，可重新校验。"
+            }
+        } catch {
+            folderAccess.close(opened)
+            throw error
+        }
+        let token = UUID()
+        let task = Task { [self] in
+            defer {
+                folderAccess.close(opened)
+                if localVerifications[fileID]?.token == token {
+                    localVerifications[fileID] = nil
+                    verifyingLocalFiles.remove(fileID)
+                }
+            }
+            do {
+                let reader = Task.detached(priority: .utility) {
+                    try LocalFileIntegrityVerifier.digests(at: readURL, expectedSize: file.size)
+                }
+                let actual = try await withTaskCancellationHandler { try await reader.value } onCancel: { reader.cancel() }
+                try Task.checkCancellation()
+                guard localVerifications[fileID]?.token == token, let current = activeJob(jobID),
+                      let currentFile = current.files.first(where: { $0.id == fileID }),
+                      currentFile.localURL == localURL, currentFile.size == file.size,
+                      currentFile.remoteReference == file.remoteReference, currentFile.integrityExpectation == basis else {
+                    throw CancellationError()
+                }
+                let digest = basis.algorithm == .sha256 ? actual.sha256 : actual.md5
+                let oldMD5 = file.md5?.lowercased()
+                let matchesMD5 = oldMD5.map { !IntegrityExpectation.isDigest($0, algorithm: .md5) || $0 == actual.md5 } ?? true
+                let matches = digest == basis.digest && matchesMD5
+                try persistLocalChange(jobID: jobID, fileID: fileID) { job, file in
+                    file.integrityStatus = matches ? .verified : .mismatch
+                    file.integrityVerifiedAt = matches ? .now : nil
+                    if matches && job.files.allSatisfy({ $0.id == fileID || $0.integrityExpectation == nil || $0.integrityStatus == .verified }) {
+                        job.phase = .completed
+                        job.error = nil
+                    } else {
+                        job.phase = .failed(.download)
+                        job.error = matches ? "其他本地文件仍需完成内容校验，可重试。" : "本地文件内容与校验依据不一致，文件已保留。"
+                    }
+                }
+                if !matches { throw LocalFileIntegrityError.mismatch }
+            } catch {
+                // 摘要不匹配已经保存；取消／读取错误保留 pending，不能冒充完成或内容不一致。
+                if localVerifications[fileID]?.token == token, let current = self.job(jobID),
+                   current.files.first(where: { $0.id == fileID })?.integrityStatus == .pending {
+                    try persistLocalChange(jobID: jobID, fileID: fileID) { job, _ in
+                        job.phase = .failed(.download)
+                        job.error = error is CancellationError ? "本地内容校验已取消，可重试。" : Self.message(for: error)
+                    }
+                }
+                throw error
+            }
+        }
+        localVerifications[fileID] = .init(token: token, jobID: jobID, task: task)
+        verifyingLocalFiles.insert(fileID)
+        try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+    }
+
+    /// 取消后等待读取线程和权限回收完成；已保存的待校验依据仍可重试。
+    public func cancelLocalVerification(fileID: String) async {
+        guard let verification = localVerifications[fileID] else { return }
+        verification.task.cancel()
+        _ = try? await verification.task.value
+    }
+
+    /// 单次同步更新与原子保存；保存失败撤回内存改动，不显示没有落盘的“校验通过”。
+    private func persistLocalChange(jobID: UUID, fileID: String, _ change: (inout Job, inout JobFile) -> Void) throws {
+        guard let (index, fileIndex) = locate(fileID), jobs[index].id == jobID else { throw CancellationError() }
+        let original = jobs[index]
+        var next = original
+        var file = next.files[fileIndex]
+        change(&next, &file)
+        next.files[fileIndex] = file
+        jobs[index] = next
+        markChanged(jobID)
+        do { try persistRequired() }
+        catch {
+            jobs[index].files[fileIndex] = original.files[fileIndex]
+            jobs[index].phase = original.phase
+            jobs[index].error = original.error
+            markChanged(jobID)
+            throw error
+        }
+    }
+
+    /// 已下载内容上的未完成复验先于网络重试；失败保留本地位置，不交给引擎重新下载。
+    private func retryLocalVerification(_ id: UUID) async -> Bool {
+        guard let job = activeJob(id), !job.files.isEmpty, job.files.allSatisfy(\.isCompleted) else { return false }
+        let files = job.files.filter { $0.integrityExpectation != nil && ($0.integrityStatus == .pending || $0.integrityStatus == .mismatch) }
+        guard !files.isEmpty else { return false }
+        for file in files {
+            guard let basis = file.integrityExpectation else { continue }
+            do { try await verifyCompletedFile(jobID: id, fileID: file.id, algorithm: basis.algorithm, digest: basis.digest) }
+            catch { return true }
+        }
+        return true
+    }
+
     // MARK: - 启动与退出
 
     /// 读取任务列表，取得未完成任务的下载目录的访问权限，然后恢复引擎中的文件下载。
@@ -168,6 +318,10 @@ public final class JobCoordinator {
             loaded[index].error = loaded[index].link != nil ? "应用退出时转存没有完成。" : "应用退出时准备没有完成。"
         }
         // 启动完成前添加的任务排在前面。
+        for index in loaded.indices where loaded[index].files.contains(where: { $0.localURL != nil && $0.integrityExpectation != nil && ($0.integrityStatus == .pending || $0.integrityStatus == .mismatch) }) {
+            loaded[index].phase = .failed(.download)
+            loaded[index].error = loaded[index].error ?? "本地内容校验尚未通过，可重新校验。"
+        }
         jobs += loaded
         invalidateIndex()
         hasLoaded = true
@@ -198,7 +352,7 @@ public final class JobCoordinator {
             var connections: [String: Int] = [:]
             var pausedIDs = Set<String>()
             for job in jobs {
-                if job.isPaused || job.files.contains(where: { Self.integrityConflict(of: $0) != nil }) {
+                if job.isPaused || job.files.contains(where: { Self.integrityConflict(of: $0) != nil || $0.localURL != nil && $0.integrityExpectation != nil && ($0.integrityStatus == .pending || $0.integrityStatus == .mismatch) }) {
                     pausedIDs.formUnion(job.files.map(\.id))
                 }
                 guard let account = job.accountKey else { continue }
@@ -268,6 +422,9 @@ public final class JobCoordinator {
     /// 应用退出前调用：停止下载，把已完成的文件下载记入任务，然后保存。
     public func shutdown() async {
         isShuttingDown = true
+        let verifications = localVerifications.values.map(\.task)
+        verifications.forEach { $0.cancel() }
+        for verification in verifications { _ = try? await verification.value }
         let running = Array(tasks.values)
         running.forEach { $0.cancel() }
         for task in running { await task.value }
@@ -386,6 +543,7 @@ public final class JobCoordinator {
             // 重用已记录的目录和回执；结果不明时不会重复提交。网盘任务只重新列出。
             startTransfer(id)
         case .download:
+            if await retryLocalVerification(id) { return }
             guard !failConflictingIntegrity(of: id) else { return }
             update(id) {
                 $0.phase = .downloading
@@ -410,6 +568,9 @@ public final class JobCoordinator {
         guard job(id) != nil, !removingJobs.contains(id) else { return [] }
         removingJobs.insert(id)
         defer { removingJobs.remove(id) }
+        let verifications = localVerifications.values.filter { $0.jobID == id }.map(\.task)
+        verifications.forEach { $0.cancel() }
+        for verification in verifications { _ = try? await verification.value }
         if let task = tasks.removeValue(forKey: id) {
             task.cancel()
             await task.value

@@ -384,6 +384,7 @@ struct JobStatusLine: View {
                 .accessibilityLabel(job.provider.title + (job.isNetdisk ? "，账号内文件" : "，分享链接"))
             Text(isRemoving
                  ? "正在移除…"
+                 : job.files.contains(where: { model.coordinator.verifyingLocalFiles.contains($0.id) }) ? "正在校验本地文件…"
                  : job.statusText(isRunning: activity.isRunning, cleansUp: model.settings.cleanupAfterDownload(for: job.provider)))
             if !job.files.isEmpty {
                 Text(job.phase == .downloading && !job.isPaused ? activity.progress.summary : activity.progress.sizeSummary)

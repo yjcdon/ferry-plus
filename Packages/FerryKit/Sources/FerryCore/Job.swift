@@ -99,6 +99,11 @@ public struct Job: Codable, Sendable, Hashable, Identifiable {
         isCleanedUp = false
     }
 
+    /// 仅在整批文件均已落盘后补充或复验摘要，避免和仍在下载的同批文件混用生命周期。
+    public var canVerifyCompletedFiles: Bool {
+        !files.isEmpty && files.allSatisfy(\.isCompleted) && (phase == .completed || phase == .failed(.download))
+    }
+
     /// 来源的分享链接。网盘任务为 nil。
     public var link: DiskShareLink? {
         if case .share(let link, _, _) = source { link } else { nil }
