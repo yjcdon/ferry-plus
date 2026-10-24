@@ -72,8 +72,8 @@ public enum QuarkError: LocalizedError, Sendable, Equatable {
         switch self {
         case .invalidResponse: "夸克接口返回了无法识别的数据，请稍后重试。"
         case .httpStatus(let code): "夸克请求失败（HTTP \(code)）。"
-        case .serviceCode(let code): "夸克请求未成功（业务码 \(code)），请稍后重试。"
-        case .serviceFailure(let code, let message): "夸克请求未成功：\(message)（\(code)）。"
+        case .serviceCode(let code): Self.serviceDescription(code: code, message: nil)
+        case .serviceFailure(let code, let message): Self.serviceDescription(code: code, message: message)
         case .loginExpired: "夸克登录已失效，请在官方页面重新登录。"
         case .accountChanged: "返回的夸克账号与已保存账号不同，请重新登录。"
         case .missingIdentity: "未取得夸克账号的稳定标识，登录信息尚未保存。"
@@ -87,5 +87,17 @@ public enum QuarkError: LocalizedError, Sendable, Equatable {
         case .invalidPasscode: "夸克分享提取码不正确，请检查后重试。"
         case .shareUnavailable: "夸克分享已失效、被取消或无法访问。"
         }
+    }
+
+    /// 将服务端业务失败转为可操作的说明；原始消息仍保存在错误关联值中供诊断。
+    private static func serviceDescription(code: String, message: String?) -> String {
+        if code == "32003" {
+            // 已实测该码表示容量限制，但响应未说明是账号剩余空间还是单次转存额度。
+            return "夸克服务端拒绝了本次操作：容量限制（业务码 32003）。请在夸克官方页面检查可用空间和转存限制，必要时减少所选文件后重试。"
+        }
+        guard let message else { return "夸克请求未成功（业务码 \(code)），请稍后重试。" }
+        // 有些接口返回未替换参数的模板；保留原因文字，不把模板当成完整的服务端说明。
+        let reason = message.replacingOccurrences(of: #"\{\d+\}"#, with: "参数未提供", options: .regularExpression)
+        return "夸克请求未成功：\(reason)（业务码 \(code)）。"
     }
 }

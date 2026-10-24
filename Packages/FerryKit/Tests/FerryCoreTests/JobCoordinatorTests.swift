@@ -7,6 +7,29 @@ import os
 @testable import FerryCore
 
 @MainActor @Suite struct JobCoordinatorTests {
+    @Test func quarkCapacityFailureExplainsServerLimitWithoutAssumingAccountIsFull() throws {
+        let original = "capacity limit[{0}]"
+        let failure = QuarkError.serviceFailure(code: "32003", message: original)
+        let description = try #require(failure.errorDescription)
+        #expect(description.contains("容量限制"))
+        #expect(description.contains("32003"))
+        #expect(description.contains("官方页面检查"))
+        #expect(description.contains("减少所选文件"))
+        #expect(!description.contains("空间已满"))
+        #expect(!description.contains("{0}"))
+        #expect(QuarkError.serviceCode("32003").errorDescription == description)
+        // 用户说明不显示未替换的模板，但错误对象仍保留服务端原始原因。
+        #expect(failure == .serviceFailure(code: "32003", message: original))
+    }
+
+    @Test func quarkUnknownFailurePreservesCodeAndReasonWithoutRawTemplateParameters() {
+        let templated = QuarkError.serviceFailure(code: "99999", message: "request limit[{0}], retry after {12}")
+        #expect(templated.errorDescription == "夸克请求未成功：request limit[参数未提供], retry after 参数未提供（业务码 99999）。")
+        #expect(QuarkError.serviceFailure(code: "99998", message: "请明天再试").errorDescription ==
+                "夸克请求未成功：请明天再试（业务码 99998）。")
+        #expect(QuarkError.serviceCode("99997").errorDescription == "夸克请求未成功（业务码 99997），请稍后重试。")
+    }
+
     private func quarkSelection(_ disk: QuarkNetdisk) async throws -> (DiskShareSession, [RemoteEntry]) {
         let session = try await disk.openShare(DiskShareLink(provider: .quark, code: "test"), password: nil)
         let root = try await disk.listShare(session, directory: nil)
