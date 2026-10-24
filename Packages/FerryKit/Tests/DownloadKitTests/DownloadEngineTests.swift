@@ -187,6 +187,123 @@ private let megabyte = 1 << 20
         await engine.shutdown()
     }
 
+    /// 另一来源维持最大连接数时，单家升降仍要替换旧请求，同时保留手动暂停。
+    @Test(arguments: [true, false])
+    func perSourceConnectionsChangeWithUnchangedGlobalMaximum(raising: Bool) async throws {
+        let fixture = Fixture()
+        let first = fixture.addFile("baidu.bin", size: 8 * megabyte)
+        let second = fixture.addFile("quark.bin", size: 8 * megabyte)
+        fixture.addFile("paused.bin", size: megabyte)
+        fixture.server.setStall(after: 64 * kilobyte)
+        defer { fixture.server.setStall(after: nil) }
+        let configuration = DownloadConfiguration.test(files: 3, connections: 3)
+        let engine = fixture.makeEngine(configuration)
+        var baidu = fixture.request("baidu.bin")
+        baidu.connections = raising ? 1 : 3
+        var quark = fixture.request("quark.bin")
+        quark.connections = 3
+        var paused = fixture.request("paused.bin")
+        paused.connections = 1
+        try await engine.enqueue(paused)
+        await engine.pause(id: paused.id)
+        try await engine.enqueue(baidu)
+        try await engine.enqueue(quark)
+        try await waitUntil("initial per-source connections") {
+            fixture.server.activeRequests == (raising ? 4 : 6)
+        }
+        await engine.updateConfiguration(configuration, connections: [baidu.id: raising ? 3 : 1, quark.id: 3, paused.id: 2])
+        try await waitUntil("updated per-source connections") {
+            fixture.server.activeRequests == (raising ? 6 : 4)
+        }
+        #expect(await engine.snapshot(id: paused.id)?.state == .paused)
+        let records = try fixture.savedRecords()
+        #expect(records.first { $0.request.id == baidu.id }?.request.connections == (raising ? 3 : 1))
+        #expect(records.first { $0.request.id == quark.id }?.request.connections == 3)
+        #expect(records.first { $0.request.id == paused.id }?.request.connections == 2)
+        #expect(records.first { $0.request.id == paused.id }?.isPaused == true)
+        #expect(fixture.server.maxActive <= 6)
+        fixture.server.setStall(after: nil)
+        _ = try await engine.waitForCompletion(of: baidu.id)
+        _ = try await engine.waitForCompletion(of: quark.id)
+        #expect(fixture.contents(baidu.id) == first)
+        #expect(fixture.contents(quark.id) == second)
+        await engine.shutdown()
+    }
+
+    /// 重启使用当前来源配置，不能重新采用旧请求中的连接数；暂停标记不变。
+    @Test func restoreUpdatesPerSourceConnectionsWithoutResumingPausedFile() async throws {
+        let fixture = Fixture()
+        fixture.addFile("paused.bin", size: megabyte)
+        let first = fixture.makeEngine()
+        var request = fixture.request("paused.bin")
+        request.connections = 3
+        try await first.enqueue(request)
+        await first.pause(id: request.id)
+        await first.shutdown()
+        let second = fixture.makeEngine()
+        let restored = try await second.restore(connections: [request.id: 1])
+        #expect(restored.first?.state == .paused)
+        #expect(try fixture.savedRecords().first?.request.connections == 1)
+        #expect(try fixture.savedRecords().first?.isPaused == true)
+        await second.shutdown()
+    }
+
+    /// 文件请求跨 actor 迟到时也采用已更新的来源配置，不能恢复请求中的旧预算。
+    @Test func latestConnectionsApplyToRequestEnqueuedAfterConfigurationUpdate() async throws {
+        let fixture = Fixture()
+        fixture.addFile("late.bin", size: 3 * megabyte)
+        fixture.server.setStall(after: 64 * kilobyte)
+        defer { fixture.server.setStall(after: nil) }
+        let configuration = DownloadConfiguration.test(files: 1, connections: 3)
+        let engine = fixture.makeEngine(configuration)
+        var request = fixture.request("late.bin")
+        request.connections = 3
+        await engine.updateConfiguration(configuration, connections: [request.id: 1])
+        try await engine.enqueue(request)
+        try await waitUntil("latest connection override to take effect") { fixture.server.activeRequests == 1 }
+        await engine.pause(id: request.id)
+        #expect(try fixture.savedRecords().first?.request.connections == 1)
+        #expect(fixture.server.maxActive == 1)
+        await engine.shutdown()
+    }
+
+    /// 快速降后升采用最后配置，收尾期间新加入的文件不能绕过屏障或带回旧覆盖值。
+    @Test func rapidPerSourceUpdatesKeepLatestConnectionsForNewEnqueues() async throws {
+        let fixture = Fixture()
+        fixture.addFile("old.bin", size: 3 * megabyte)
+        fixture.addFile("new.bin", size: 3 * megabyte)
+        fixture.server.setStall(after: 64 * kilobyte)
+        let source = GatedSource(fixture.source, gating: ["old.bin"])
+        defer { source.open(); fixture.server.setStall(after: nil) }
+        let configuration = DownloadConfiguration.test(files: 2, connections: 3)
+        let engine = DownloadEngine(stateDirectory: fixture.stateDirectory, source: source,
+                                    configuration: configuration, session: fixture.session)
+        var old = fixture.request("old.bin")
+        old.connections = 3
+        try await engine.enqueue(old)
+        try await waitUntil("original source lookup") { source.hasEntered(old.id) }
+        let decrease = Task { [oldID = old.id] in
+            await engine.updateConfiguration(configuration, connections: [oldID: 1, "new.bin": 1])
+        }
+        try await waitUntil("old worker cancellation") { source.wasCancelled(old.id) }
+        var new = fixture.request("new.bin")
+        new.connections = 3
+        try await engine.enqueue(new)
+        #expect(fixture.server.log.isEmpty)
+        let increase = Task { [oldID = old.id, newID = new.id] in
+            await engine.updateConfiguration(configuration, connections: [oldID: 3, newID: 2])
+        }
+        source.open()
+        await decrease.value
+        await increase.value
+        try await waitUntil("latest mixed connection counts") { fixture.server.activeRequests == 5 }
+        let records = try fixture.savedRecords()
+        #expect(records.first { $0.request.id == old.id }?.request.connections == 3)
+        #expect(records.first { $0.request.id == new.id }?.request.connections == 2)
+        #expect(fixture.server.maxActive <= 6)
+        await engine.shutdown()
+    }
+
     @Test func retriesTransientErrors() async throws {
         let fixture = Fixture()
         let data = fixture.addFile("a.bin", size: megabyte)

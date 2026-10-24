@@ -1,5 +1,5 @@
 import BaiduKit
-@testable import DownloadKit
+@testable @testable import DownloadKit
 import Foundation
 import Testing
 import QuarkKit
@@ -7,6 +7,52 @@ import os
 @testable import FerryCore
 
 @MainActor @Suite struct JobCoordinatorTests {
+    /// 当前分网盘连接数覆盖恢复记录，并在共享最大值不变时分别更新两家暂停任务。
+    @Test func settingsUpdateExistingRequestsForBothProvidersAndKeepPause() async throws {
+        let fixture = Fixture()
+        var jobs: [Job] = []
+        let stateStore = StateStore(directory: fixture.stateDirectory)
+        for provider in Provider.allCases {
+            let reference: RemoteReference = provider == .baidu ? .baidu(path: "/baidu.bin", fsID: 1) : .quark(fid: "quark-file")
+            let entry = RemoteEntry(reference: reference, name: "\(provider.rawValue).bin", isDirectory: false, size: 1024)
+            let account = AccountKey(provider: provider, accountID: "1")
+            var file = JobFile(remotePath: reference.identifier, relativePath: entry.name, size: entry.size)
+            file.remoteReference = reference
+            var job = Job(netdiskEntries: [entry])
+            job.accountKey = account
+            job.files = [file]
+            job.phase = .downloading
+            job.isPaused = true
+            jobs.append(job)
+            let request = DownloadRequest(id: file.id, destination: fixture.downloads.appendingPathComponent(entry.name),
+                                          expectedSize: entry.size,
+                                          context: try DownloadContext(account: account, reference: reference, size: entry.size).encoded(),
+                                          connections: 6)
+            var record = DownloadRecord(request: request)
+            record.isPaused = true
+            try stateStore.save(record)
+        }
+        try fixture.store.save(jobs)
+        var settings = FerrySettings(cleanupAfterDownload: false, maxConcurrentFiles: 2, connectionsPerFile: 3)
+        settings.quarkConnectionsPerFile = 3
+        let coordinator = fixture.makeCoordinator(settings: settings)
+        await coordinator.start()
+        #expect(try stateStore.loadAll().allSatisfy { $0.request.connections == 3 && $0.isPaused })
+        for (baidu, quark) in [(1, 3), (3, 1)] {
+            settings.connectionsPerFile = baidu
+            settings.quarkConnectionsPerFile = quark
+            await coordinator.updateSettings(settings)
+            let records = try stateStore.loadAll()
+            for job in jobs {
+                let record = try #require(records.first { $0.request.id == job.files[0].id })
+                #expect(record.request.connections == settings.connections(for: job.provider))
+                #expect(record.isPaused)
+                #expect(coordinator.job(job.id)?.isPaused == true)
+            }
+        }
+        await coordinator.shutdown()
+    }
+
     @Test(arguments: [401, 403, 404, 429])
     func quarkAPIHTTPFailuresKeepMeaningAndUseBoundedResolveRetries(_ status: Int) async throws {
         let stub = QuarkAPIStub()

@@ -6,7 +6,7 @@ import os
 /// 目标路径要在应用持有访问权限的目录中。引擎不处理 security-scoped bookmark。
 public actor DownloadEngine {
     private struct Entry {
-        let record: LiveRecord
+        var record: LiveRecord
         var state: DownloadState
         /// 传输任务结束（包括取消后的收尾）前不为 nil。不为 nil 时，只有传输任务写状态文件。
         var worker: Worker?
@@ -37,6 +37,8 @@ public actor DownloadEngine {
     private var ticker: Task<Void, Never>?
     private var isShutDown = false
     private var pendingConfiguration: DownloadConfiguration?
+    /// 当前来源配置也约束配置更新期间才加入的文件；取消后释放对应项。
+    private var connectionOverrides: [String: Int] = [:]
     private var configurationRevision = 0
 
     /// 引擎用 `sessionConfiguration` 创建会话，并负责 invalidate 它。
@@ -106,7 +108,7 @@ public actor DownloadEngine {
     /// 暂停或失败过的恢复为 paused，其余恢复为 queued 并开始下载。
     /// 调用前，应用要先取得目标目录的访问权限。
     @discardableResult
-    public func restore(contexts: [String: Data] = [:], pausedIDs: Set<String> = []) throws -> [DownloadSnapshot] {
+    public func restore(contexts: [String: Data] = [:], pausedIDs: Set<String> = [], connections: [String: Int] = [:]) throws -> [DownloadSnapshot] {
         let records = try store.loadAll().sorted { $0.createdAt < $1.createdAt }
         var restored: [DownloadSnapshot] = []
         for var record in records where entries[record.request.id] == nil && !cancellingIDs.contains(record.request.id) {
@@ -115,6 +117,10 @@ public actor DownloadEngine {
                 record.request.context = context
             }
             if pausedIDs.contains(record.request.id) { record.isPaused = true }
+            if let connections = connectionOverrides[record.request.id] ?? connections[record.request.id], record.request.connections != connections {
+                record.request.connections = connections
+                try store.save(record)
+            }
             let state: DownloadState = if let url = record.completedURL {
                 .completed(url)
             } else {
@@ -131,6 +137,8 @@ public actor DownloadEngine {
     /// 加入队列。已有同一 id 的下载（包括已完成或取消收尾中的）时不做任何事。
     public func enqueue(_ request: DownloadRequest) throws {
         guard entries[request.id] == nil, !cancellingIDs.contains(request.id) else { return }
+        var request = request
+        if let connections = connectionOverrides[request.id] { request.connections = connections }
         let record = DownloadRecord(request: request)
         try store.save(record)
         add(Entry(record: LiveRecord(record), state: .queued))
@@ -174,6 +182,7 @@ public actor DownloadEngine {
     /// 已完成的下载也要调用：引擎在完成后保留状态文件，`restore()` 时把它恢复为 completed，
     /// 直到应用保存了最终路径并调用这个方法确认。这时只删除状态文件，不删除下载好的文件。
     public func cancel(id: String) async {
+        connectionOverrides[id] = nil
         guard let entry = entries.removeValue(forKey: id) else { return }
         cancellingIDs.insert(id)
         defer { cancellingIDs.remove(id) }
@@ -230,17 +239,27 @@ public actor DownloadEngine {
     }
 
     /// 文件数或连接数改变时先取消并保存现有分片，再按最新预算排队，避免新旧连接预算叠加。
+    /// 按下载 ID 更新来源的连接数；即使全局最大值不变，也先收尾再应用，不改变手动暂停状态。
     /// 其他参数直接生效；分片大小只影响尚未规划分片的下载。
-    public func updateConfiguration(_ configuration: DownloadConfiguration) async {
+    public func updateConfiguration(_ configuration: DownloadConfiguration, connections: [String: Int] = [:]) async {
         let previous = pendingConfiguration ?? settings.value
         let changesBudget = previous.maxConcurrentFiles != configuration.maxConcurrentFiles
             || previous.segmentsPerFile != configuration.segmentsPerFile
-        guard changesBudget else {
-            if pendingConfiguration != nil { pendingConfiguration = configuration }
-            else { settings.value = configuration }
+        let changesConnections = connections.contains { id, value in
+            guard let entry = entries[id] else { return false }
+            return (connectionOverrides[id] ?? entry.record.request.connections) != value
+        }
+        guard changesBudget || changesConnections else {
+            connectionOverrides.merge(connections) { _, latest in latest }
+            if pendingConfiguration != nil {
+                pendingConfiguration = configuration
+            } else {
+                settings.value = configuration
+            }
             return
         }
         pendingConfiguration = configuration
+        connectionOverrides.merge(connections) { _, latest in latest }
         configurationRevision += 1
         let revision = configurationRevision
         let draining = Array(workers.values)
@@ -248,6 +267,14 @@ public actor DownloadEngine {
         for worker in draining { await worker.value }
         // 快速修改时最后一次调用负责应用完整的最新配置；旧调用不能解开调度屏障。
         guard revision == configurationRevision, let latest = pendingConfiguration else { return }
+        for (id, connections) in connectionOverrides {
+            guard var entry = entries[id], entry.record.request.connections != connections else { continue }
+            var record = entry.record.value
+            record.request.connections = connections
+            entry.record = LiveRecord(record)
+            entries[id] = entry
+            try? store.save(record)
+        }
         settings.value = latest
         pendingConfiguration = nil
         schedule()

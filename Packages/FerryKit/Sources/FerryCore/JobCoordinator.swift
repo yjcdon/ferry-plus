@@ -193,6 +193,7 @@ public final class JobCoordinator {
         let restored: [DownloadSnapshot]
         do {
             var contexts: [String: Data] = [:]
+            var connections: [String: Int] = [:]
             var pausedIDs = Set<String>()
             for job in jobs {
                 if job.isPaused { pausedIDs.formUnion(job.files.map(\.id)) }
@@ -200,9 +201,10 @@ public final class JobCoordinator {
                 for file in job.files {
                     let reference = file.remoteReference ?? .baidu(path: file.remotePath, fsID: 0)
                     contexts[file.id] = try DownloadContext(account: account, reference: reference, size: file.size, md5: file.md5).encoded()
+                    connections[file.id] = settings.connections(for: job.provider)
                 }
             }
-            restored = try await engine.restore(contexts: contexts, pausedIDs: pausedIDs)
+            restored = try await engine.restore(contexts: contexts, pausedIDs: pausedIDs, connections: connections)
         } catch {
             logger.error("cannot restore downloads: \(error.localizedDescription)")
             restorationProblem = "下载进度恢复失败，原文件和分片已保留。请检查存储权限后重新启动。"
@@ -280,9 +282,13 @@ public final class JobCoordinator {
         for id in Array(openedFolders.keys) { closeFolder(of: id) }
     }
 
+    /// 两家当前连接数同步到已排队、运行及暂停的下载，统一等待旧连接收尾后生效。
     public func updateSettings(_ settings: FerrySettings) async {
         self.settings = settings
-        await engine.updateConfiguration(settings.downloadConfiguration(base: baseConfiguration))
+        let connections = Dictionary(uniqueKeysWithValues: jobs.flatMap { job in
+            job.files.filter { !$0.isCompleted }.map { ($0.id, settings.connections(for: job.provider)) }
+        })
+        await engine.updateConfiguration(settings.downloadConfiguration(base: baseConfiguration), connections: connections)
     }
 
     // MARK: - 任务操作
