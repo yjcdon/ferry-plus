@@ -128,7 +128,7 @@ private struct TransferRateField: View {
     var body: some View {
         LabeledContent(title) {
             HStack(spacing: 6) {
-                TextField("0", value: kibibytesPerSecond, format: .number.grouping(.never))
+                TextField("", value: kibibytesPerSecond, format: .number.grouping(.never))
                     .labelsHidden()
                     .multilineTextAlignment(.trailing)
                     .frame(width: 100)
