@@ -7,6 +7,64 @@ import os
 @testable import FerryCore
 
 @MainActor @Suite struct JobCoordinatorTests {
+    @Test(arguments: [401, 403, 404, 429])
+    func quarkAPIHTTPFailuresKeepMeaningAndUseBoundedResolveRetries(_ status: Int) async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        stub.state.withLock { $0.httpStatus = status }
+        let client = stub.makeClient()
+        let expected: QuarkError = status == 401 ? .loginExpired : .httpStatus(status)
+        do {
+            _ = try await client.download(fid: "file")
+            Issue.record("HTTP failure must not produce a download URL.")
+        } catch let error as QuarkError { #expect(error == expected) }
+        #expect(stub.state.withLock { $0.downloadRequests } == 1)
+        stub.state.withLock { $0.downloadRequests = 0 }
+        try await expectQuarkResolveFailure(stub: stub, client: client, expected: expected,
+                                           requestCount: status == 429 ? 3 : 1)
+        let description = try #require(expected.errorDescription)
+        if status == 403 {
+            #expect(description.contains("访问权限"))
+            #expect(!description.contains("登录已失效"))
+        } else if status == 404 { #expect(description.contains("确认文件或分享")) }
+        else if status == 429 { #expect(description.contains("降低并发数")) }
+    }
+
+    @Test(arguments: [false, true])
+    func quarkCapacityResolveFailureDoesNotRetryWithOrWithoutMessage(_ hasMessage: Bool) async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        stub.state.withLock {
+            $0.downloadBusinessCode = "32003"
+            $0.downloadFailureMessage = hasMessage ? "capacity limit[{0}]" : nil
+        }
+        let expected: QuarkError = hasMessage ? .serviceFailure(code: "32003", message: "capacity limit[{0}]") : .serviceCode("32003")
+        try await expectQuarkResolveFailure(stub: stub, client: stub.makeClient(), expected: expected, requestCount: 1)
+    }
+
+    /// 通过真实路由和引擎检查 API 错误的重试次数，不触发任何 CDN 下载。
+    private func expectQuarkResolveFailure(stub: QuarkAPIStub, client: QuarkClient,
+                                          expected: QuarkError, requestCount: Int) async throws {
+        let fixture = Fixture()
+        let source = RoutedDownloadSource()
+        let account = AccountKey(provider: .quark, accountID: "test")
+        source.setQuark(client, account: account)
+        let engine = DownloadEngine(stateDirectory: fixture.directory.appendingPathComponent("state"), source: source,
+                                    configuration: DownloadConfiguration(maxRetries: 2, retryBaseDelay: .milliseconds(1), retryMaxDelay: .milliseconds(1)))
+        let request = DownloadRequest(id: "quark-failure", destination: fixture.directory.appendingPathComponent("file"),
+                                      expectedSize: 12,
+                                      context: try DownloadContext(account: account, reference: .quark(fid: "file"), size: 12).encoded())
+        try await engine.enqueue(request)
+        try await waitUntil("Quark resolve failure") {
+            if case .failed = await engine.snapshot(id: request.id)?.state { true } else { false }
+        }
+        let snapshot = await engine.snapshot(id: request.id)
+        #expect(snapshot?.state == .failed(.resolveFailed(expected.localizedDescription)))
+        #expect(stub.state.withLock { $0.downloadRequests } == requestCount)
+        #expect(fixture.server.log.isEmpty)
+        await engine.shutdown()
+    }
+
     @Test func quarkCapacityReadsByteCountsWithoutWritesAndAllowsUsedAboveTotal() async throws {
         let stub = QuarkAPIStub()
         defer { FileProtocol.removeAPI(stub.id) }

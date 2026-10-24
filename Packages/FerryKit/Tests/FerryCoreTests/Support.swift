@@ -308,10 +308,10 @@ final class FileServer: Sendable {
 final class FileProtocol: URLProtocol, @unchecked Sendable {
     private static let servers = OSAllocatedUnfairLock<[String: FileServer]>(initialState: [:])
     private let stopped = OSAllocatedUnfairLock(initialState: false)
-    private static let apiHandlers = OSAllocatedUnfairLock<[String: @Sendable (URLRequest) throws -> Data]>(initialState: [:])
+    private static let apiHandlers = OSAllocatedUnfairLock<[String: (status: Int, body: @Sendable (URLRequest) throws -> Data)]>(initialState: [:])
 
-    static func registerAPI(_ id: String, handler: @escaping @Sendable (URLRequest) throws -> Data) {
-        apiHandlers.withLock { $0[id] = handler }
+    static func registerAPI(_ id: String, statusCode: Int = 200, handler: @escaping @Sendable (URLRequest) throws -> Data) {
+        apiHandlers.withLock { $0[id] = (statusCode, handler) }
     }
     static func removeAPI(_ id: String) { apiHandlers.withLock { $0[id] = nil } }
 
@@ -351,8 +351,8 @@ final class FileProtocol: URLProtocol, @unchecked Sendable {
         if let id = request.value(forHTTPHeaderField: "X-Ferry-Test-API"),
            let handler = Self.apiHandlers.withLock({ $0[id] }) {
             do {
-                let data = try handler(request)
-                let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+                let data = try handler.body(request)
+                let response = HTTPURLResponse(url: request.url!, statusCode: handler.status, httpVersion: "HTTP/1.1",
                     headerFields: ["Content-Type": "application/json"])!
                 client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
                 client?.urlProtocol(self, didLoad: data)
@@ -392,6 +392,10 @@ struct QuarkAPIStub: Sendable {
         var requestedShareParents: [String] = []
         var capacityPayload = #"{"total_capacity":100,"use_capacity":40}"#
         var capacityRequests: [(method: String, host: String, query: [String: String])] = []
+        var httpStatus = 200
+        var downloadBusinessCode: String?
+        var downloadFailureMessage: String?
+        var downloadRequests = 0
     }
     let id = UUID().uuidString
     let state = OSAllocatedUnfairLock(initialState: State())
@@ -402,12 +406,24 @@ struct QuarkAPIStub: Sendable {
 
     func makeClient() -> QuarkClient {
         let state = state
-        FileProtocol.registerAPI(id) { request in
+        FileProtocol.registerAPI(id, statusCode: state.withLock { $0.httpStatus }) { request in
             let components = URLComponents(url: request.url!, resolvingAgainstBaseURL: false)!
             let query = Dictionary(uniqueKeysWithValues: (components.queryItems ?? []).map { ($0.name, $0.value ?? "") })
             let path = components.path
             let data: Any
-            if path.hasSuffix("/member") {
+            if path.hasSuffix("/file/download") {
+                let failure = state.withLock { state -> (String?, String?) in
+                    state.downloadRequests += 1
+                    return (state.downloadBusinessCode, state.downloadFailureMessage)
+                }
+                if let code = failure.0 {
+                    var response: [String: Any] = ["status": 400, "code": code]
+                    if let message = failure.1 { response["message"] = message }
+                    return try JSONSerialization.data(withJSONObject: response)
+                }
+                data = [["fid": "file", "size": 12, "download_url": "https://download.test/file"]]
+            }
+            else if path.hasSuffix("/member") {
                 let payload = state.withLock { state -> String in
                     state.capacityRequests.append((request.httpMethod ?? "", components.host ?? "", query))
                     return state.capacityPayload

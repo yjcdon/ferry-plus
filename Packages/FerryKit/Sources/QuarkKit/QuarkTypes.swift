@@ -71,7 +71,10 @@ public enum QuarkError: LocalizedError, Sendable, Equatable {
     public var errorDescription: String? {
         switch self {
         case .invalidResponse: "夸克接口返回了无法识别的数据，请稍后重试。"
-        case .httpStatus(let code): "夸克请求失败（HTTP \(code)）。"
+        case .httpStatus(403): "夸克拒绝访问（HTTP 403），请在夸克官方页面确认该文件和账号的访问权限。"
+        case .httpStatus(404): "夸克请求的资源不存在（HTTP 404），请在夸克官方页面确认文件或分享是否仍然可用。"
+        case .httpStatus(429): "夸克请求过于频繁（HTTP 429），请降低并发数，稍后重试。"
+        case .httpStatus(let code): "夸克请求失败（HTTP \(code)），请稍后重试。"
         case .serviceCode(let code): Self.serviceDescription(code: code, message: nil)
         case .serviceFailure(let code, let message): Self.serviceDescription(code: code, message: message)
         case .loginExpired: "夸克登录已失效，请在官方页面重新登录。"

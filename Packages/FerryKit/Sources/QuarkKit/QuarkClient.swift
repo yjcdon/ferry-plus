@@ -314,7 +314,7 @@ public actor QuarkClient {
                 if [301, 302, 303].contains(http.statusCode) { payload = nil }
                 continue
             }
-            if http.statusCode == 401 || http.statusCode == 403 { throw QuarkError.loginExpired }
+            if http.statusCode == 401 { throw QuarkError.loginExpired }
             guard (200..<300).contains(http.statusCode) else { throw QuarkError.httpStatus(http.statusCode) }
             return data
         }

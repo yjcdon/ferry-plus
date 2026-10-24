@@ -52,12 +52,21 @@ public final class RoutedDownloadSource: DownloadSource {
             }
         } catch let error as BaiduError where BaiduDownloadPolicy.isPermanent(error) {
             throw PermanentLinkError(description: error.localizedDescription)
-        } catch let error as QuarkError where error == .loginExpired || error == .accountChanged {
+        } catch let error as QuarkError where Self.isPermanentQuarkFailure(error) {
             throw PermanentLinkError(description: error.localizedDescription)
         }
         guard state.withLock({ $0.sessions[context.account.provider]?.revision }) == session.revision else {
             throw PermanentLinkError(description: "获取地址期间账号会话已变化，请重试。")
         }
         return resolved
+    }
+
+    /// 解析接口已明确拒绝时停止自动重试；CDN 直链过期仍由下载引擎刷新。
+    private static func isPermanentQuarkFailure(_ error: QuarkError) -> Bool {
+        switch error {
+        case .loginExpired, .accountChanged, .httpStatus(403), .httpStatus(404),
+             .serviceCode("32003"), .serviceFailure(code: "32003", message: _): true
+        default: false
+        }
     }
 }
