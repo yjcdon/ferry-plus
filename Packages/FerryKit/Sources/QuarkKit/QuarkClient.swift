@@ -23,8 +23,8 @@ public struct QuarkCapacity: Decodable, Sendable, Equatable {
 
 /// 本机直连的夸克登录客户端。Cookie 按域和路径发送，独立于系统及百度会话。
 public actor QuarkClient {
-    private let session: URLSession
-    private let revoked = OSAllocatedUnfairLock(initialState: false)
+    let session: URLSession
+    let revoked = OSAllocatedUnfairLock(initialState: false)
     private var cookies: [QuarkCredential.Cookie]
     private var credentialDidChange: (@Sendable (QuarkCredential) async throws -> Void)?
 
@@ -286,7 +286,7 @@ public actor QuarkClient {
     }
 
     /// 手动处理有限重定向，逐跳收集 Cookie，并禁止凭据发往夸克域以外。
-    private func send(_ initialURL: URL, body: Data? = nil) async throws -> Data {
+    func send(_ initialURL: URL, body: Data? = nil) async throws -> Data {
         var url = initialURL
         var payload = body
         for _ in 0..<6 {
