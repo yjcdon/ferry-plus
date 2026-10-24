@@ -946,6 +946,9 @@ public actor UploadCoordinator {
             // 建目录和合并均可能先返回成功回执、后更新目录索引。仅查询准确对象，不重提副作用。
             if attempt < 5 { try await Task.sleep(for: .milliseconds(200 * (1 << attempt))) }
         }
+        // 文件已由准确 fid 确认后可能被移动；名称刷新不应阻断随后按 fid 的完整内容回读。
+        // 仅在所有原目录查询成功但准确对象缺失时继续；网络、账号、类型与大小错误仍原样失败。
+        if !file.isDirectory, case .quark(let fid) = reference, !fid.isEmpty { return }
         throw UploadDestinationError.remoteResultUnconfirmed
     }
 

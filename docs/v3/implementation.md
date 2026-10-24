@@ -390,3 +390,9 @@ Release 构建 `.build/v3-inspector-final-build.log` 通过。Computer Use 在�
 合并回执丢失和原会话不可用共用准确 fid 查询：先有限重查原父目录，再按原预分配 fid 解析已被外部移动的对象。两种入口使用同一账号、父目录及大小约束；同名同大小但其他 fid 不认领，网络错误保留原始原因，不重复合并。解析结果仍须完整回读 SHA-256 后才能记为内容验证通过。
 
 独立复制当前四个模块编译和 provider 层 12 项 URLProtocol 检查通过，覆盖两个入口的移走产物、错误大小、账号／父目录拒绝及原网络错误，所有请求只有目录和下载解析，没有 merge／写请求：`.build/v3-commit-inspection-validation/{report.md,checks.log,source-hashes.json}`。统一 307 项测试及 Release App 构建通过：`.build/v3-shared-commit-inspection-tests.log`、`.build/v3-shared-commit-inspection-app-build.log`。真实移动后合并恢复现场仍未完整覆盖，不能据此勾选 T07 或 T10。
+
+## 夸克移动后恢复进入完整回读
+
+进一步审计发现，精确 fid 查询成功后，Coordinator 仍要求原父目录能列出该文件，导致移动后的准确产物无法进入回读。现仅对夸克非目录文件，在六次原目录查询均成功但准确 fid 缺失时保留旧显示名称，继续按准确 fid 完整回读；不吞网络、账号、类型或大小错误，不放宽百度路径和目录创建合同。
+
+当前 Coordinator 独立编译及七项持久化恢复场景通过：pending merge 与已有引用重启均完成完整 SHA 校验；同大小异内容失败；百度路径和夸克目录缺失仍失败；网络和账号错误原样保留，所有场景无新片／合并／写请求。证据 `.build/moved-commit-recovery-validation/{report.md,persisted-checks.log,source-hashes.json}`。该增量随后与准备意图改动统一构建；真实外部移动现场验收仍单独保留。
