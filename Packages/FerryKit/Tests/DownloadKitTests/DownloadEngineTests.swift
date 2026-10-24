@@ -514,6 +514,150 @@ private let megabyte = 1 << 20
         expectOnlyMissingBytesRequested(fixture.server.log, after: saved)
     }
 
+    /// 已有分片失去写权限时停止，不重试网络或发布最终文件；恢复权限后原位续传。
+    @Test func readOnlyPartialFilePreservesCheckpointAndResumes() async throws {
+        let fixture = Fixture()
+        let data = fixture.addFile("readonly.bin", size: megabyte)
+        let request = fixture.request("readonly.bin")
+        let engine = fixture.makeEngine(.test(connections: 1, retries: 3))
+        fixture.server.setStall(after: 64 * kilobyte)
+        try await engine.enqueue(request)
+        try await waitUntil("initial writable prefix") {
+            await engine.snapshot(id: request.id)?.receivedBytes == Int64(64 * kilobyte)
+        }
+        await engine.pause(id: request.id)
+        let saved = try #require(fixture.savedRecords().first)
+        let prefix = try Data(contentsOf: request.temporaryURL)
+        #expect(prefix == data.prefix(64 * kilobyte))
+        try FileManager.default.setAttributes([.posixPermissions: 0o444], ofItemAtPath: request.temporaryURL.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: request.temporaryURL.path) }
+        fixture.server.setStall(after: nil)
+        fixture.server.clearLog()
+        await engine.resume(id: request.id)
+        try await waitUntil("permission failure") {
+            if case .failed(.fileSystem) = await engine.snapshot(id: request.id)?.state { true } else { false }
+        }
+        #expect(await engine.snapshot(id: request.id)?.receivedBytes == saved.receivedBytes)
+        #expect(try Data(contentsOf: request.temporaryURL) == prefix)
+        #expect(!FileManager.default.fileExists(atPath: request.destination.path))
+        #expect(try fixture.savedRecords().first?.completedURL == nil)
+        #expect(fixture.server.log.isEmpty)
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: request.temporaryURL.path)
+        await engine.resume(id: request.id)
+        _ = try await engine.waitForCompletion(of: request.id)
+        #expect(fixture.contents("readonly.bin") == data)
+        expectOnlyMissingBytesRequested(fixture.server.log, after: saved)
+        await engine.shutdown()
+    }
+
+    /// 文件内容完整但目标目录不能重命名时仍属于失败；恢复目录权限后直接发布原分片。
+    @Test func unwritableDestinationPreservesCompletePartialUntilPublishCanRetry() async throws {
+        let fixture = Fixture()
+        let data = fixture.addFile("publish.bin", size: megabyte)
+        let request = fixture.request("publish.bin")
+        let engine = fixture.makeEngine(.test(connections: 1, retries: 3))
+        fixture.server.setStall(after: 64 * kilobyte)
+        try await engine.enqueue(request)
+        try await waitUntil("prefix before directory permission change") {
+            await engine.snapshot(id: request.id)?.receivedBytes == Int64(64 * kilobyte)
+        }
+        await engine.pause(id: request.id)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: fixture.downloadsDirectory.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fixture.downloadsDirectory.path) }
+        fixture.server.setStall(after: nil)
+        await engine.resume(id: request.id)
+        try await waitUntil("final rename permission failure") {
+            if case .failed(.fileSystem) = await engine.snapshot(id: request.id)?.state { true } else { false }
+        }
+        #expect(await engine.snapshot(id: request.id)?.receivedBytes == Int64(data.count))
+        #expect(try Data(contentsOf: request.temporaryURL) == data)
+        #expect(!FileManager.default.fileExists(atPath: request.destination.path))
+        #expect(try fixture.savedRecords().first?.completedURL == nil)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fixture.downloadsDirectory.path)
+        fixture.server.clearLog()
+        await engine.resume(id: request.id)
+        _ = try await engine.waitForCompletion(of: request.id)
+        #expect(fixture.contents("publish.bin") == data)
+        #expect(fixture.server.log.isEmpty)
+        #expect(!FileManager.default.fileExists(atPath: request.temporaryURL.path))
+        await engine.shutdown()
+    }
+
+    /// 仅显式挂载的独立小卷可填满；普通测试不依赖磁盘挂载，也不消耗用户数据卷的可用空间。
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["FERRY_TEST_DISK_FULL_VOLUME"] != nil,
+                   "需要独立、已挂载且不超过32MiB的 FERRY_TEST_DISK_FULL_VOLUME，禁止指向用户数据卷"))
+    func fullVolumePreservesPartialAndRestoresAfterSpaceIsFreed() async throws {
+        let volumePath = try #require(ProcessInfo.processInfo.environment["FERRY_TEST_DISK_FULL_VOLUME"])
+        let volume = URL(fileURLWithPath: volumePath, isDirectory: true).resolvingSymlinksInPath()
+        let properties = try volume.resourceValues(forKeys: [.volumeTotalCapacityKey, .volumeURLKey])
+        let capacity = try #require(properties.volumeTotalCapacity)
+        try #require(capacity > 0 && capacity <= 32 * megabyte)
+        try #require(properties.volume?.resolvingSymlinksInPath() == volume)
+        let directory = volume.appendingPathComponent("FerryDiskFull-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false)
+        let fixture = Fixture()
+        let data = fixture.addFile("full.bin", size: megabyte)
+        var request = fixture.request("full.bin")
+        request.destination = directory.appendingPathComponent("full.bin")
+        let configuration = DownloadConfiguration.test(connections: 1, retries: 3)
+        let engine = fixture.makeEngine(configuration)
+        fixture.server.setStall(after: 64 * kilobyte)
+        try await engine.enqueue(request)
+        try await waitUntil("prefix before filling isolated volume") {
+            await engine.snapshot(id: request.id)?.receivedBytes == Int64(64 * kilobyte)
+        }
+        await engine.pause(id: request.id)
+        let saved = try #require(fixture.savedRecords().first)
+        let prefix = try Data(contentsOf: request.temporaryURL)
+        #expect(prefix == data.prefix(64 * kilobyte))
+        let filler = directory.appendingPathComponent("bounded-filler.bin")
+        try Data().write(to: filler)
+        let handle = try FileHandle(forWritingTo: filler)
+        var diskFull = false
+        let chunk = Data(repeating: 0x7f, count: 512 * kilobyte)
+        for _ in 0..<64 {
+            do { try handle.write(contentsOf: chunk) }
+            catch {
+                let error = error as NSError
+                let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError
+                diskFull = error.domain == NSPOSIXErrorDomain && error.code == Int(ENOSPC) ||
+                    underlying?.domain == NSPOSIXErrorDomain && underlying?.code == Int(ENOSPC) ||
+                    error.domain == NSCocoaErrorDomain && error.code == CocoaError.fileWriteOutOfSpace.rawValue
+                break
+            }
+        }
+        try handle.close()
+        try #require(diskFull, "独立小卷必须真实产生ENOSPC，而不是模拟网络错误")
+        fixture.server.setStall(after: nil)
+        fixture.server.clearLog()
+        await engine.resume(id: request.id)
+        try await waitUntil("real full-volume write failure") {
+            if case .failed(.fileSystem) = await engine.snapshot(id: request.id)?.state { true } else { false }
+        }
+        #expect(await engine.snapshot(id: request.id)?.receivedBytes == saved.receivedBytes)
+        #expect(try Data(contentsOf: request.temporaryURL) == prefix)
+        #expect(!FileManager.default.fileExists(atPath: request.destination.path))
+        let failedRecord = try #require(fixture.savedRecords().first)
+        #expect(failedRecord.completedURL == nil)
+        #expect(failedRecord.receivedBytes == saved.receivedBytes)
+        #expect(fixture.server.log.count == 1)
+        // 移入本机废纸篓释放测试卷空间，保留样本；测试不删除用户文件。
+        let trashedFiller = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".Trash/FerryPlus-ENOSPC-\(UUID().uuidString).bin")
+        try FileManager.default.moveItem(at: filler, to: trashedFiller)
+        await engine.shutdown()
+        fixture.server.clearLog()
+        let restored = fixture.makeEngine(configuration)
+        _ = try await restored.restore()
+        #expect(await restored.snapshot(id: request.id)?.receivedBytes == saved.receivedBytes)
+        await restored.resume(id: request.id)
+        _ = try await restored.waitForCompletion(of: request.id)
+        #expect(try Data(contentsOf: request.destination) == data)
+        expectOnlyMissingBytesRequested(fixture.server.log, after: saved)
+        #expect(!FileManager.default.fileExists(atPath: request.temporaryURL.path))
+        await restored.shutdown()
+    }
+
     @Test func pauseAndResume() async throws {
         let fixture = Fixture()
         let data = fixture.addFile("a.bin", size: 2 * megabyte)
