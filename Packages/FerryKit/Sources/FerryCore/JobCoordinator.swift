@@ -394,7 +394,11 @@ public final class JobCoordinator {
         jobs.removeAll { $0.id == id }
         invalidateIndex()
         jobActivities[id] = nil
-        for file in job.files { fileActivities[file.id] = nil }
+        // 引擎事件流可能尚未消费 removed，返回前同步清除快照与实际运行标记。
+        for file in job.files {
+            setSnapshot(file.id, nil)
+            fileActivities[file.id] = nil
+        }
         save()
         closeFolder(of: id)
         if cleanupConfirmed ?? settings.cleanupAfterDownload(for: job.provider), job.hasJobDirectory, !job.isCleanedUp {
