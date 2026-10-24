@@ -470,27 +470,34 @@ final class AppModel {
     var canDownloadFromNetdisk: Bool { true }
 
     /// 应用变为活跃时调用。剪贴板中有新复制的分享链接时，打开添加链接，由 sheet 填入。
-    /// 未登录、已有 sheet、剪贴板已经读过（包括手动打开添加链接时），或链接已经是一个任务的来源时不打开。
+    /// 已有 sheet、剪贴板已经读过（包括手动打开添加链接时），或链接已经是一个任务的来源时不打开。
     func detectCopiedLink() async {
+        let changeCount = NSPasteboard.general.changeCount
         guard !isShuttingDown, settings.detectsCopiedLinks, coordinator.isStarted, sheet == nil,
-              pasteboardCheck?.changeCount != NSPasteboard.general.changeCount else { return }
-        guard let link = await shareLinkOnPasteboard(), !Task.isCancelled, !isShuttingDown, sheet == nil,
+              pasteboardCheck?.changeCount != changeCount else { return }
+        guard let link = await shareLinkOnPasteboard(), !Task.isCancelled, !isShuttingDown,
+              settings.detectsCopiedLinks, sheet == nil,
+              NSPasteboard.general.changeCount == changeCount,
               !coordinator.jobs.contains(where: { $0.link?.surl == link.surl }) else { return }
         openMainWindow?()
         sheet = .addLink
     }
 
-    /// 剪贴板中有网址时才读取内容（见 `pasteboardMayContainWebURL`）。
+    /// 检测期间剪贴板变化或任务取消时不读取、缓存或打开过时结果，留待下次检测。
     func shareLinkOnPasteboard() async -> DiskShareLink? {
         let pasteboard = NSPasteboard.general
         let changeCount = pasteboard.changeCount
+        guard !Task.isCancelled else { return nil }
         if let pasteboardCheck, pasteboardCheck.changeCount == changeCount {
             return pasteboardCheck.link
         }
+        let mayContainURL = await pasteboardMayContainWebURL()
+        guard !Task.isCancelled, pasteboard.changeCount == changeCount else { return nil }
         var link: DiskShareLink?
-        if await pasteboardMayContainWebURL(), let text = pasteboard.string(forType: .string) {
+        if mayContainURL, let text = pasteboard.string(forType: .string) {
             link = DiskShareLink.parse(text)
         }
+        guard pasteboard.changeCount == changeCount else { return nil }
         pasteboardCheck = (changeCount, link)
         return link
     }

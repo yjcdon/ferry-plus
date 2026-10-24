@@ -10,6 +10,20 @@ import Testing
         RemoteEntry(fsID: Int64(name.hashValue), name: name, path: "/s/" + name, isDirectory: directory, size: directory ? 0 : 10)
     }
 
+    /// 剪贴板去重身份包含网盘；同短码的两家分享仍各自保留链接和提取码。
+    @Test func shareLinkIdentitySeparatesProvidersAndPreservesPasscodes() throws {
+        let baidu = try #require(DiskShareLink.parse("https://pan.baidu.com/s/1common123?pwd=ab12"))
+        let quark = try #require(DiskShareLink.parse("https://pan.quark.cn/s/common123?pwd=x9Z1"))
+        #expect(baidu.provider == .baidu)
+        #expect(quark.provider == .quark)
+        #expect(baidu.code == quark.code)
+        #expect(baidu.surl != quark.surl)
+        #expect(baidu.password == "ab12")
+        #expect(quark.password == "x9Z1")
+        let text = try #require(DiskShareLink.parse("分享链接：https://pan.quark.cn/s/common123 提取码：x9Z1"))
+        #expect(text == quark)
+    }
+
     @Test func rejectsUnknownVersionAndInconsistentProvider() throws {
         let job = Job(link: link, password: nil, entries: [entry("a.zip")], transferFolder: "/Ferry")
         var json = try #require(JSONSerialization.jsonObject(with: JSONEncoder().encode(job)) as? [String: Any])

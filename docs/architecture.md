@@ -190,6 +190,8 @@ WKWebView 加载 https://pan.quark.cn/ → 用户在官方页面完成短信或�
 
 手动粘贴与剪贴板检测共用来源识别。ShareLink 的 Provider 由百度或夸克链接确定，不从 providerFilter 赋值；添加窗口显示识别出的网盘，并使用该网盘账号完成登录检查及文件选择。
 
+剪贴板异步检测前后核对 changeCount；内容变化、任务取消或检测开关已关闭时不缓存旧结果、不自动弹窗。相同版本重复激活复用缓存，已存在任务按包含网盘的分享身份去重；手动添加仍可读取剪贴板。
+
 ```mermaid
 sequenceDiagram
     participant U as SwiftUI
