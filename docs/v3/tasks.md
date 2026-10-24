@@ -1,6 +1,6 @@
 # Ferry Plus 3.0 实施任务清单
 
-状态：待实施。日期：2026-10-24。依据：[功能清单](features.md)、[架构设计](architecture.md)。
+状态：实施中。日期：2026-10-24。依据：[功能清单](features.md)、[架构设计](architecture.md)。分功能实现与验证见 [执行记录](implementation.md)；勾选仍以每项完整完成标准为准。
 
 ## 1. 执行规则
 
