@@ -619,16 +619,20 @@ public final class JobCoordinator {
         if let unexpected = actual.keys.sorted().first { throw TransferCheckError.incompleteTransfer(unexpected) }
     }
 
-    /// 批次意图写盘失败时尚未发出请求；已收到的回执即使磁盘失败也保留在内存供再次保存。
+    /// 新意图或失败回执重置写盘失败时恢复原状态；新收到的回执则保留在内存供再次保存。
     private func recordTransferProgress(_ progress: TransferProgress, for id: Job.ID, using netdisk: any Netdisk) throws {
         guard let current = job(id) else { throw CancellationError() }
         let previous = current.transferProgress
         let isIntent = progress.introducesSubmissionIntent(comparedTo: previous)
-        if isIntent { try checkCurrentAccount(current, expected: netdisk.account) }
+        // 明确失败的空批次可回到未提交；写盘失败时仍须保留原回执供核对。
+        let previousReceipts = Set((previous?.batches?.compactMap(\.taskID) ?? []) + [previous?.taskID].compactMap { $0 })
+        let nextReceipts = Set((progress.batches?.compactMap(\.taskID) ?? []) + [progress.taskID].compactMap { $0 })
+        let removesReceipt = !previousReceipts.isSubset(of: nextReceipts)
+        if isIntent || removesReceipt { try checkCurrentAccount(current, expected: netdisk.account) }
         update(id) { $0.transferProgress = progress }
         do { try persistRequired() }
         catch {
-            if isIntent { update(id) { $0.transferProgress = previous } }
+            if isIntent || removesReceipt { update(id) { $0.transferProgress = previous } }
             throw error
         }
     }

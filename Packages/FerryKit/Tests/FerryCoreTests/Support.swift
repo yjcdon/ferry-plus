@@ -379,6 +379,8 @@ struct QuarkAPIStub: Sendable {
         var saves: [(fids: [String], destination: String)] = []
         var queried: [String] = []
         var failQueries = Set<String>()
+        var taskResponses: [String: String] = [:]
+        var beforeTaskResponse: (@Sendable () throws -> Void)?
         var loseReceipts = Set<Int>()
         var afterSave: (@Sendable () throws -> Void)?
         var shareRootParentFID = "0"
@@ -502,6 +504,13 @@ struct QuarkAPIStub: Sendable {
                     return state.failQueries.remove(task) != nil
                 }
                 if failed { throw URLError(.timedOut) }
+                let result = state.withLock { state -> (String?, (@Sendable () throws -> Void)?) in
+                    let callback = state.beforeTaskResponse
+                    state.beforeTaskResponse = nil
+                    return (state.taskResponses[task], callback)
+                }
+                try result.1?()
+                if let response = result.0 { return Data(response.utf8) }
                 data = ["status": 2]
             } else { throw URLError(.unsupportedURL) }
             return try JSONSerialization.data(withJSONObject: ["status": 200, "code": 0, "data": data])

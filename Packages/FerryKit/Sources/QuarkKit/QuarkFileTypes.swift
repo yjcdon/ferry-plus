@@ -54,6 +54,7 @@ public struct QuarkTransferTask: Sendable {
     public let id: String
     public let status: Status
     public let savedFIDs: [String]
+    public var failureReason: String? = nil
 }
 
 /// 短期下载地址和内容身份；请求头不能写入任务持久化数据。

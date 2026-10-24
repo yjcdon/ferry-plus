@@ -63,7 +63,7 @@ public enum QuarkError: LocalizedError, Sendable, Equatable {
     case invalidShareLink
     case invalidSelection
     case taskTimedOut(String)
-    case taskFailed(String)
+    case taskFailed(String, reason: String? = nil)
     case shareRequiresCode
     case invalidPasscode
     case shareUnavailable
@@ -85,7 +85,9 @@ public enum QuarkError: LocalizedError, Sendable, Equatable {
         case .invalidShareLink: "请输入有效的夸克网盘分享链接。"
         case .invalidSelection: "夸克文件选择或目录身份无效，请重新打开文件列表。"
         case .taskTimedOut(let id): "夸克转存仍在处理中（任务 \(id)），稍后可继续核对。"
-        case .taskFailed(let id): "夸克转存任务失败（任务 \(id)）。"
+        case .taskFailed(let id, let reason):
+            if let reason { "上一次夸克转存失败：\(reason)（任务 \(id) 已停止。）" }
+            else { "上一次夸克转存失败（任务 \(id) 已停止）。" }
         case .shareRequiresCode: "这个夸克分享需要提取码，请填写后重试。"
         case .invalidPasscode: "夸克分享提取码不正确，请检查后重试。"
         case .shareUnavailable: "夸克分享已失效、被取消或无法访问。"

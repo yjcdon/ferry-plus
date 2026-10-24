@@ -81,7 +81,7 @@ public actor QuarkNetdisk: Netdisk {
         return TransferDirectory(reference: .quark(fid: fid), name: name)
     }
 
-    /// 每个相对目录独立记录意图、回执与完成；未知提交不重复发送，未提交组可以安全继续。
+    /// 每个相对目录独立记录意图、回执与完成；确认失败且目标为空时重置该批，供下次人工重试。
     public func submitTransfer(_ session: DiskShareSession?, entries: [RemoteEntry], to directory: TransferDirectory,
                                previous: TransferProgress?,
                                onProgress: @Sendable (TransferProgress) async throws -> Void) async throws -> TransferProgress {
@@ -92,7 +92,15 @@ public actor QuarkNetdisk: Netdisk {
         // 升级前只有一个回执的任务沿用原结果，不将已提交任务重新规划成多个 POST。
         if let previous, previous.batches == nil, previous.submitted {
             guard let taskID = previous.taskID else { throw TransferCheckError.unconfirmedTransfer }
-            _ = try await client.waitForTask(id: taskID)
+            do { _ = try await client.waitForTask(id: taskID) }
+            catch let error as QuarkError {
+                if case .taskFailed = error {
+                    let children = try await client.listDirectory(parentFID: root)
+                    try Task.checkCancellation()
+                    if children.isEmpty { try await onProgress(TransferProgress()) }
+                }
+                throw error
+            }
             let completed = TransferProgress(taskID: taskID, submitted: true, completed: true)
             try await onProgress(completed)
             return completed
@@ -148,7 +156,24 @@ public actor QuarkNetdisk: Netdisk {
                 try await onProgress(Self.progress(batches))
             }
             guard let taskID = batches[index].taskID else { throw TransferCheckError.unconfirmedTransfer }
-            _ = try await client.waitForTask(id: taskID)
+            do { _ = try await client.waitForTask(id: taskID) }
+            catch let error as QuarkError {
+                if case .taskFailed = error, let destination = batches[index].destination {
+                    let target = try Self.fid(destination)
+                    let selected = entries.filter { batches[index].entryIDs.contains($0.id) }
+                    let names = Set(selected.map(\.name))
+                    let children = try await client.listDirectory(parentFID: target)
+                    try Task.checkCancellation()
+                    // 失败任务可能留下部分文件；只有本批所有目标名均不存在才允许下次人工重提。
+                    if selected.count == batches[index].entryIDs.count,
+                       children.allSatisfy({ !names.contains($0.name) }) {
+                        batches[index].submitted = false
+                        batches[index].taskID = nil
+                        try await onProgress(Self.progress(batches))
+                    }
+                }
+                throw error
+            }
             batches[index].completed = true
             try await onProgress(Self.progress(batches))
         }

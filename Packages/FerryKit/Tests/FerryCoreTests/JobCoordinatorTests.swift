@@ -464,6 +464,187 @@ import os
         #expect(state.folders.count == 3)
     }
 
+    /// 非成功业务包只有明确终态且身份相符时才允许调用方安全准备下一次提交。
+    @Test func quarkFailedTaskEnvelopeRetainsReasonAndChecksIdentity() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        let client = stub.makeClient()
+        stub.state.withLock { $0.taskResponses["failed"] = #"{"status":400,"code":32003,"message":"capacity","data":{"status":3,"task_id":"failed"}}"# }
+        let result = try await client.queryTask(id: "failed")
+        #expect(result.status == .failed)
+        #expect(result.failureReason?.contains("32003") == true)
+        do { _ = try await client.waitForTask(id: "failed"); Issue.record("expected terminal failure") }
+        catch QuarkError.taskFailed(let id, let reason) {
+            #expect(id == "failed")
+            #expect(reason?.contains("空间不足") == true)
+        }
+        stub.state.withLock { $0.taskResponses["failed"] = #"{"status":200,"code":0,"data":{"status":3,"task_id":"failed"}}"# }
+        let successfulEnvelopeFailure = try await client.queryTask(id: "failed")
+        #expect(successfulEnvelopeFailure.status == .failed)
+        for response in [
+            #"{"status":200,"code":0,"data":{"status":3,"task_id":"other"}}"#,
+            #"{"status":200,"code":0,"data":{"status":4}}"#
+        ] {
+            stub.state.withLock { $0.taskResponses["failed"] = response }
+            do { _ = try await client.queryTask(id: "failed"); Issue.record("failed task must have matching identity") }
+            catch QuarkError.invalidResponse {}
+        }
+        let unknown = [
+            #"{"status":400,"code":32003,"data":{"status":3,"task_id":"other"}}"#,
+            #"{"status":400,"code":32003,"data":{"status":3}}"#,
+            #"{"status":400,"code":32003,"data":{"status":1,"task_id":"failed"}}"#,
+            #"{"status":400,"code":32003,"data":null}"#,
+            #"{"status":400,"code":32003,"data":{"status":"unknown","task_id":"failed"}}"#
+        ]
+        for response in unknown {
+            stub.state.withLock { $0.taskResponses["failed"] = response }
+            do { _ = try await client.queryTask(id: "failed"); Issue.record("unconfirmed task must preserve business failure") }
+            catch QuarkError.serviceCode("32003") {}
+        }
+        stub.state.withLock { $0.taskResponses["failed"] = #"{"status":400,"code":401,"data":{"status":3,"task_id":"failed"}}"# }
+        do { _ = try await client.queryTask(id: "failed"); Issue.record("login error must win") }
+        catch QuarkError.loginExpired {}
+    }
+
+    @Test(arguments: [
+        #"{"status":400,"code":32003,"data":{"status":3,"task_id":"other"}}"#,
+        #"{"status":400,"code":32003,"data":{"status":1,"task_id":"task-1"}}"#,
+        #"{"status":400,"code":32003,"data":null}"#,
+        #"{"status":200,"code":0,"data":{"status":3,"task_id":"other"}}"#,
+        #"{"status":200,"code":0,"data":{"status":4}}"#
+    ])
+    func quarkUnconfirmedFailedEnvelopeKeepsOriginalReceipt(_ response: String) async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        stub.state.withLock { $0.taskResponses["task-1"] = response }
+        let disk = stub.makeDisk()
+        let (session, entries) = try await quarkSelection(disk)
+        let ledger = OSAllocatedUnfairLock<TransferProgress?>(initialState: nil)
+        let directory = TransferDirectory(reference: .quark(fid: "owned"), name: "TASK")
+        for _ in 0..<2 {
+            let previous = ledger.withLock { $0 }
+            do {
+                _ = try await disk.submitTransfer(session, entries: entries, to: directory, previous: previous) { value in ledger.withLock { $0 = value } }
+                Issue.record("unconfirmed failure must stop")
+            } catch QuarkError.serviceCode("32003") {}
+            catch QuarkError.invalidResponse {}
+        }
+        #expect(ledger.withLock { $0?.batches?[0].taskID } == "task-1")
+        #expect(ledger.withLock { $0?.batches?[0].submitted } == true)
+        #expect(stub.state.withLock { $0.saves.count } == 1)
+        await disk.releaseShare(session)
+    }
+
+    @Test func quarkTerminalEmptyBatchRetriesOnlyFailedBatch() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        stub.state.withLock { $0.taskResponses["task-2"] = #"{"status":400,"code":32003,"data":{"status":3,"task_id":"task-2"}}"# }
+        let disk = stub.makeDisk()
+        let (session, entries) = try await quarkSelection(disk)
+        let ledger = OSAllocatedUnfairLock<TransferProgress?>(initialState: nil)
+        let directory = TransferDirectory(reference: .quark(fid: "owned"), name: "TASK")
+        do {
+            _ = try await disk.submitTransfer(session, entries: entries, to: directory, previous: nil) { value in ledger.withLock { $0 = value } }
+            Issue.record("expected stopped failure")
+        } catch QuarkError.taskFailed {}
+        let previous = try #require(ledger.withLock { $0 })
+        #expect(previous.batches?[0].completed == true)
+        #expect(previous.batches?[0].taskID == "task-1")
+        #expect(previous.batches?[1].submitted == false)
+        #expect(previous.batches?[1].taskID == nil)
+        #expect(previous.needsSubmission)
+        await disk.releaseShare(session)
+        let restored = stub.makeDisk()
+        let reopened = try await restored.openShare(DiskShareLink(provider: .quark, code: "test"), password: nil)
+        try await restored.prepareTransfer(reopened, entries: [entries[1]])
+        let result = try await restored.submitTransfer(reopened, entries: entries, to: directory, previous: previous) { value in ledger.withLock { $0 = value } }
+        await restored.releaseShare(reopened)
+        #expect(result.completed)
+        #expect(stub.state.withLock { $0.saves.count } == 3)
+        #expect(stub.state.withLock { $0.saves.map(\.fids) } == [["readme"], ["report"], ["report"]])
+        #expect(stub.state.withLock { $0.queried } == ["task-1", "task-2", "task-3"])
+    }
+
+    @Test func quarkFailedPartialBatchRetainsReceiptAndNeverResubmits() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        stub.state.withLock { $0.taskResponses["task-1"] = #"{"status":400,"code":32003,"data":{"status":3,"task_id":"task-1"}}"# }
+        let disk = stub.makeDisk()
+        let (session, entries) = try await quarkSelection(disk)
+        // 同名目录也算已产生目标，不能仅因尚未看到文件就重新提交。
+        stub.state.withLock { state in
+            state.folders["owned"] = [("docs-target", "docs")]
+            state.folders["docs-target"] = [("partial", "readme.txt")]
+        }
+        let ledger = OSAllocatedUnfairLock<TransferProgress?>(initialState: nil)
+        let directory = TransferDirectory(reference: .quark(fid: "owned"), name: "TASK")
+        for _ in 0..<2 {
+            let previous = ledger.withLock { $0 }
+            do {
+                _ = try await disk.submitTransfer(session, entries: entries, to: directory, previous: previous) { value in ledger.withLock { $0 = value } }
+                Issue.record("partial destination must remain failed")
+            } catch QuarkError.taskFailed {}
+        }
+        await disk.releaseShare(session)
+        #expect(ledger.withLock { $0?.batches?[0].taskID } == "task-1")
+        #expect(ledger.withLock { $0?.batches?[0].submitted } == true)
+        #expect(stub.state.withLock { $0.saves.count } == 1)
+    }
+
+    @Test func quarkLegacyFailedEmptyReceiptCanBeReplanned() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        stub.state.withLock { $0.taskResponses["old"] = #"{"status":400,"code":32003,"data":{"status":3,"task_id":"old"}}"# }
+        let disk = stub.makeDisk()
+        let (session, entries) = try await quarkSelection(disk)
+        let ledger = OSAllocatedUnfairLock<TransferProgress?>(initialState: TransferProgress(taskID: "old", submitted: true))
+        let directory = TransferDirectory(reference: .quark(fid: "owned"), name: "TASK")
+        do {
+            _ = try await disk.submitTransfer(nil, entries: entries, to: directory, previous: ledger.withLock { $0 }) { value in ledger.withLock { $0 = value } }
+            Issue.record("expected stopped old failure")
+        } catch QuarkError.taskFailed {}
+        #expect(ledger.withLock { $0?.needsSubmission } == true)
+        #expect(ledger.withLock { $0?.taskID } == nil)
+        let result = try await disk.submitTransfer(session, entries: entries, to: directory, previous: ledger.withLock { $0 }) { value in ledger.withLock { $0 = value } }
+        #expect(result.completed)
+        #expect(stub.state.withLock { $0.saves.count } == 2)
+        await disk.releaseShare(session)
+    }
+
+    /// 重置失败回执时保存失败，内存和磁盘都保留旧身份，避免下一次重试误发新提交。
+    @Test func quarkFailedReceiptResetWriteFailureKeepsOriginalReceipt() async throws {
+        let stub = QuarkAPIStub()
+        defer { FileProtocol.removeAPI(stub.id) }
+        let disk = stub.makeDisk()
+        let (session, entries) = try await quarkSelection(disk)
+        let fixture = Fixture()
+        let coordinator = fixture.makeCoordinator()
+        coordinator.netdisks[.quark] = disk
+        await coordinator.start()
+        let file = fixture.store.fileURL
+        let backup = file.appendingPathExtension("before-reset")
+        stub.state.withLock {
+            $0.taskResponses["task-1"] = #"{"status":400,"code":32003,"data":{"status":3,"task_id":"task-1"}}"#
+            $0.beforeTaskResponse = {
+                try FileManager.default.moveItem(at: file, to: backup)
+                try FileManager.default.createDirectory(at: file, withIntermediateDirectories: false)
+            }
+        }
+        let job = coordinator.addJob(session: session, entries: entries)
+        try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
+        let memory = try #require(coordinator.job(job.id)?.transferProgress)
+        #expect(memory.batches?[0].taskID == "task-1")
+        #expect(memory.batches?[0].submitted == true)
+        try FileManager.default.moveItem(at: file, to: file.appendingPathExtension("blocked-reset"))
+        try FileManager.default.moveItem(at: backup, to: file)
+        let stored = try #require(fixture.store.load().first { $0.id == job.id }?.transferProgress)
+        #expect(stored.batches?[0].taskID == "task-1")
+        #expect(stored.batches?[0].submitted == true)
+        #expect(stub.state.withLock { $0.saves.count } == 1)
+        await disk.releaseShare(session)
+        await coordinator.shutdown()
+    }
+
     @Test func quarkUnknownSubmissionNeverRepeatsOrStartsNextBatch() async throws {
         let stub = QuarkAPIStub()
         defer { FileProtocol.removeAPI(stub.id) }

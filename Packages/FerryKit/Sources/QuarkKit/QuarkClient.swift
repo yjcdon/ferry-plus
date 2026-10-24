@@ -96,10 +96,31 @@ public actor QuarkClient {
 
     /// 独立查询已提交任务，适用于重启后核对尚未确认的转存。
     public func queryTask(id: String, retryIndex: Int = 0) async throws -> QuarkTransferTask {
-        let data: TaskData = try await api(path: "/task", query: [("task_id", id), ("retry_index", String(retryIndex))])
+        let bytes = try await send(Self.url(host: "drive-pc.quark.cn", path: "/1/clouddrive/task",
+            query: Self.commonQuery + [("task_id", id), ("retry_index", String(retryIndex))]))
+        let result: TaskResponse
+        do { result = try JSONDecoder().decode(TaskResponse.self, from: bytes) }
+        catch { throw QuarkError.invalidResponse }
+        let response = result.envelope
+        guard response.status == 200, response.code?.text == "0" else {
+            if case .loginExpired = response.error { throw response.error }
+            // 业务失败包也可能带终态回执；只有身份相符才能证明原提交已经停止。
+            if let failed = result.failure, failed.task_id == id, [3, 4].contains(failed.status) {
+                return QuarkTransferTask(id: id, status: .failed, savedFIDs: [],
+                                         failureReason: response.error.localizedDescription)
+            }
+            throw response.error
+        }
+        guard let data = response.data else { throw QuarkError.invalidResponse }
         let status: QuarkTransferTask.Status
-        switch data.status { case 0, 1: status = .pending; case 2: status = .completed; case 3, 4: status = .failed
-        default: throw QuarkError.invalidResponse }
+        switch data.status {
+        case 0, 1: status = .pending
+        case 2: status = .completed
+        case 3, 4:
+            guard data.task_id == id else { throw QuarkError.invalidResponse }
+            status = .failed
+        default: throw QuarkError.invalidResponse
+        }
         return QuarkTransferTask(id: id, status: status, savedFIDs: data.save_as?.save_as_top_fids ?? [])
     }
 
@@ -111,7 +132,7 @@ public actor QuarkClient {
             let task = try await queryTask(id: id, retryIndex: attempt)
             switch task.status {
             case .completed: return task
-            case .failed: throw QuarkError.taskFailed(id)
+            case .failed: throw QuarkError.taskFailed(id, reason: task.failureReason)
             case .pending: if attempt + 1 < maxAttempts { try await Task.sleep(for: interval) }
             }
         }
@@ -399,7 +420,21 @@ private struct ShareTokenData: Decodable { let stoken: String; let title: String
 private struct CreatedDirectory: Decodable { let fid: String }
 private struct TaskReceipt: Decodable { let task_id: String }
 private struct DeleteData: Decodable { let task_id: String? }
+/// 只有任务查询需要读取失败包中的终态身份；其余接口仍保留业务错误并忽略失败 data。
+private struct TaskResponse: Decodable {
+    let envelope: Envelope<TaskData>
+    let failure: FailedTaskData?
+    private enum CodingKeys: String, CodingKey { case data }
+    init(from decoder: any Decoder) throws {
+        envelope = try Envelope(from: decoder)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        failure = envelope.status == 200 && envelope.code?.text == "0" ? nil :
+            (try? container.decode(FailedTaskData.self, forKey: .data))
+    }
+}
+private struct FailedTaskData: Decodable { let task_id: String; let status: Int }
 private struct TaskData: Decodable {
+    let task_id: String?
     let status: Int
     let save_as: SavedFiles?
     struct SavedFiles: Decodable { let save_as_top_fids: [String] }
