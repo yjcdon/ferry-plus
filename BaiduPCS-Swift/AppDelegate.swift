@@ -3,6 +3,9 @@ import UserNotifications
 
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     let model = AppModel()
+    #if DEBUG
+    private var naturalExpirySignals: [any DispatchSourceSignal] = []
+    #endif
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         #if DEBUG
@@ -20,6 +23,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                     FileHandle.standardError.write(Data("无法生成通知状态报告。\n".utf8))
                     exit(1)
                 }
+            }
+            return
+        }
+        if ProcessInfo.processInfo.arguments.contains("--verify-drive-natural-expiry") {
+            NSApp.setActivationPolicy(.prohibited)
+            NSApp.windows.forEach { $0.orderOut(nil) }
+            let verification = Task {
+                let smoke = ProcessInfo.processInfo.arguments.contains("--natural-expiry-smoke")
+                let report = await model.verifyNaturalExpiry(smoke: smoke) { report in
+                    let encoder = JSONEncoder()
+                    encoder.outputFormatting = [.sortedKeys]
+                    encoder.dateEncodingStrategy = .iso8601
+                    if let data = try? encoder.encode(report) { FileHandle.standardOutput.write(data + Data([10])) }
+                }
+                await model.shutdown()
+                naturalExpirySignals.forEach { $0.cancel() }
+                naturalExpirySignals.removeAll()
+                exit(!report.results.isEmpty && report.results.allSatisfy { $0.state == "verified" } ? 0 : 1)
+            }
+            for value in [SIGTERM, SIGINT] {
+                signal(value, SIG_IGN)
+                let source = DispatchSource.makeSignalSource(signal: value, queue: .main)
+                source.setEventHandler { verification.cancel() }
+                source.resume()
+                naturalExpirySignals.append(source)
             }
             return
         }

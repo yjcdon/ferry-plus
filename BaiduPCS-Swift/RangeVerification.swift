@@ -2,7 +2,7 @@
 import Foundation
 import os
 
-/// 验证只允许一个真实的 1 MiB 响应；下一片先挂起，由正式 coordinator 暂停传输。
+/// 验证只允许一个真实窗口（默认 1 MiB）；下一片先挂起，由正式下载流程暂停传输。
 nonisolated final class RangeVerificationGate: @unchecked Sendable {
     static let window: Int64 = 1 << 20
     struct Evidence: Encodable, Sendable {
@@ -27,6 +27,7 @@ nonisolated final class RangeVerificationGate: @unchecked Sendable {
         var admitted = false
     }
     let lowerOffset: Int64
+    let windowLength: Int64
     let upperOffset: Int64
     let totalSize: Int64
     let configuration: URLSessionConfiguration
@@ -34,9 +35,10 @@ nonisolated final class RangeVerificationGate: @unchecked Sendable {
     private let events: AsyncStream<Event>
     private let continuation: AsyncStream<Event>.Continuation
 
-    init(lowerOffset: Int64, totalSize: Int64, configuration: URLSessionConfiguration) {
+    init(lowerOffset: Int64, totalSize: Int64, configuration: URLSessionConfiguration, window: Int64 = RangeVerificationGate.window) {
         self.lowerOffset = lowerOffset
-        upperOffset = lowerOffset + Self.window
+        windowLength = window
+        upperOffset = lowerOffset + window
         self.totalSize = totalSize
         self.configuration = configuration
         (events, continuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(4))
@@ -64,7 +66,7 @@ nonisolated final class RangeVerificationGate: @unchecked Sendable {
         guard response.statusCode == 206 else { fail("http_\(response.statusCode)"); return false }
         let expected = "bytes \(lowerOffset)-\(upperOffset - 1)/\(totalSize)"
         guard response.value(forHTTPHeaderField: "Content-Range") == expected,
-              response.expectedContentLength < 0 || response.expectedContentLength == Self.window else {
+              response.expectedContentLength < 0 || response.expectedContentLength == windowLength else {
             fail("unexpected_response_range")
             return false
         }
@@ -139,7 +141,7 @@ nonisolated final class RangeVerificationGate: @unchecked Sendable {
     /// 响应体累计不得超出一个窗口；超长块不会交给引擎写盘。
     func acceptBody(count: Int) -> Bool {
         let accepted = state.withLock { value in
-            guard Int64(count) <= Self.window - value.bytes else { return false }
+            guard Int64(count) <= windowLength - value.bytes else { return false }
             value.bytes += Int64(count)
             return true
         }
@@ -284,7 +286,7 @@ nonisolated final class RangeVerificationProtocol: URLProtocol, URLSessionDataDe
         }
         session.finishTasksAndInvalidate()
         guard shouldFinish else { return }
-        if error != nil || gate?.bytes != RangeVerificationGate.window {
+        if error != nil || gate?.bytes != gate?.windowLength {
             gate?.fail(error == nil ? "short_response" : "network_failure")
             client?.urlProtocol(self, didFailWithError: RangeVerificationFailure("network_failure"))
         } else { client?.urlProtocolDidFinishLoading(self) }

@@ -144,10 +144,11 @@ final class AppModel {
     }
 
     #if DEBUG
-    /// 两类接口验证都使用独立任务空间，不能恢复或修改主应用的真实任务列表。
+    /// 接口验证使用独立任务空间，不能恢复或修改主应用的真实任务列表。
     private static var isDriveVerification: Bool {
         ProcessInfo.processInfo.arguments.contains("--verify-drive-interfaces") ||
-            ProcessInfo.processInfo.arguments.contains("--verify-drive-resume")
+            ProcessInfo.processInfo.arguments.contains("--verify-drive-resume") ||
+            ProcessInfo.processInfo.arguments.contains("--verify-drive-natural-expiry")
     }
 
     /// 复用正式账号路由解析一次候选链接，只返回脱敏到期元数据，不建立任务或请求下载正文。
@@ -158,6 +159,28 @@ final class AppModel {
             expectedSize: entry.size, context: try context.encoded())
         let link = try await source.resolve(request)
         return RangeVerificationGate.expiryMetadata(link.url)
+    }
+
+    /// 等待期间主应用可能退出或换号；探测前仅核对当前钥匙串账号身份，不发布凭据。
+    func naturalExpiryAccountMatches(_ encoded: Data) throws -> Bool {
+        let context = try JSONDecoder().decode(DownloadContext.self, from: encoded)
+        switch context.account.provider {
+        case .baidu:
+            guard let saved = CredentialStore.load() else { return false }
+            return context.account == AccountKey(provider: .baidu, accountID: String(saved.account.uk))
+        case .quark:
+            guard let saved = try QuarkCredentialStore.load() else { return false }
+            return context.account == AccountKey(provider: .quark, accountID: saved.account.id)
+        }
+    }
+
+    /// 自然过期验证独立保存分片，仅保留正式来源和网络配置；链接留在包装来源的进程内存中。
+    func naturalExpiryContext(_ sample: RemoteEntry, account: AccountKey, directory: URL) throws -> NaturalExpiryContext {
+        let context = DownloadContext(account: account, reference: sample.reference, size: sample.size, md5: sample.md5)
+        let request = DownloadRequest(id: UUID().uuidString, destination: directory.appendingPathComponent("sample.bin"),
+            expectedSize: sample.size, context: try context.encoded(), connections: 1, expectedMD5: sample.md5)
+        return NaturalExpiryContext(directory: directory, request: request, source: NaturalExpirySource(base: source),
+            network: Self.applying(activeProxy, to: DownloadEngine.defaultSessionConfiguration()))
     }
 
     /// 用同一来源路由和代理创建隔离的正式下载栈；验证护栏只改变传输边界，不替换账号或下载内容。
