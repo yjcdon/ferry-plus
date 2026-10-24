@@ -67,7 +67,7 @@ final class AppModel {
     @ObservationIgnored private var sessionReplacement: Task<Void, Never>?
     @ObservationIgnored private var hasStarted = false
     @ObservationIgnored private var isShuttingDown = false
-    @ObservationIgnored private var hasRequestedNotifications = false
+    @ObservationIgnored private var notificationAuthorizationTask: Task<Bool, Never>?
     /// 最近一次读取剪贴板的结果。剪贴板没变时不再读取，所以每次复制最多触发一次系统的剪贴板隐私提示，
     /// 也最多自动打开一次添加链接。
     @ObservationIgnored private var pasteboardCheck: (changeCount: Int, link: DiskShareLink?)?
@@ -200,6 +200,8 @@ final class AppModel {
 
     func shutdown() async {
         isShuttingDown = true
+        // 系统授权提示不一定响应取消；不等待它，回调返回后会再次检查取消状态。
+        notificationAuthorizationTask?.cancel()
         await coordinator.shutdown()
         downloadActivity.close()
         await sessionReplacement?.value
@@ -603,18 +605,37 @@ final class AppModel {
 
     // MARK: - 通知
 
+    /// 首次任务共用一次授权请求；小文件即使先完成，也等待本次授权结果再发送通知。
     private func requestNotificationAuthorization() {
-        guard !hasRequestedNotifications else { return }
-        hasRequestedNotifications = true
-        Task { _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) }
+        guard notificationAuthorizationTask == nil else { return }
+        let center = UNUserNotificationCenter.current()
+        notificationAuthorizationTask = Task {
+            guard !Task.isCancelled else { return false }
+            do {
+                let granted = try await center.requestAuthorization(options: [.alert, .sound])
+                return granted && !Task.isCancelled
+            } catch { return false }
+        }
     }
 
+    /// 授权拒绝或通知提交失败只影响通知，不改变下载结果；异步任务不持有 AppModel。
     private func notifyCompletion(of job: Job) {
         let content = UNMutableNotificationContent()
         content.title = "下载完成"
         content.body = job.provider.title + " · " + job.title
         let request = UNNotificationRequest(identifier: job.id.uuidString, content: content, trigger: nil)
-        Task { try? await UNUserNotificationCenter.current().add(request) }
+        let authorization = notificationAuthorizationTask
+        let center = UNUserNotificationCenter.current()
+        Task {
+            if let authorization { _ = await authorization.value }
+            guard !Task.isCancelled, authorization?.isCancelled != true else { return }
+            // 系统权限可在运行中改变，首次拒绝的结果不能永久挡住后来允许的通知。
+            // 启动恢复没有新建操作时也只读当前许可，不额外弹授权。
+            let status = await center.notificationSettings().authorizationStatus
+            guard status == .authorized || status == .provisional,
+                  !Task.isCancelled, authorization?.isCancelled != true else { return }
+            try? await center.add(request)
+        }
     }
 }
 

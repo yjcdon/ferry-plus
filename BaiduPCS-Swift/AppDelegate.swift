@@ -6,6 +6,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         #if DEBUG
+        if ProcessInfo.processInfo.arguments.contains("--inspect-notifications") {
+            NSApp.setActivationPolicy(.prohibited)
+            NSApp.windows.forEach { $0.orderOut(nil) }
+            Task {
+                let report = await NotificationVerification.inspect(arguments: Array(ProcessInfo.processInfo.arguments.dropFirst()))
+                do {
+                    let encoder = JSONEncoder()
+                    encoder.outputFormatting = [.sortedKeys]
+                    FileHandle.standardOutput.write(try encoder.encode(report) + Data([10]))
+                    exit(report.state == "invalid_arguments" ? 1 : 0)
+                } catch {
+                    FileHandle.standardError.write(Data("无法生成通知状态报告。\n".utf8))
+                    exit(1)
+                }
+            }
+            return
+        }
         if ProcessInfo.processInfo.arguments.contains("--verify-drive-resume") {
             NSApp.setActivationPolicy(.prohibited)
             NSApp.windows.forEach { $0.orderOut(nil) }
