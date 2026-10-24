@@ -452,3 +452,9 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 四类场景均已先复现再通过：新任务、自动恢复、手动继续、历史已完成记录。最终同一源码 96 项 JobModel／JobCoordinator 检查通过；额外同大小不同内容且启用自动清理的分享样本明确失败、零远端删除。DownloadKit 56 项、MD5 形状但无摘要语义的 ETag、清单 19 项及记录清理 10 项专项通过。已有两家实际上传再次下载证据已核对，三份现存本地文件重新只读计算摘要一致；早期 App 运行不冒称新修复的界面验收。证据 `.build/t11-current-validation/{report.md,core-complete-fix-tests.log,same-size-changed-share.log,final-snapshot-hashes.json}`。
 
 包含最终修复的 Release App 构建和签名验证通过（`.build/v3-rapid-md5-app-build.log`）。V3-T11 自身完成标准已核对，最终界面回归仍归 V3-T18。
+
+## 夸克上传任务查询与会话重建边界
+
+只读实测发现，现有 Cookie `/1/clouddrive/task` 可按原上传 task_id 查询：自有未合并小会话返回进行中，自有曾完整校验后回收的任务返回已完成；两者核对同一 task_id、类型为上传，但回执不含准确 FID。正式下载解析对未合并的预分配 FID、已完成后回收 FID、随机未分配 FID 都返回 HTTP 404，故不能据此证明“从未提交”并自动重新上传。
+
+官方 1.0.25 OAuth SDK 另有 `/open/v1/file/list_uploaded_parts`，明确处理 finish_status=2 与 FID，恢复时对结构化 43006 清 taskID 重启。它要求 OAuth access_token，当前 Cookie／OSS 路径没有等价合同；也未证明该码排除曾完成后记录过期，不能直接转换为自动新建会话的许可。证据 `.build/t10-quark-authoritative-status/{report.md,primary-excerpts.json,read-only-comparison.jsonl}`。本轮两次只读探针退出成功，不改任务、网盘或凭据；V3-T10 自动过期重建仍未完成。
