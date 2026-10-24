@@ -378,3 +378,9 @@ Release 构建 `.build/v3-inspector-final-build.log` 通过。Computer Use 在�
 共享预算的实际下载接线、设置更新、代理会话替换与旧下载参数兼容已逐项核对。独立重编译当前 DownloadKit 源码后，预算 11 项、非 Range 13 项及 Range 检查通过：包含 200 次取消／授予竞争、异常释放、限速聚合、方向独立及闲置对象释放；慢流超过原 0.25 秒总时限仍完整完成，网络无数据超时保留。完整 307 项既有测试同时通过，配置和换会话用例直接断言暂停意图及原位移续传。
 
 证据 `.build/t12-current-validation/{report.md,budget-result.txt,stream-result.txt,range-result.txt}`。本次没有启用缓冲仪表，输出的 METRICS=0 表示未采样，不作为零内存或峰值证据；两台本地测试服务已停止。T12 可勾选，T17 真实混合负载、真实 SOCKS 网络与 T19 整体资源测量仍分别保留实际验证边界。
+
+## 目录创建回执即时保存
+
+两家创建目录返回准确引用后，通过 `onCreated` 先将目录 ID 与确认提交保存到发起时账号的任务，再进行后置会话检查。会话失效、换号或取消不会丢弃已拿到的准确回执，后续重试沿用原目录而不重复创建。落盘失败停止后续操作；真正响应丢失仍保持未决，不按名称猜测归属。旧注入环境和目标选择页的目录创建入口保持兼容。
+
+独立编译当前 Core 并验证 21 项通过，包含两家后置会话失败、原账号持久化、落盘失败、错误引用、旧环境及真实 worker 取消恢复：`.build/directory-checkpoint-validation/result.txt`。统一 307 项测试及 Release App 构建通过：`.build/v3-directory-checkpoint-tests.log`、`.build/v3-directory-checkpoint-app-build.log`。该修复只消除已收到回执之后的丢失窗口，不作为 T07 真正响应丢失自动恢复的完成证据。

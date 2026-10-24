@@ -742,10 +742,12 @@ public actor UploadCoordinator {
             try Task.checkCancellation()
             let commit = UploadCommit(kind: .createDirectory)
             file.commits.append(commit); file.phase = .committing; try await saveFile(file)
-            let reference = try await env.createDirectory(parent, file.remoteName!)
-            file.remoteReference = reference; file.commits[file.commits.count - 1].status = .confirmed
-            file.commits[file.commits.count - 1].finalObject = reference; file.phase = .committing
-            try await saveFile(file)
+            let fileID = file.id
+            _ = try await env.makeDirectory(parent: parent, name: file.remoteName!, onCreated: { [weak self] reference in
+                guard let self else { throw CancellationError() }
+                try await self.directoryCreated(reference, fileID: fileID, jobID: jobID, commitID: commit.id, account: job.account, parent: parent)
+            })
+            file = try await store.loadFile(id: fileID, in: jobs[jobID]!)
             try await refreshRemoteName(&file, parent: parent, environment: env)
             file.phase = .completed; try await saveFile(file)
             return
@@ -895,6 +897,31 @@ public actor UploadCoordinator {
                 if file.isDirectory { file.phase = .completed; try await saveFile(file) }
             }
         }
+    }
+
+    /// 已接收的准确目录回执属于发起时账号，即使此时取消或换号也须先保存，之后才停止后续操作。
+    private func directoryCreated(_ reference: RemoteReference, fileID: UUID, jobID: UUID,
+                                  commitID: UUID, account: AccountKey, parent: RemoteReference) async throws {
+        guard let job = jobs[jobID], job.account == account, reference.provider == account.provider,
+              !reference.identifier.isEmpty else { throw UploadDestinationError.otherAccount }
+        var file = try await store.loadFile(id: fileID, in: job)
+        guard file.isDirectory, let index = file.commits.firstIndex(where: { $0.id == commitID && $0.kind == .createDirectory }),
+              file.commits[index].status == .pending else { throw UploadDestinationError.invalidPreparation }
+        switch reference {
+        case .baidu(let path, let fsID):
+            guard fsID > 0, case .baidu(let parentPath, _) = parent,
+                  let relative = RemotePath.relativePath(of: path, in: parentPath),
+                  RemotePath.components(of: relative, omittingEmpty: false).count == 1,
+                  let name = file.remoteName, RemotePath.isSameComponent(relative, name) else {
+                throw UploadDestinationError.invalidPreparation
+            }
+        case .quark(let fid):
+            guard fid != "0", fid != parent.identifier else { throw UploadDestinationError.invalidPreparation }
+        }
+        file.remoteReference = reference
+        file.commits[index].status = .confirmed; file.commits[index].finalObject = reference
+        file.phase = .committing
+        try await saveFile(file)
     }
 
     /// 服务端可能自动另存为其他名称；以已确认对象身份查询实际名称，绝不按请求名称认领对象。

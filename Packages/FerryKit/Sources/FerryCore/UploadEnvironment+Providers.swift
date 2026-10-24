@@ -8,6 +8,16 @@ extension UploadEnvironment {
     public static func baidu(client: BaiduClient, account: AccountKey,
                              checkSession: @escaping @Sendable () async throws -> Void) throws -> UploadEnvironment {
         let destination = try BaiduUploadDestination(client: client, account: account)
+        let createDirectory: @Sendable (RemoteReference, String, @Sendable (RemoteReference) async throws -> Void) async throws -> RemoteReference = { parent, name, onCreated in
+            try await checkSession()
+            try validateName(name)
+            let path = RemotePath.join(try baiduPath(parent), name)
+            let entry = try await client.createOwnedDirectory(path)
+            let reference = RemoteReference.baidu(path: entry.path, fsID: entry.fsID)
+            try await onCreated(reference)
+            try await checkSession()
+            return reference
+        }
         return UploadEnvironment(destination: destination, listDirectory: { reference in
             try await checkSession()
             let path = try baiduPath(reference)
@@ -15,12 +25,7 @@ extension UploadEnvironment {
             try await checkSession()
             return entries
         }, createDirectory: { parent, name in
-            try await checkSession()
-            try validateName(name)
-            let path = RemotePath.join(try baiduPath(parent), name)
-            let entry = try await client.createOwnedDirectory(path)
-            try await checkSession()
-            return .baidu(path: entry.path, fsID: entry.fsID)
+            try await createDirectory(parent, name, { _ in })
         }, resolve: { reference, size in
             try await checkSession()
             guard case .baidu(let path, let fsID) = reference, fsID > 0 else {
@@ -33,24 +38,29 @@ extension UploadEnvironment {
             let link = try await client.downloadLink(for: path)
             try await checkSession()
             return ResolvedURL(url: link.url, headers: link.headers)
-        })
+        }, createDirectoryWithCheckpoint: createDirectory)
     }
 
     /// 绑定当前夸克会话；合并未知时只按预分配 fid 查询，不能认领同名文件或重新合并。
     public static func quark(client: QuarkClient, account: AccountKey, secrets: any UploadSecretStorage,
                              checkSession: @escaping @Sendable () async throws -> Void) throws -> UploadEnvironment {
         let destination = try QuarkUploadDestination(client: client, account: account, secrets: secrets)
+        let createDirectory: @Sendable (RemoteReference, String, @Sendable (RemoteReference) async throws -> Void) async throws -> RemoteReference = { parent, name, onCreated in
+            try await checkSession()
+            try validateName(name)
+            let fid = try await client.createDirectory(name: name, parentFID: quarkFID(parent))
+            let reference = RemoteReference.quark(fid: fid)
+            try await onCreated(reference)
+            try await checkSession()
+            return reference
+        }
         return UploadEnvironment(destination: destination, listDirectory: { reference in
             try await checkSession()
             let entries = try await client.listDirectory(parentFID: quarkFID(reference)).map { QuarkNetdisk.convert($0) }
             try await checkSession()
             return entries
         }, createDirectory: { parent, name in
-            try await checkSession()
-            try validateName(name)
-            let fid = try await client.createDirectory(name: name, parentFID: quarkFID(parent))
-            try await checkSession()
-            return .quark(fid: fid)
+            try await createDirectory(parent, name, { _ in })
         }, resolve: { reference, size in
             try await checkSession()
             let link = try await client.download(fid: quarkFID(reference))
@@ -97,7 +107,7 @@ extension UploadEnvironment {
                 return .rejected("原预分配对象的大小与上传基准不一致")
             }
             return .confirmed(.quark(fid: native.fileID))
-        })
+        }, createDirectoryWithCheckpoint: createDirectory)
     }
 
     private static func validateName(_ name: String) throws {
