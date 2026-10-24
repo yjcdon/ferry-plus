@@ -28,6 +28,9 @@ struct UploadView: View {
     @State private var submission: Submission?
     @State private var isSubmitting = false
     @State private var isDropTarget = false
+    @State private var preflight: UploadPreflightResult?
+    @State private var preflightError: String?
+    @State private var isCheckingPreflight = false
     @State private var panelPresenter = UploadOpenPanelPresenter()
     private let onSubmit: @MainActor ([URL], AccountKey, RemoteReference, UploadConflictPolicy) async throws -> Void
 
@@ -43,6 +46,14 @@ struct UploadView: View {
         let directory: RemoteReference
         let generation: Int
         let session: ObjectIdentifier?
+    }
+    private struct PreflightRequest: Hashable {
+        let files: [URL]
+        let account: AccountKey
+        let directory: RemoteReference
+        let session: ObjectIdentifier
+        let policy: UploadConflictPolicy
+        let generation: Int
     }
     private struct Creation: Identifiable {
         let id = UUID()
@@ -115,6 +126,7 @@ struct UploadView: View {
             return urls.contains(where: \.isFileURL)
         } isTargeted: { isDropTarget = $0 }
         .task(id: request) { await load(request) }
+        .task(id: preflightRequest) { await checkPreflight(preflightRequest) }
         .alert("新建文件夹", isPresented: $showsNewFolder) {
             TextField("文件夹名称", text: $newFolderName)
             Button("取消", role: .cancel) { }
@@ -281,6 +293,7 @@ struct UploadView: View {
             if let directoryNotice {
                 Text(directoryNotice).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
+            preflightContent
             if let submitError { errorLabel(submitError) }
             HStack {
                 Text("上传完成后会校验云端内容。")
@@ -315,7 +328,77 @@ struct UploadView: View {
         guard !trail.isEmpty else { return "根目录" }
         return "/" + trail.map { ($0.hasUnknownAncestors ? "…/" : "") + $0.name }.joined(separator: "/")
     }
-    private var canSubmit: Bool { canUseDirectory && !files.isEmpty && policy != .replace }
+    private var canSubmit: Bool {
+        canUseDirectory && !files.isEmpty && policy != .replace && !isCheckingPreflight && preflight?.canUpload == true
+    }
+    private var preflightRequest: PreflightRequest? {
+        guard !files.isEmpty, let account = loadedAccount, let session = loadedSession,
+              account == model.accountKey(for: provider), loadedDirectory == currentDirectory,
+              session == sessionIdentity, !isLoading else { return nil }
+        return .init(files: files, account: account, directory: currentDirectory, session: session,
+                     policy: policy, generation: generation)
+    }
+
+    @ViewBuilder private var preflightContent: some View {
+        if isCheckingPreflight { ProgressView("正在检查文件及目标容量…").controlSize(.small) }
+        else if let preflightError { errorLabel(preflightError) }
+        else if let result = preflight {
+            Text("\(result.summary.fileCount) 个文件 · \(result.summary.directoryCount) 个文件夹 · \(ByteCountFormatter.string(fromByteCount: result.summary.totalBytes, countStyle: .file))")
+                .font(.caption).foregroundStyle(.secondary)
+            Text(result.availableBytes.map { "剩余容量：" + ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "剩余容量未知（\(result.capacityReason ?? "服务端未提供可靠容量")）")
+                .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            DisclosureGroup("上传前检查") {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("单文件大小上限未知，以服务端结果为准。")
+                        Text("同名项目 \(result.conflictCount) · 类型冲突 \(result.typeConflictCount) · 合并文件夹 \(result.mergingDirectoryCount)")
+                        Text("这里只预览当前目录的根项目；子目录同名项在执行时逐项检查。预览不会锁定容量或目标。")
+                        if result.requiredLowerBound != result.requiredUpperBound {
+                            Text("跳过策略下所需空间尚不确定，最多需 \(ByteCountFormatter.string(fromByteCount: result.requiredUpperBound, countStyle: .file))。")
+                        }
+                        if result.summary.issueCount > 0 {
+                            Text("发现 \(result.summary.issueCount) 个源问题；请处理后重新添加或刷新。")
+                            ForEach(Array(result.summary.issues.enumerated()), id: \.offset) { _, message in
+                                Text(message).textSelection(.enabled)
+                            }
+                            if result.summary.issueCount > result.summary.issues.count { Text("仅显示前 20 个问题。") }
+                        }
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                        .font(.caption).foregroundStyle(.secondary)
+                }.frame(maxHeight: 120)
+            }
+            if result.insufficientSpace { errorLabel("目标剩余容量不足，请清理空间或减少本次上传内容。") }
+            if result.summary.issueCount > 0 { errorLabel("所选源文件存在无法上传的项目，请展开检查。") }
+        }
+    }
+
+    /// 只做可取消的元数据和只读容量／目录预览，变更选择或账号后丢弃旧结果。
+    private func checkPreflight(_ request: PreflightRequest?) async {
+        preflight = nil; preflightError = nil; isCheckingPreflight = request != nil
+        guard let request else { return }
+        do {
+            let summary = try await UploadPreflight.inspect(request.files)
+            try Task.checkCancellation()
+            guard request == preflightRequest else { return }
+            var available: Int64?, capacityReason: String?
+            do { available = try await model.uploadAvailableBytes(for: request.account) }
+            catch {
+                if error is CancellationError || Task.isCancelled { throw CancellationError() }
+                capacityReason = error.localizedDescription
+            }
+            let disk = try model.netdisk(for: request.account.provider)
+            guard disk.account == request.account, ObjectIdentifier(disk) == request.session else { throw UploadDestinationError.otherAccount }
+            let entries = try await disk.listDirectory(request.directory)
+            try Task.checkCancellation()
+            guard request == preflightRequest else { return }
+            preflight = UploadPreflight.evaluate(summary, entries: entries, policy: request.policy,
+                                                  availableBytes: available, capacityReason: capacityReason)
+            isCheckingPreflight = false
+        } catch {
+            guard !Task.isCancelled, request == preflightRequest else { return }
+            preflightError = error.localizedDescription; isCheckingPreflight = false
+        }
+    }
     private var canUseDirectory: Bool {
         !isSubmitting && creation == nil && !isLoading && loadError == nil &&
         loadedAccount == model.accountKey(for: provider) && loadedAccount != nil &&
