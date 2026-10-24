@@ -480,3 +480,11 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 修复下载行主按钮、下载详情单选及多选操作直接使用旧任务快照的旁路。它们通过显式回调交回 MainView，与工具栏、菜单、快捷键和右键共用当前可见范围及动作可用性核对；下载方向 ID 明确，AppModel 不承担窗口全局筛选状态。无调用方的旧 JobActionsMenu 已删除，不遗留重复入口。
 
 真实旧回调的红测确认筛选切换后仍可操作隐藏下载。修复后 35 项源码提取检查覆盖四类筛选、四个下载动作、多选、确认后移除、上传每次 await 后重新核对和多任务错误汇总；两家实际 Core 移除 2 项验证保留原文件、独立记录且零云端调用；慢回读 8 项证明发送 100% 仍为校验，完整 SHA 成功才完成。证据 `.build/t14-scope-validation/{report.md,result.txt,retention-result.txt,progress-result.txt,final-source-manifest.json}`。全包 307 项及 Release App 构建通过，T14 自身规则已核对；未把隔离业务验证当作当前锁屏下无法重跑的实际 GUI 验收。
+
+## 当前开发 App 空闲资源观测
+
+按完整路径启动重新构建的 `.build/Ferry Plus.app`，实际进程 PID 66250。12 次每秒采样 CPU 均为 0%，RSS 稳定为 154,912 KiB；系统调用栈采样显示主线程在正常 AppKit 事件循环等待，物理内存 footprint 为 58.0M、该进程启动以来 peak 为 82.6M。RSS 包含共享映射，不能和 footprint 混用。未发现该进程的防休眠断言；原两条大上传仍暂停，确认位移保持 461,373,440 与 721,420,288 字节。
+
+当前开发 App 占用 10,752 KiB，安装版 2.0 为 6,052 KiB；未启动旧版操作新版数据。当前构建仍保留开发中的 2.0 bundle 标签，尚未生成或宣称 3.0 待发布产物。证据 `.build/v3-current-app-idle-validation/{samples.json,idle-stack.txt,power-assertions.json,large-paused-check.json,provenance.json}`，固定已提交源码 `193a86f` 及二进制哈希。
+
+本轮 Mac 锁屏，启动和进程资源可观测，实际界面仍无法操作；上述短时空闲数据不证明混合负载峰值、完整无泄漏或最终 GUI 验收，T18／T19 保持未完成。
