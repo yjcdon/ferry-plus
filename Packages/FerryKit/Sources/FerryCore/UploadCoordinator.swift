@@ -123,6 +123,22 @@ public actor UploadCoordinator {
         return result
     }
 
+    /// 定位已确认产物所在的准确云端目录；嵌套文件只读取已发布父目录，不按同名条目猜测。
+    public func resultDirectory(jobID: UUID, fileID: UUID) async throws -> RemoteReference {
+        guard let job = jobs[jobID], job.fileIDs.contains(fileID) else { throw UploadCoordinatorError.missingJob }
+        let file = try await store.loadFile(id: fileID, in: job)
+        guard let result = file.remoteReference else { throw UploadRecordError.invalid("此项目尚无已确认的云端结果") }
+        if file.isDirectory { return result }
+        let parentPath = file.relativePath.split(separator: "/").dropLast().joined(separator: "/")
+        if parentPath.isEmpty { return job.destination }
+        let parentID = stableID(jobID: jobID, relativePath: parentPath)
+        let parent = try await store.loadFile(id: parentID, in: job)
+        guard parent.isDirectory, let directory = parent.remoteReference else {
+            throw UploadRecordError.invalid("上传父目录尚无已确认的云端身份：\(parentPath)")
+        }
+        return directory
+    }
+
     /// 仅变化时发布最新摘要；取消订阅不保留 coordinator。
     public func updates() -> AsyncStream<[UploadJob]> {
         let id = UUID()

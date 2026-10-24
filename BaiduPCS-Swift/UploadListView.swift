@@ -130,7 +130,16 @@ struct UploadFilesView: View {
     @State private var isRelocationPickerPresented = false
     @State private var relocationRequest: RelocationRequest?
     @State private var relocationError: String?
+    @State private var locationError: String?
+    @State private var cloudRequest: UUID?
+    @State private var cloudLocation: CloudLocation?
     private let pageSize = 100
+
+    private struct CloudLocation: Identifiable {
+        let id = UUID()
+        let account: AccountKey
+        let directory: RemoteReference
+    }
 
     private struct RelocationRequest: Equatable {
         let id = UUID()
@@ -192,6 +201,17 @@ struct UploadFilesView: View {
             guard let request = relocationRequest else { return }
             await relocate(request)
         }
+        .task(id: cloudRequest) {
+            guard let fileID = cloudRequest else { return }
+            await openCloudDirectory(fileID: fileID)
+        }
+        .sheet(item: $cloudLocation) { location in
+            NetdiskDownloadView(initialAccount: location.account, initialDirectory: location.directory)
+                .environment(model)
+        }
+        .alert("无法定位文件", isPresented: Binding(
+            get: { locationError != nil }, set: { if !$0 { locationError = nil } }
+        )) { Button("好") { locationError = nil } } message: { Text(locationError ?? "") }
         .fileImporter(isPresented: $isRelocationPickerPresented, allowedContentTypes: [.item],
                       allowsMultipleSelection: false) { result in
             guard let fileID = relocationFileID else { return }
@@ -236,6 +256,12 @@ struct UploadFilesView: View {
                             .lineLimit(1).truncationMode(.middle).help(file.relativePath)
                         Spacer()
                         Text(file.phase.displayName).foregroundStyle(.secondary)
+                        Menu {
+                            Button("打开云端所在目录", systemImage: "cloud") { cloudRequest = file.id }
+                                .disabled(file.remoteReference == nil || cloudRequest != nil)
+                            Button("在 Finder 中显示源文件", systemImage: "folder") { revealSource(file) }
+                        } label: { Label("定位", systemImage: "location") }
+                            .menuStyle(.borderlessButton).fixedSize().help("定位文件")
                     }
                     Text(integrityDescription(file)).font(.caption).foregroundStyle(.secondary)
                     if canRelocate(file) {
@@ -267,6 +293,38 @@ struct UploadFilesView: View {
                 }.padding(.vertical, 3)
             }
         }
+    }
+
+    /// 复用任务绑定账号的既有目录浏览入口，不把旧任务转到当前另一账号。
+    private func openCloudDirectory(fileID: UUID) async {
+        defer { cloudRequest = nil }
+        do {
+            guard let sourceJob = job, let coordinator = model.uploadCoordinator else { throw UploadCoordinatorError.missingJob }
+            guard model.accountKey(for: sourceJob.account.provider) == sourceJob.account else {
+                throw UploadRecordError.invalid("请先登录此任务的\(sourceJob.account.provider.title)账号“\(sourceJob.accountName)”再打开云端目录。")
+            }
+            let directory = try await coordinator.resultDirectory(jobID: jobID, fileID: fileID)
+            try Task.checkCancellation()
+            guard job?.account == sourceJob.account,
+                  model.accountKey(for: sourceJob.account.provider) == sourceJob.account else {
+                throw UploadRecordError.invalid("账号或上传任务已变化，请重新定位。")
+            }
+            cloudLocation = .init(account: sourceJob.account, directory: directory)
+        } catch is CancellationError { }
+        catch { locationError = error.localizedDescription }
+    }
+
+    /// 从保存的授权书签定位实际源文件；失效、已移走或无权限时显示原始完整路径与原因。
+    private func revealSource(_ file: UploadFile) {
+        var path = file.source.url.path
+        do {
+            let url = try file.source.bookmark.map { try UploadSource.resolve(bookmark: $0) } ?? file.source.url
+            path = url.path
+            let accessed = url.startAccessingSecurityScopedResource()
+            defer { if accessed { url.stopAccessingSecurityScopedResource() } }
+            guard try url.checkResourceIsReachable() else { throw CocoaError(.fileReadNoSuchFile) }
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } catch { locationError = "\(path)\n\(error.localizedDescription)" }
     }
 
     /// 仅待发送且已有原始 SHA-256 的失败项可重新选源，校验云端内容时不再依赖本地文件。
