@@ -506,3 +506,9 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 修复确认新建后、异步任务执行前会话变化仍可能在旧父目录创建的窗口。创建前核对取消、父目录、账号与会话；请求尚未发出时直接停止，不显示“可能已创建”。已发请求的迟到成功或错误仍不更新新上下文。
 
 从实际方法提取的旧版红例证明旧会话仍会调用创建接口；修复后 11 项确定性检查通过，覆盖账号／会话／目录变化、已取消均零写入，正常恰一次，以及在途迟到结果隔离。证据 `.build/upload-directory-context-validation/{report.md,red-result.txt,green-result.txt}`。Release App 构建及固定签名校验通过（`.build/v3-startup-directory-context-app-build.log`）。本项不替代锁屏期间尚未重跑的实际拖入／换号界面验收。
+
+## 启动恢复与退出交错收尾
+
+修复 AppModel 启动等待下载／上传恢复时开始退出，恢复晚返回仍启动账号请求的窗口。启动入口及恢复、剪贴板等待后的边界核对退出标志；既有夸克后台启动任务保存句柄，退出及释放 Model 时取消，任务跨等待只持有会话。百度验证入口与返回后不再于退出中保存凭据或改变账号状态。
+
+旧启动链经确定性等待复现退出后仍调用百度验证。实际 start／revalidate 方法全文提取的 14 项检查通过，包含三处等待边界、正常启动、晚成功／过期、夸克取消及 Model 释放。HTTP、钥匙串为轻量替身，夸克替身沿用正式 revalidate 的返回后取消检查，不冒称真实登录／退出现场。证据 `.build/start-shutdown-validation/{report.md,result.txt,source-hashes.json}`。最终 Release App 构建及固定签名校验通过（`.build/v3-startup-directory-context-app-build.log`）；睡眠唤醒、通知及实际界面验收仍未补齐。

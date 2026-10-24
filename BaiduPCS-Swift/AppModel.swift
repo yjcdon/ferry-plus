@@ -84,6 +84,7 @@ final class AppModel {
     /// 最近一次换引擎会话的 Task。下一次先等它完成，因为各个 Task 到达引擎的顺序不一定和创建顺序相同。
     @ObservationIgnored private var sessionReplacement: Task<Void, Never>?
     @ObservationIgnored private var shutdownTask: Task<Void, Never>?
+    @ObservationIgnored private var quarkStartupTask: Task<Void, Never>?
     @ObservationIgnored private var transferLifecycle: TransferLifecycle?
     @ObservationIgnored private var isSystemSleeping = false
     @ObservationIgnored private var downloadIsExecuting = false
@@ -242,9 +243,9 @@ final class AppModel {
 
     // MARK: - 生命周期
 
-    /// 恢复任务，然后在后台校验账号。
+    /// 恢复任务后校验账号；退出一旦开始，恢复期间的晚返回不能再发起账号校验。
     func start() async {
-        guard !hasStarted else { return }
+        guard !hasStarted, !isShuttingDown else { return }
         hasStarted = true
         #if DEBUG
         if DemoData.isEnabled {
@@ -261,16 +262,23 @@ final class AppModel {
         transferLifecycle = TransferLifecycle { [weak self] sleeping in self?.systemSleepChanged(sleeping) }
         quark.publishRestoredSession()
         await coordinator.start()
+        guard !isShuttingDown else { return }
         await startUploads()
-        Task { await quark.start() }
+        guard !isShuttingDown else { return }
+        quarkStartupTask = Task { [weak self] in
+            guard self?.isShuttingDown == false, let quark = self?.quark else { return }
+            await quark.start()
+        }
         // 启动时应用变为活跃的那次检测在任务列表加载前，被跳过，所以加载后再检测一次。
         if NSApp.isActive { await detectCopiedLink() }
+        guard !isShuttingDown else { return }
         await revalidate()
     }
 
     func shutdown() async {
         if let shutdownTask { await shutdownTask.value; return }
         isShuttingDown = true
+        quarkStartupTask?.cancel()
         // 系统授权提示不一定响应取消；不等待它，回调返回后会再次检查取消状态。
         notificationAuthorizationTask?.cancel()
         uploadUpdates?.cancel()
@@ -422,15 +430,15 @@ final class AppModel {
 
     /// 网络错误不算失效，只有百度明确说登录失效才提示。
     private func revalidate() async {
-        guard let client, let credential else { return }
+        guard !isShuttingDown, let client, let credential else { return }
         do {
             let account = try await client.validate()
             // 校验期间退出登录或换了账号。
-            guard credential == self.credential else { return }
+            guard !isShuttingDown, credential == self.credential else { return }
             self.account = account
                 try? CredentialStore.save(StoredLogin(credential: credential, account: account))
         } catch BaiduError.loginExpired {
-            if credential == self.credential, client === self.client { markBaiduExpired() }
+            if !isShuttingDown, credential == self.credential, client === self.client { markBaiduExpired() }
         } catch {}
     }
 
@@ -1003,6 +1011,7 @@ final class AppModel {
     }
 
     isolated deinit {
+        quarkStartupTask?.cancel()
         uploadUpdates?.cancel()
         uploadActivityUpdates?.cancel()
         transferLifecycle?.close()
