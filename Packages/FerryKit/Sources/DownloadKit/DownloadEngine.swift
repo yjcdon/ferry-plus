@@ -37,6 +37,9 @@ public actor DownloadEngine {
     private let broadcaster = EventBroadcaster()
     private var ticker: Task<Void, Never>?
     private var isShutDown = false
+    /// 系统睡眠等运行时阻断不写用户暂停意图；收尾屏障防止 resume 在旧 worker 退出前重新启动。
+    private var isExecutionSuspended = false
+    private var suspensionDrains = 0
     private var pendingConfiguration: DownloadConfiguration?
     /// 当前来源配置也约束配置更新期间才加入的文件；取消后释放对应项。
     private var connectionOverrides: [String: Int] = [:]
@@ -209,6 +212,30 @@ public actor DownloadEngine {
         return entry.record.value.completedURL
     }
 
+    /// 系统睡眠前停稳所有 worker，包括已移出列表的取消收尾；不改变用户手动暂停意图。
+    /// 返回前 FileTransfer 已结束 finalize／检查点写入；已完成结果保留，其余保存续传检查点。
+    public func suspendExecution() async {
+        isExecutionSuspended = true
+        suspensionDrains += 1
+        let draining = Array(workers.values)
+        for worker in draining { worker.cancel() }
+        for worker in draining { await worker.value }
+        suspensionDrains -= 1
+        if suspensionDrains == 0 {
+            ticker?.cancel()
+            ticker = nil
+            // 唤醒请求可能在 await 收尾期间已到达，由最后一个收尾者解除调度屏障。
+            schedule()
+        }
+    }
+
+    /// 系统唤醒仅解除运行时阻断；手动暂停保持暂停，永久 shutdown 后不再接纳恢复执行。
+    public func resumeExecution() {
+        guard !isShutDown else { return }
+        isExecutionSuspended = false
+        schedule()
+    }
+
     /// 应用退出前调用：停止所有下载并保存进度。进行中的下载下次 `restore()` 时恢复为 queued。
     /// 之后引擎不再开始新的下载。
     public func shutdown() async {
@@ -309,7 +336,7 @@ public actor DownloadEngine {
     }
 
     private func schedule() {
-        guard !isShutDown, pendingConfiguration == nil else { return }
+        guard !isShutDown, !isExecutionSuspended, suspensionDrains == 0, pendingConfiguration == nil else { return }
         // 移出列表的取消任务仍可能收尾，结束前继续占用全局并发名额。
         var active = workers.count
         for id in order where active < configuration.maxConcurrentFiles {
@@ -363,7 +390,7 @@ public actor DownloadEngine {
         case .cancelled:
             try? store.save(entry.record.value)
             if entry.state == .running {
-                if restarts, !isShutDown, pendingConfiguration == nil {
+                if restarts, !isShutDown, !isExecutionSuspended, suspensionDrains == 0, pendingConfiguration == nil {
                     // 换会话时不经过 queued：界面一直显示下载中，并发名额也不会让给排在后面的下载。
                     entries[id] = entry
                     start(id)
@@ -383,8 +410,8 @@ public actor DownloadEngine {
         guard ticker == nil else { return }
         ticker = Task { [weak self] in
             while let interval = await self?.configuration.progressInterval {
-                try? await Task.sleep(for: interval)
-                guard let self, await self.tick() else { return }
+                do { try await Task.sleep(for: interval) } catch { return }
+                guard !Task.isCancelled, let self, await self.tick() else { return }
             }
         }
     }

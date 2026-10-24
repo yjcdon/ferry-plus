@@ -861,6 +861,9 @@ private let megabyte = 1 << 20
             await first.snapshot(id: "a.bin")?.receivedBytes == Int64(512 * kilobyte)
         }
         await first.shutdown()
+        let stateStore = StateStore(directory: fixture.stateDirectory)
+        let originalA = try Data(contentsOf: stateStore.fileURL(for: "a.bin"))
+        let originalB = try Data(contentsOf: stateStore.fileURL(for: "b.bin"))
 
         let saved = try #require(try fixture.savedRecords().first { $0.request.id == "a.bin" })
         #expect(saved.receivedBytes == Int64(512 * kilobyte))
@@ -870,6 +873,8 @@ private let megabyte = 1 << 20
         fixture.server.clearLog()
         let second = fixture.makeEngine(.test(files: 1))
         let restored = try await second.restore()
+        #expect(try Data(contentsOf: stateStore.fileURL(for: "a.bin").appendingPathExtension("before-v3")) == originalA)
+        #expect(try Data(contentsOf: stateStore.fileURL(for: "b.bin").appendingPathExtension("before-v3")) == originalB)
 
         #expect(restored.map(\.id) == ["a.bin", "b.bin"])
         #expect(restored.map(\.state) == [.queued, .paused])
@@ -877,10 +882,124 @@ private let megabyte = 1 << 20
         _ = try await second.waitForCompletion(of: "a.bin")
         #expect(fixture.contents("a.bin") == data)
         expectOnlyMissingBytesRequested(fixture.server.log, after: saved)
+        #expect(try Data(contentsOf: stateStore.fileURL(for: "a.bin")) != originalA)
+        _ = try await second.restore()
+        #expect(try Data(contentsOf: stateStore.fileURL(for: "a.bin").appendingPathExtension("before-v3")) == originalA)
+        #expect(try Data(contentsOf: stateStore.fileURL(for: "b.bin").appendingPathExtension("before-v3")) == originalB)
 
         await second.resume(id: "b.bin")
         _ = try await second.waitForCompletion(of: "b.bin")
         #expect(fixture.contents("b.bin") == other)
+    }
+
+    @Test func runtimeSuspensionPreservesPauseAndResumesCheckpointOnReplacementSession() async throws {
+        let fixture = Fixture()
+        let expected = fixture.addFile("runtime.bin", size: megabyte)
+        fixture.addFile("manual.bin", size: megabyte)
+        let queuedData = fixture.addFile("queued.bin", size: 32 * kilobyte)
+        fixture.addFile("after-shutdown.bin", size: kilobyte)
+        fixture.server.setStall(after: 128 * kilobyte)
+        let engine = fixture.makeEngine(.test(files: 1, connections: 1))
+        try await engine.enqueue(fixture.request("runtime.bin"))
+        try await engine.enqueue(fixture.request("manual.bin"))
+        await engine.pause(id: "manual.bin")
+        try await waitUntil("runtime checkpoint bytes") { await engine.snapshot(id: "runtime.bin")?.receivedBytes == Int64(128 * kilobyte) }
+        await engine.suspendExecution()
+        #expect(fixture.server.activeRequests == 0)
+        #expect(await engine.snapshot(id: "runtime.bin")?.state == .queued)
+        #expect(await engine.snapshot(id: "manual.bin")?.state == .paused)
+        let saved = try #require(try fixture.savedRecords().first { $0.request.id == "runtime.bin" })
+        #expect(!saved.isPaused && saved.receivedBytes == Int64(128 * kilobyte))
+        #expect(try fixture.savedRecords().first { $0.request.id == "manual.bin" }?.isPaused == true)
+        fixture.server.clearLog()
+        try await engine.enqueue(fixture.request("queued.bin"))
+        await engine.replaceSession(configuration: StubProtocol.makeConfiguration(name: "runtime-new"))
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(fixture.server.log.isEmpty)
+        fixture.server.setStallRule { _ in nil }
+        await engine.resumeExecution()
+        _ = try await engine.waitForCompletion(of: "runtime.bin")
+        _ = try await engine.waitForCompletion(of: "queued.bin")
+        #expect(fixture.contents("runtime.bin") == expected)
+        #expect(fixture.contents("queued.bin") == queuedData)
+        #expect(await engine.snapshot(id: "manual.bin")?.state == .paused)
+        #expect(fixture.server.log.allSatisfy { $0.headers["X-Session"] == "runtime-new" })
+        expectOnlyMissingBytesRequested(fixture.server.log.filter { $0.url.path == "/runtime.bin" }, after: saved)
+        await engine.shutdown()
+        fixture.server.clearLog()
+        try await engine.enqueue(fixture.request("after-shutdown.bin"))
+        await engine.resumeExecution()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(fixture.server.log.isEmpty)
+    }
+
+    @Test func runtimeResumeDuringDrainWaitsForPreviousWorker() async throws {
+        let fixture = Fixture()
+        fixture.addFile("runtime-a.bin", size: kilobyte)
+        fixture.addFile("runtime-b.bin", size: kilobyte)
+        let source = GatedSource(fixture.source, gating: ["runtime-a.bin", "runtime-b.bin"])
+        defer { source.open() }
+        let engine = DownloadEngine(stateDirectory: fixture.stateDirectory, source: source, configuration: .test(files: 1), session: fixture.session)
+        try await engine.enqueue(fixture.request("runtime-a.bin"))
+        try await waitUntil("first runtime worker started") { source.hasEntered("runtime-a.bin") }
+        let suspended = Task { await engine.suspendExecution() }
+        try await waitUntil("runtime suspension cancelled worker") { source.wasCancelled("runtime-a.bin") }
+        await engine.resumeExecution()
+        try await engine.enqueue(fixture.request("runtime-b.bin"))
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!source.hasEntered("runtime-b.bin"))
+        #expect(fixture.server.log.isEmpty)
+        source.open()
+        await suspended.value
+        _ = try await engine.waitForCompletion(of: "runtime-a.bin")
+        _ = try await engine.waitForCompletion(of: "runtime-b.bin")
+        await engine.shutdown()
+    }
+
+    @Test func runtimeSuspensionBlocksSessionReplacementRestart() async throws {
+        let fixture = Fixture()
+        fixture.addFile("runtime.bin", size: kilobyte)
+        let source = GatedSource(fixture.source, gating: ["runtime.bin"])
+        defer { source.open() }
+        let engine = DownloadEngine(stateDirectory: fixture.stateDirectory, source: source, configuration: .test(), session: fixture.session)
+        try await engine.enqueue(fixture.request("runtime.bin"))
+        try await waitUntil("runtime source entered") { source.hasEntered("runtime.bin") }
+        let suspended = Task { await engine.suspendExecution() }
+        try await waitUntil("runtime cancellation") { source.wasCancelled("runtime.bin") }
+        let replaced = Task { await engine.replaceSession(configuration: StubProtocol.makeConfiguration(name: "runtime-new")) }
+        source.open()
+        await suspended.value
+        await replaced.value
+        #expect(await engine.snapshot(id: "runtime.bin")?.state == .queued)
+        #expect(fixture.server.log.isEmpty)
+        #expect(try fixture.savedRecords().allSatisfy { !$0.isPaused })
+        await engine.resumeExecution()
+        _ = try await engine.waitForCompletion(of: "runtime.bin")
+        #expect(fixture.server.log.allSatisfy { $0.headers["X-Session"] == "runtime-new" })
+        await engine.shutdown()
+    }
+
+    @Test func runtimeSuspensionAwaitsRemovedCancellingWorker() async throws {
+        let fixture = Fixture()
+        fixture.addFile("runtime.bin", size: kilobyte)
+        let source = GatedSource(fixture.source, gating: ["runtime.bin"])
+        defer { source.open() }
+        let engine = DownloadEngine(stateDirectory: fixture.stateDirectory, source: source, configuration: .test(), session: fixture.session)
+        try await engine.enqueue(fixture.request("runtime.bin"))
+        try await waitUntil("runtime source entered") { source.hasEntered("runtime.bin") }
+        let cancelled = Task { await engine.cancel(id: "runtime.bin") }
+        try await waitUntil("runtime cancellation removed entry") { await engine.snapshot(id: "runtime.bin") == nil }
+        let finished = OSAllocatedUnfairLock(initialState: false)
+        let suspended = Task { await engine.suspendExecution(); finished.withLock { $0 = true } }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(!finished.withLock { $0 })
+        source.open()
+        await suspended.value
+        await cancelled.value
+        #expect(finished.withLock { $0 })
+        #expect(fixture.server.log.isEmpty)
+        #expect(try fixture.savedRecords().isEmpty)
+        await engine.shutdown()
     }
 
     @Test func replacingSessionContinuesFromCheckpointOnNewSession() async throws {

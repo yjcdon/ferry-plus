@@ -189,6 +189,8 @@ Release 包全套 303 项测试通过，日志 `.build/v3-integrity-package-test
 
 下载挂起等待全部 worker、finalize 和检查点收尾，包含已从列表移除但尚未结束的任务；会话替换遵守相同屏障，关闭后不能恢复。进度 ticker 收到取消直接退出，修正快速暂停／恢复时旧计时任务可能空转的问题。
 
+对应现有 DownloadEngineTests 覆盖手动暂停不变、运行时恢复与收尾交错、挂起期间替换会话，以及取消移出列表后的 worker 仍需等待。
+
 上传 13 项隔离检查通过，证据 `.build/upload-lifecycle-validation/result.txt`。Release 全套 307 项测试通过，新增下载运行时暂停、恢复重入、会话替换和移除收尾用例，日志 `.build/v3-lifecycle-package-tests.log`。实际系统睡眠、代理变更和 App 通知接线的验收仍待新构建操作，不以离线暂停代替物理睡眠证据。
 
 ## 首次进入新版本的元数据备份
