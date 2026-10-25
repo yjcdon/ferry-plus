@@ -1,6 +1,6 @@
 # Ferry Plus 3.1 优化方案与功能清单
 
-状态：19项代码优化与技术Review完成，真实App验收未完成；实际结果见 [实施记录](implementation.md)。日期：2026-10-25。基线：已发布 [3.0](https://github.com/yjcdon/ferry-plus/releases/tag/v3.0)，实施基线 `7e37e7f`，业务源码 `64aa672`。技术设计见 [架构设计](architecture.md)，设计完成后拆解的工作见 [任务清单](tasks.md)。
+状态：19项代码优化、技术Review与本轮真实App回归已完成，候选交付整理中；实际结果见 [实施记录](implementation.md)。日期：2026-10-25。基线：已发布 [3.0](https://github.com/yjcdon/ferry-plus/releases/tag/v3.0)，实施基线 `7e37e7f`，业务源码 `64aa672`。技术设计见 [架构设计](architecture.md)，设计完成后拆解的工作见 [任务清单](tasks.md)。
 
 ## 1. 定义、目的与方法
 
