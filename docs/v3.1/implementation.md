@@ -135,3 +135,11 @@ IntegrityStore.saveIfChanged只在load及完整校验成功、整条record完全
 提取实际Presenter验证所属窗口、原选项、禁止重复面板、选择、取消重开、弱窗口与弱presenter释放，均通过；未新增正式测试类/临时App。证据 .build/v31-upload-panel-sheet/。当前实机可打开并取消附着面板；App所在Space仍影响自动化“打开”操作，文件选择成功未通过，不将此次归属修复冒称已经解决全部computer-use交互问题。
 
 统一冻结后SDK26.5固定签名Release App构建、独立SDK27既有307项测试通过；日志 .build/v31-wave6-{app-build,package-tests}.log，生产输入摘要 .build/v31-wave6-source-hashes.json。T14凭据简化也包含在此真实构建内。实际候选PID59574可恢复登录并浏览，选择面板可开/取消；完整真实账号上传下载、覆盖、导出/重定位等保留T21。
+
+## T11 分片回执复用旧聚合摘要
+
+仅received在本次真实文件读取后、同步append之前保留confirmedBytes和phase两字段摘要，传给私有saveFile；其他52处调用仍重读，无actor或持久镜像、锁或批量延迟写。引擎父任务串行await每个onReceipt，同批次其他写入需等待worker；停止/重定位等所有权链已主代理与独立Review复核。
+
+同一b89a96d基线与候选真实Core/Store隔离副本各29项通过。正常新分片实际JSON读取由4manifest+2file降至3+1，文件和job仍各立即成功写1次。验证重复/乱序/晚回执、暂停/取消等待、重入prioritize保留最新意图、retry/reconcile忙态拒绝、写失败和实际restore重建、无worker不推进阶段。网络及worker驱动为受控替身，真实Store原子IO/协调器方法及插桩计数来自对应生产源码；不冒称全UploadEngine云端端到端。证据 .build/v31-t11/。
+
+统一冻结后SDK26.5固定签名Release App构建与独立SDK27既有307项测试通过；日志 .build/v31-wave7-{app-build,package-tests}.log，完整生产摘要 .build/v31-wave7-source-hashes.json。最后独立Review未发现确定新错，最终记录 .build/v31-t20/t11-review.md。真实分片上传/内容一致性仍在T21，不省略最终GUI门禁。19项候选至此均已实现并逐项本地提交，T20兼容与整体签收、T21真实App及T22产物尚未完成。

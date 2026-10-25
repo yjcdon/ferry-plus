@@ -1317,25 +1317,38 @@ public actor UploadCoordinator {
         try await saveFile(file)
     }
 
+    /// 回执由引擎父任务串行交付；同步修改前保留旧聚合摘要，每片仍立即落盘。
     private func received(_ receipt: UploadPartReceipt, fileID: UUID, jobID: UUID) async throws {
         guard let job = jobs[jobID] else { throw UploadCoordinatorError.missingJob }
         var file = try await store.loadFile(id: fileID, in: job)
         guard !file.parts.contains(where: { $0.index == receipt.index }) else { throw UploadDestinationError.invalidReceipt }
-        file.parts.append(receipt); try await saveFile(file)
+        let previous = FileCheckpointSummary(confirmedBytes: Self.confirmedBytes(file), phase: file.phase)
+        file.parts.append(receipt); try await saveFile(file, previous: previous)
+    }
+
+    private struct FileCheckpointSummary {
+        let confirmedBytes: Int64
+        let phase: UploadPhase
     }
 
     /// 文件状态先落盘，聚合随后保存；恢复时可从每文件检查点重建聚合。
     /// 只有实际 worker 驱动批次阶段；停止后的核对仅保存检查点，继续由显式重试或恢复决定。
-    private func saveFile(_ file: UploadFile) async throws {
+    /// 仅串行回执入口传入刚读取的旧摘要；其余调用仍从存储读取原状态。
+    private func saveFile(_ file: UploadFile, previous: FileCheckpointSummary? = nil) async throws {
         guard let job = jobs[file.jobID] else { throw UploadCoordinatorError.missingJob }
         do {
-            let previous = try await store.loadFile(id: file.id, in: job)
+            let baseline: FileCheckpointSummary
+            if let previous { baseline = previous }
+            else {
+                let stored = try await store.loadFile(id: file.id, in: job)
+                baseline = .init(confirmedBytes: Self.confirmedBytes(stored), phase: stored.phase)
+            }
             try await store.saveFile(file, in: job)
-            let delta = Self.confirmedBytes(file) - Self.confirmedBytes(previous)
+            let delta = Self.confirmedBytes(file) - baseline.confirmedBytes
             jobs[file.jobID]!.completedBytes = min(jobs[file.jobID]!.totalBytes, max(0, jobs[file.jobID]!.completedBytes + delta))
-            jobs[file.jobID]!.completedCount += (file.phase == .completed ? 1 : 0) - (previous.phase == .completed ? 1 : 0)
-            jobs[file.jobID]!.failedCount += (file.phase == .failed ? 1 : 0) - (previous.phase == .failed ? 1 : 0)
-            jobs[file.jobID]!.skippedCount += (file.phase == .skipped ? 1 : 0) - (previous.phase == .skipped ? 1 : 0)
+            jobs[file.jobID]!.completedCount += (file.phase == .completed ? 1 : 0) - (baseline.phase == .completed ? 1 : 0)
+            jobs[file.jobID]!.failedCount += (file.phase == .failed ? 1 : 0) - (baseline.phase == .failed ? 1 : 0)
+            jobs[file.jobID]!.skippedCount += (file.phase == .skipped ? 1 : 0) - (baseline.phase == .skipped ? 1 : 0)
             if workers[file.jobID] != nil, !jobs[file.jobID]!.isPaused && !jobs[file.jobID]!.cancellationRequested {
                 jobs[file.jobID]!.phase = file.phase.isTerminal ? .queued : file.phase
             }
