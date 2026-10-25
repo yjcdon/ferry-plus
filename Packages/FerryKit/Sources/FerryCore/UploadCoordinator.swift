@@ -827,6 +827,12 @@ public actor UploadCoordinator {
             try Task.checkCancellation()
             let commit = UploadCommit(kind: .merge)
             file.commits.append(commit); file.phase = .committing; try await saveFile(file)
+            // 尚未调用合并策略时可准确拒绝本地意图；进入策略后的取消仍保留未知结果。
+            if Task.isCancelled {
+                file.commits[file.commits.count - 1].status = .rejected
+                try await saveFile(file)
+                throw CancellationError()
+            }
             let reference = try await env.destination.complete(prepared, receipts: receipts)
             file.remoteReference = reference; file.commits[file.commits.count - 1].status = .confirmed
             file.commits[file.commits.count - 1].finalObject = reference; file.phase = .verifying
