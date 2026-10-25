@@ -111,3 +111,11 @@ Publisher传回本次完整最终IntegrityRecord，Coordinator校验归属后共
 删除KeychainItem的无错load/delete包装，百度与代理调用方显式沿用try? checked基础；夸克、上传恢复授权继续抛错，save及条目/服务/签名完全不变。全库无旧包装调用。百度读取/解码失败返回nil、代理读取失败返回空串及清空时忽略删除失败属于3.0既有可见策略，本项明确保留；不夹带新弹窗或启动失败策略。不是将全部凭据错误都改成吞错。
 
 提取完整旧新CredentialStore，Security入口仅用记录调用的协作者替代，合成最小Codable账号类型，不接触真实Keychain；5类状态×5类数据读及5类状态×6类写/删共55项输出、条目/服务与调用序列完全一致。当前真实BaiduKit/QuarkKit模型与Security框架类型检查通过；证据 .build/v31-t14/，policy.md给出四类凭据错误矩阵，before/proposal报告逐字节相同。固定签名实际App登录恢复及退出的最终验收保留在T21；本项不注销真实账号或导出凭据，也未单独覆盖当前候选App。
+
+## T10 旧版本归档去重及真实恢复补齐
+
+IntegrityStore.saveIfChanged只在load及完整校验成功、整条record完全相等时省写；读取失败是比较无法省写，继续原save，实际写失败仍抛错。同步actor内无await、不加缓存；其他save调用不变。同五次检查点归档写5→2，文件检查点写5不变，增加5次小JSON比较读。
+
+独立Review发现初版真实published恢复绕过checkpoint、缺失旧proof不补齐；原手工probe不足。已抽取archiveReplacementSnapshot，普通checkpoint仍文件先写；最终本次record验证后、completed及授权释放前再保证旧proof归档。修复前真实restore+retry负例确认完成却丢proof；修复后通过公开add/restore/retry/remove的30项真实恢复检查，权限写失败/最终record失败且proof缺失均补齐原snapshot/ref/SHA/原名/实际verifiedAt，移除后仍保留。无时间旧格式不伪造依据，不增加旧快照回读或副作用重放。另36项归档及54项完整集成检查通过，证据 .build/v31-t10/。
+
+统一冻结后SDK26.5固定签名Release App构建、独立SDK27既有307项测试通过；日志 .build/v31-wave6-{app-build,package-tests}.log，生产输入摘要 .build/v31-wave6-source-hashes.json。T14凭据简化也包含在此真实构建内。实际候选PID59574可恢复登录并浏览，选择面板可开/取消；完整真实账号上传下载、覆盖、导出/重定位等保留T21。

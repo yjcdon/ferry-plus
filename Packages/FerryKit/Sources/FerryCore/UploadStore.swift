@@ -148,6 +148,16 @@ public actor IntegrityStore {
         try UploadDiskRecord.write(record, at: recordURL(record.id))
     }
 
+    /// 仅在磁盘记录完整相同时省写；比较是可选优化，不替代本次真实证明的归档。
+    /// 缺失、损坏或读取失败时继续原有原子保存，保存失败仍抛出；同一 actor 内全程不挂起。
+    public func saveIfChanged(_ record: IntegrityRecord) throws {
+        try record.validate()
+        let needsSave: Bool
+        do { needsSave = try load(id: record.id) != record }
+        catch { needsSave = true }
+        if needsSave { try save(record) }
+    }
+
     public func load(id: UUID) throws -> IntegrityRecord {
         let record = try readValidatedRecord(at: recordURL(id))
         guard record.id == id else { throw UploadRecordError.invalid("校验记录 ID 不一致") }

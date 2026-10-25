@@ -1029,13 +1029,18 @@ public actor UploadCoordinator {
         var file = try await store.loadFile(id: fileID, in: job)
         file.replacement = state; file.phase = phase
         try await saveFile(file)
+        try await archiveReplacementSnapshot(state, account: job.account)
+    }
+
+    /// 重用检查点中实际取得的旧内容证明；完成／恢复也补齐独立归档，不新增回读或校验时间。
+    private func archiveReplacementSnapshot(_ state: UploadReplacementState, account: AccountKey) async throws {
         if let snapshot = state.snapshotObject, let digest = state.originalSHA256, let verifiedAt = state.snapshotVerifiedAt {
             let expectation = try IntegrityExpectation(algorithm: .sha256, digest: digest, origin: .remoteOriginal,
                 size: state.original.size, reference: snapshot)
-            let record = IntegrityRecord(id: fileID, account: job.account, reference: snapshot,
-                expectation: expectation, actualDigest: digest, status: .verified, verifiedAt: verifiedAt, uploadFileID: fileID,
+            let record = IntegrityRecord(id: state.fileID, account: account, reference: snapshot,
+                expectation: expectation, actualDigest: digest, status: .verified, verifiedAt: verifiedAt, uploadFileID: state.fileID,
                 originalFileName: state.original.name)
-            do { try await integrityStore.save(record) }
+            do { try await integrityStore.saveIfChanged(record) }
             catch { throw UploadCoordinatorError.persistence(error.localizedDescription) }
         }
     }
@@ -1281,6 +1286,9 @@ public actor UploadCoordinator {
         try await saveVerification(record, file: &file, environment: env)
         guard file.replacement == nil || file.replacement?.stage == .published else {
             throw UploadReplacementError.unconfirmed
+        }
+        if let replacement = file.replacement {
+            try await archiveReplacementSnapshot(replacement, account: record.account)
         }
         file.phase = .completed; file.sessionResultRecoveryRequired = nil; try await saveFile(file)
         if let prepared = file.preparation {
