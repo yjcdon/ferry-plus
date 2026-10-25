@@ -389,9 +389,10 @@ final class AppModel {
         }
     }
 
+    /// 凭据删除成功后才退出百度会话；失败沿账号变更流程展示，保留当前登录。
     func logOut() {
         let change = enqueueProviderChange(.baidu) { [self] in
-            CredentialStore.delete()
+            try CredentialStore.delete()
             client?.revoke()
             client = nil
             credential = nil

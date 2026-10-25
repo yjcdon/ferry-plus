@@ -21,9 +21,8 @@ enum CredentialStore {
         try item.save(JSONEncoder().encode(login))
     }
 
-    static func delete() {
-        item.delete()
-    }
+    /// 删除失败交由账号流程提示，避免只退出内存会话而保留可恢复的凭据。
+    static func delete() throws { try item.deleteChecked() }
 }
 
 /// 夸克凭据与账号使用独立条目保存，验证工具与界面共用此入口。
@@ -70,7 +69,7 @@ enum ProxyPasswordStore {
 /// Keychain 中的一项通用密码。service 是应用的 bundle id。
 struct KeychainItem {
     let account: String
-    /// 保存失败时提示中的名称。
+    /// 钥匙串操作失败时提示中的名称。
     let name: String
 
     private static let service = Bundle.main.bundleIdentifier ?? "Ferry"
@@ -92,7 +91,7 @@ struct KeychainItem {
         var result: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
-        try check(status)
+        try check(status, operation: "读取")
         guard let data = result as? Data else { throw CocoaError(.coderReadCorrupt) }
         return data
     }
@@ -103,9 +102,9 @@ struct KeychainItem {
             var item = query
             item[kSecValueData as String] = data
             item[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-            try check(SecItemAdd(item as CFDictionary, nil))
+            try check(SecItemAdd(item as CFDictionary, nil), operation: "保存")
         } else {
-            try check(status)
+            try check(status, operation: "保存")
         }
     }
 
@@ -115,13 +114,13 @@ struct KeychainItem {
 
     func deleteChecked() throws {
         let status = SecItemDelete(query as CFDictionary)
-        if status != errSecItemNotFound { try check(status) }
+        if status != errSecItemNotFound { try check(status, operation: "删除") }
     }
 
-    private func check(_ status: OSStatus) throws {
+    private func check(_ status: OSStatus, operation: String) throws {
         guard status == errSecSuccess else {
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(status),
-                          userInfo: [NSLocalizedDescriptionKey: "无法把\(name)保存到钥匙串（\(status)）。"])
+                          userInfo: [NSLocalizedDescriptionKey: "无法\(operation)钥匙串中的\(name)（\(status)）。"])
         }
     }
 }
