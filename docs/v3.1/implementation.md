@@ -200,3 +200,11 @@ T21通过本轮有限真实App回归；没有恢复睡眠／资源专项或扩�
 实际解包后，8条目录／文件清单（4个文件）逐项核对内容、权限和符号链接，全部相同；解包签名严格验证通过，二进制SHA与GUI候选身份一致。验证用解包App副本随后移入废纸篓，保留正式候选App、ZIP、SHA及比对清单。证据 `.build/v31-delivery/package-validation.json`、`bundle-inventory.json`。README、更新记录、功能／技术／任务／审查文档均已同步本地候选状态；没有推送、创建3.1 Release或替换本机稳定版。
 
 实际收益以Review表的局部计数为准。状态／接口整理主要减少维护成本，未宣称包体缩小或未经测量的CPU／内存降低；包体增加约2%。资源所有权与有界处理已完成技术审查，未重新开展已取消的生命周期及最终资源专项。
+
+## 3.1 发布与本机更新
+
+2026-10-25，用户明确要求推送、发布Release并更新本机后，已推送main并发布 [Ferry Plus 3.1](https://github.com/yjcdon/ferry-plus/releases/tag/v3.1)，标签指向 `e1f9673`。Release设为Latest，两个附件的GitHub端大小及SHA摘要与上表本地实测产物一致，未另行重建应用。
+
+本机 `/Applications/Ferry Plus.app` 已从3.0更新为同一份3.1；原App移入废纸篓，更新后的严格签名及可执行文件SHA均通过核对。已实际打开安装版，百度、夸克账号菜单均继续显示原登录状态，没有改写钥匙串或用户数据目录。
+
+发布隐私核对覆盖2.0、3.0及3.1实际ZIP；历史包SHA与GitHub实际附件一致。包内仅应用可执行文件、图标、Info.plist、签名及macOS附属元数据，不含登录会话、Cookie、用户任务数据或已知个人账号字符串。网页登录使用非持久WebKit存储，保存的凭据位于使用者本机Keychain。核对报告位于 `.build/v31-delivery/{release-privacy-check,historical-release-privacy-check,local-installation}.json`，未导出真实凭据进行扫描。
