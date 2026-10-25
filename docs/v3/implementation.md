@@ -711,3 +711,8 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 真实库与 URLProtocol 的 17 项隔离检查通过，包含实际 Coordinator 的意图前拒绝及意图后正式入口发现目录变化，两者均 POST=0、pending=0；后者仅有一条明确拒绝的建目录意图。证据 `.build/v3-baidu-upload-directory-identity/{report.md,result.txt,source-sha256.json}`。独立 SDK27 的既有包测试 307 项通过，SDK26.5 Release App 构建及固定签名通过，日志 `.build/v3-directory-identity-{package-tests,app-build}.log`。
 
 重新启动实际 App（PID 21276），通过 Computer Use 在百度根目录新建专用目录 `FerryPlus-Directory-Check-20261025-125711`，再创建 child 子目录，原生文件选择器选取 4096 字节 sample.bin 上传到 child。任务 `4A0AF236-E754-48D9-ACE5-172238A6B70A` 完成一项、零失败，完整回读记录 verified，实际 SHA-256 与本地原始值均为 `c8f5d0341d54d951a71b136e6e2afcb14d11ed8489a7ae126a8fee0df6ecf193`。准确目的目录 fsID=544800166535849，最终文件 fsID=169389770941157；截图实际目标路径正确，AX 聚合文字仍可能缓存根目录，不据此误判真实路径。随后通过 App 移除本轮任务、将本轮专用目录及内容移入网盘回收站，刷新后消失。两家上传页目录均能复用已有登录加载；原 19 个上传批次及两条大任务暂停位置保留。本次真实界面证明正常路径可用，目录替换故障由上述确定性验证覆盖，不冒充真实外部并发测试。证据 `.build/ui-directory-identity/`。
+
+
+## 目录与核对修复后的交付候选
+
+源码提交 `ab9f76e` 包含目录身份修复，亦保留 `a37c197` 只读核对不启动上传及 `769cd4d` 快照校验时间修复。正式 App 构建后通过上述 Computer Use 实际路径；随后打包为 `.build/dist/Ferry-Plus-3.0-arm64.zip`（3,756,788 字节），SHA-256 为 `e58ef1f78509da584784b4a8a104a01a379339107ee7a6f519251824548ec1dc`。App 共 11,796,275 字节，arm64、固定签名及解包 4 个文件的逐项摘要均核对通过。证据 `.build/v3-package-validation/result.json`。这是当前已实现功能的交付候选；未知提交／过期恢复的服务端能力缺口仍如实保留，不将本轮正常上传回归扩展成全异常矩阵通过。没有推送或发布 3.0。
