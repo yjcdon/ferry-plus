@@ -75,6 +75,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 18F1CB1F3086E87C00A59465 /* Build configuration list for PBXNativeTarget "BaiduPCS-Swift" */;
 			buildPhases = (
+				A31F00103086E8A000000002 /* Validate Product Version */,
 				18F1CB103086E87B00A59465 /* Sources */,
 				18F1CB113086E87B00A59465 /* Frameworks */,
 				18F1CB123086E87B00A59465 /* Resources */,
@@ -143,6 +144,26 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A31F00103086E8A000000002 /* Validate Product Version */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Scripts/read-version.sh",
+				"$(SRCROOT)/Config/Version.xcconfig",
+			);
+			name = "Validate Product Version";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "set -euo pipefail\nversion=\"$(/bin/bash \"$SRCROOT/Scripts/read-version.sh\")\"\nif [ \"${MARKETING_VERSION-}\" != \"$version\" ]; then\n    printf 'error: MARKETING_VERSION must match Config/Version.xcconfig (%s).\\n' \"$version\" >&2\n    exit 1\nfi\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		18F1CB103086E87B00A59465 /* Sources */ = {

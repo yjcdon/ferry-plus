@@ -143,3 +143,9 @@ IntegrityStore.saveIfChanged只在load及完整校验成功、整条record完全
 同一b89a96d基线与候选真实Core/Store隔离副本各29项通过。正常新分片实际JSON读取由4manifest+2file降至3+1，文件和job仍各立即成功写1次。验证重复/乱序/晚回执、暂停/取消等待、重入prioritize保留最新意图、retry/reconcile忙态拒绝、写失败和实际restore重建、无worker不推进阶段。网络及worker驱动为受控替身，真实Store原子IO/协调器方法及插桩计数来自对应生产源码；不冒称全UploadEngine云端端到端。证据 .build/v31-t11/。
 
 统一冻结后SDK26.5固定签名Release App构建与独立SDK27既有307项测试通过；日志 .build/v31-wave7-{app-build,package-tests}.log，完整生产摘要 .build/v31-wave7-source-hashes.json。最后独立Review未发现确定新错，最终记录 .build/v31-t20/t11-review.md。真实分片上传/内容一致性仍在T21，不省略最终GUI门禁。19项候选至此均已实现并逐项本地提交，T20兼容与整体签收、T21真实App及T22产物尚未完成。
+
+## T18 Review补修：直接Xcode入口版本门禁
+
+最终门禁核对发现，仅引用Version.xcconfig不能直接证明空产品版本或命令行覆盖不一致必然在Xcode构建阶段失败。已在target首个PBXShellScriptBuildPhase复用read-version.sh，并与实际MARKETING_VERSION比较；不新增版本来源，Sources前每次校验，声明两个输入文件，构建号覆盖、共享配置、sandbox和签名均保留。
+
+从真实pbxproj解析提取实际shell，29项同值/缺值/空值/无效/不一致及canonical异常检查通过；目录带空格及独立CURRENT_PROJECT_VERSION覆盖通过。plutil/脚本语法和工程对象图核对通过，差异仅新阶段及target引用。证据 .build/v31-t18-xcode-gate-fix/。本机没有完整Xcode，未安装或触发CI；明确区分真实脚本执行/接线证明与实际Xcode构建，本项不修改CLT产物。
