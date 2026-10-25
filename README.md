@@ -4,19 +4,20 @@
 ![macOS](https://img.shields.io/badge/macOS-14%2B-black)
 [![license](https://img.shields.io/github/license/yjcdon/ferry-plus?color=blue)](LICENSE)
 
-Ferry Plus 是一款简洁的 macOS 原生百度网盘、夸克网盘下载器，基于 [Ferry](https://github.com/yiquncode/BaiduPCS-Swift)，使用 Swift 和 SwiftUI 开发，专为 Apple Silicon Mac 构建。
+Ferry Plus 是一款简洁的 macOS 原生百度网盘、夸克网盘文件传输工具，基于 [Ferry](https://github.com/yiquncode/BaiduPCS-Swift)，使用 Swift 和 SwiftUI 开发，专为 Apple Silicon Mac 构建。
 
-[下载 Ferry Plus 2.0](https://github.com/yjcdon/ferry-plus/releases/tag/v2.0) · [更新记录](CHANGELOG.md)
+[下载 Ferry Plus 3.0](https://github.com/yjcdon/ferry-plus/releases/tag/v3.0) · [更新记录](CHANGELOG.md)
 
-支持分享链接和账号内文件下载，两家账号可同时登录，共用下载队列。下载速度受网盘服务和账号权限限制。
+支持两家网盘的本地文件／文件夹上传、分享链接及账号内文件下载。两个账号可同时登录，上传和下载统一管理，传输速度受网盘服务和账号权限限制。
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset=".github/screenshot-dark.png">
-  <img src=".github/screenshot-light.png" alt="Ferry 主窗口：侧边栏按状态列出任务，右边是转存中、下载中、等待、失败和已完成的任务" width="1100">
-</picture>
+![Ferry Plus 3.0 主窗口](.github/screenshot-v3.jpg)
 
 ## 当前功能
 
+- **双网盘上传**：选择文件或文件夹，也可拖入上传窗口或网盘目录；支持分片、正常暂停续传、保留两份和跳过同名文件。
+- **内容一致性校验**：上传后完整回读 SHA-256；下载可关联原始摘要、导入导出校验清单及本地复验。没有原始摘要的文件明确显示未验证。
+- **百度安全覆盖**：新内容校验后发布，独立保留旧版本；夸克本版提供保留两份和跳过。
+- **网盘文件管理**：新建目录，单项或批量将文件、文件夹移入网盘回收站。
 - **双网盘下载**：支持百度、夸克分享链接和账号内文件下载，保留所选目录结构；文件窗口通过 Tab 切换网盘，默认打开百度。
 - **双网盘登录**：通过百度、夸克的官方网页完成登录，分别保存账号状态；账号菜单同步显示账号名，并可单独退出。
 - **统一任务列表**：按网盘、状态和文件名筛选；批量操作遵守当前可见范围。
@@ -24,13 +25,12 @@ Ferry Plus 是一款简洁的 macOS 原生百度网盘、夸克网盘下载器�
 - **独立设置**：两家分别设置转存目录、完成清理和单文件连接数，共用全局同时下载文件数。
 - **本机保存凭据**：登录凭据存入 macOS Keychain，应用直接访问网盘服务。
 
-2.0 已发布。两家真实下载、夸克跨层转存及清理、暂停与退出恢复、网络恢复、错误提取码及大目录浏览已通过验证；真实 CDN 地址自然过期和物理睡眠恢复仍待实测。详细范围和进度见 [功能清单](docs/features.md)、[架构设计](docs/architecture.md) 和 [任务清单](docs/tasks.md)。上图沿用 Ferry 的界面截图。
+3.0 的双网盘上传／下载、完整内容校验、网盘删除已有真实 App 验证；实现与验证范围见 [3.0 功能清单](docs/v3/features.md)、[架构设计](docs/v3/architecture.md) 和 [任务清单](docs/v3/tasks.md)。
 
-## 3.0 开发进度
+## 使用边界
 
-当前源码构建版本为 3.0，尚未发布。已接入百度、夸克本地文件／文件夹上传、选定网盘后的拖放入口、发送后完整 SHA-256 回读，以及上传与下载统一任务列表。网盘文件与文件夹可移入回收站；下载支持指定摘要、本地复验及独立保留校验记录。
-
-百度已接入安全覆盖：新内容校验后发布，保留独立云端旧版本，遇到并发冲突停止覆盖；已有实际 App 上传、发布及新旧文件下载摘要比对。夸克当前仍支持保留两份和跳过。夸克覆盖、部分未知提交／过期会话恢复及界面收尾仍未完成；按用户要求，不再追加生命周期和最终资源专项验收，已有代码质量要求保留。详细范围见 [3.0 功能清单](docs/v3/features.md)、[架构设计](docs/v3/architecture.md) 和 [任务清单](docs/v3/tasks.md)。上方下载链接继续指向已发布的 2.0。
+- 极端异常自动恢复和夸克安全覆盖延期。少数写请求丢失回执或会话过期后，任务可能停在“结果待核对”，应用保留记录，不会盲目重复提交。
+- 取消上传不承诺立即清除服务端未完成分片；移除任务记录不会删除本地源文件或已上传的云端文件。
 
 ## 系统要求
 
@@ -39,7 +39,7 @@ Ferry Plus 是一款简洁的 macOS 原生百度网盘、夸克网盘下载器�
 
 ## 安装
 
-从 [2.0 Release](https://github.com/yjcdon/ferry-plus/releases/tag/v2.0) 下载 `Ferry-Plus-2.0-arm64.zip`，解压后把 `Ferry Plus.app` 拖到“应用程序”文件夹即可，无需 DMG。发布页同时提供 SHA-256 校验文件。
+从 [3.0 Release](https://github.com/yjcdon/ferry-plus/releases/tag/v3.0) 下载 `Ferry-Plus-3.0-arm64.zip`，解压后把 `Ferry Plus.app` 拖到“应用程序”文件夹即可，无需 DMG。发布页同时提供 SHA-256 校验文件。
 
 可与原版 Ferry 共存；两者的登录凭据、设置及任务数据独立。
 
@@ -75,9 +75,9 @@ bash Scripts/test-packages.sh
 ```
 BaiduPCS-Swift/          Ferry Plus.app：SwiftUI 界面、Keychain、下载目录权限、应用生命周期
 Packages/FerryKit/
-├── FerryCore            任务流程：任务模型、任务列表、JobCoordinator、设置
+├── FerryCore            任务流程：上传／下载队列、流式校验、任务存储与设置
 ├── BaiduKit             百度协议：凭据、分享、转存、网盘操作、下载链接
-├── QuarkKit             夸克登录、文件、分享、转存与下载接口
+├── QuarkKit             夸克登录、文件、分享、转存、上传与下载接口
 └── DownloadKit          通用分片下载：分片、并发、断点续传、进度持久化
 Scripts/                本机 .app 构建、ZIP 打包与包测试
 docs/                   功能、架构、任务和验证记录
