@@ -217,10 +217,7 @@ final class QuarkAccountSession {
         if case .loggedIn = state { passed = true } else { passed = false }
         let report = Report(provider: "quark", authenticated: passed, accountID: account?.id,
                             nickname: account?.nickname, verifiedAt: verifiedAt, problem: problem)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        return try encoder.encode(report)
+        return try VerificationReportOutput.encode(report, datesAsISO8601: true)
     }
 
     private struct Report: Encodable {
@@ -243,9 +240,7 @@ final class QuarkAccountSession {
         guard self.revision == revision, self.client === client else { throw CancellationError() }
         let report = CapacityReport(provider: "quark", authenticated: true,
                                     totalBytes: capacity.total, usedBytes: capacity.used)
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.sortedKeys]
-        return try encoder.encode(report)
+        return try VerificationReportOutput.encode(report)
     }
 
     private struct CapacityReport: Encodable {

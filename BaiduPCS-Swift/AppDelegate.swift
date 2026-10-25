@@ -15,9 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             Task {
                 let report = await NotificationVerification.inspect(arguments: Array(ProcessInfo.processInfo.arguments.dropFirst()))
                 do {
-                    let encoder = JSONEncoder()
-                    encoder.outputFormatting = [.sortedKeys]
-                    FileHandle.standardOutput.write(try encoder.encode(report) + Data([10]))
+                    VerificationReportOutput.write(try VerificationReportOutput.encode(report))
                     exit(report.state == "invalid_arguments" ? 1 : 0)
                 } catch {
                     FileHandle.standardError.write(Data("无法生成通知状态报告。\n".utf8))
@@ -32,10 +30,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             let verification = Task {
                 let smoke = ProcessInfo.processInfo.arguments.contains("--natural-expiry-smoke")
                 let report = await model.verifyNaturalExpiry(smoke: smoke) { report in
-                    let encoder = JSONEncoder()
-                    encoder.outputFormatting = [.sortedKeys]
-                    encoder.dateEncodingStrategy = .iso8601
-                    if let data = try? encoder.encode(report) { FileHandle.standardOutput.write(data + Data([10])) }
+                    if let data = try? VerificationReportOutput.encode(report, datesAsISO8601: true) {
+                        VerificationReportOutput.write(data)
+                    }
                 }
                 await model.shutdown()
                 naturalExpirySignals.forEach { $0.cancel() }
@@ -57,9 +54,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             Task {
                 let report = await model.verifyBoundedResume()
                 do {
-                    let encoder = JSONEncoder()
-                    encoder.outputFormatting = [.sortedKeys]
-                    FileHandle.standardOutput.write(try encoder.encode(report) + Data([10]))
+                    VerificationReportOutput.write(try VerificationReportOutput.encode(report))
                     await model.shutdown()
                     exit(report.results.allSatisfy { $0.state == "verified" } ? 0 : 1)
                 } catch {
@@ -76,13 +71,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             Task {
                 do {
                     let report = try await model.quark.capacityVerificationReport()
-                    FileHandle.standardOutput.write(report + Data([10]))
+                    VerificationReportOutput.write(report)
                     exit(0)
                 } catch {
                     let report = ["provider": "quark", "problem": error.localizedDescription]
                     do {
                         let data = try JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
-                        FileHandle.standardOutput.write(data + Data([10]))
+                        VerificationReportOutput.write(data)
                     } catch {
                         FileHandle.standardError.write(Data("无法生成夸克容量验证报告。\n".utf8))
                     }
@@ -97,9 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             Task {
                 let report = await model.verifyInterfaces()
                 do {
-                    let encoder = JSONEncoder()
-                    encoder.outputFormatting = [.sortedKeys]
-                    FileHandle.standardOutput.write(try encoder.encode(report) + Data([10]))
+                    VerificationReportOutput.write(try VerificationReportOutput.encode(report))
                     await model.shutdown()
                     exit(report.results.allSatisfy { $0.downloadedBytes != nil } ? 0 : 1)
                 } catch {
@@ -119,7 +112,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 await model.quark.start()
                 do {
                     let report = try model.quark.verificationReport()
-                    FileHandle.standardOutput.write(report + Data([10]))
+                    VerificationReportOutput.write(report)
                     if case .loggedIn = model.quark.state { exit(0) }
                     exit(1)
                 } catch {

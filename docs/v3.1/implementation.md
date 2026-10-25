@@ -81,3 +81,9 @@ CI保留预期版本核对，改调现有package-app.sh，并将脚本实际ZIP�
 14处分散State合为IntegritySelection，手填／历史／清单草稿分组；导入文档与名称一起持有。保持模式切换保留草稿、上下文变化清依据且保留算法／刷新代次、取消及迟到回调规则。16个提取真实状态方法的旧新检查点一致。实际GUI切到JSON清单并打开导入面板、取消后回原页，未创建任务。文件面板选择样本时Open未可用，本批未验证实际导入成功／坏清单；这些仍在T21真实样本范围。证据 .build/v31-t05/。
 
 本批源码冻结后SDK26.5固定签名Release构建通过，独立SDK27现有307项测试通过，当前DEBUG Core构建及App完整类型检查通过，日志 .build/v31-wave3-{app-build,package-tests,debug-typecheck}.log。真实候选PID51260，两家目录可读，退出重开无凭据提示，原61份JSON摘要不变；GUI证据 .build/v31-wave3-ui/。无云端写入，未替换Applications稳定版；源码摘要 .build/v31-wave3-source-hashes.json，正式3.1版本及完整任务GUI验收由T20／T21完成。
+
+## T17 复用验证命令报告输出
+
+共用sortedKeys编码和逐行输出，每次新编码器，原ISO8601调用显式保持；JSONSerialization错误报告不强改编码。19项编码／抛错检查及精确换行通过；展开helper后两个完整文件控制流与原版一致。Release实际--verify-quark-session退出0且authenticated=true，字段保留，DEBUG路径也完整类型检查通过。未重启长时间自然过期验证。证据 .build/v31-t17/及wave3-session文件。
+
+本批源码冻结后SDK26.5固定签名Release构建通过，独立SDK27现有307项测试通过，当前DEBUG Core构建及App完整类型检查通过，日志 .build/v31-wave3-{app-build,package-tests,debug-typecheck}.log。真实候选PID51260，两家目录可读，退出重开无凭据提示，原61份JSON摘要不变；GUI证据 .build/v31-wave3-ui/。无云端写入，未替换Applications稳定版；源码摘要 .build/v31-wave3-source-hashes.json，正式3.1版本及完整任务GUI验收由T20／T21完成。
