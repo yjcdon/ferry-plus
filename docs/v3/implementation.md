@@ -377,6 +377,12 @@ Release 构建及固定签名通过（`.build/v3-upload-two-tabs-app-build.log`�
 
 PID 92713 的独立短空闲观察约 90 秒／45 个样本，CPU 起止及样本峰值均 0%，RSS 起止及峰值均 240112 KiB；物理 footprint 当前 121 MB、进程整个生命周期峰值 178 MB，两种指标不混用。`leaks` 返回 657 块／31536 字节，尚未完成归因，不能写成无泄漏或资源验收通过。采样器已结束，证据 `.build/v3-current-resource-validation/report.json`。此结果也不代替长时混合负载及最终交付审查，T19 保持未完成。
 
+## 工具栏辅助功能查询的 leaks 对照
+
+针对短空闲检查中的 657 块报告，保持相同 22 项任务正常冷启动：未主动 Computer Use 查询时 `leaks=0`，查询一次后 26 块／1248 字节，累计六次后 171 块／8208 字节。仅下一次诊断启动启用 `MallocStackLogging=lite`，查询前仍为 0；一次查询后的创建栈经过 HIServices 的 AX 动作名称查询、AppKit 的 `NSToolbarItemViewer accessibilityCustomActions`。捕获栈中应用帧仅启动 `main`，未出现任务、上传或下载方法。
+
+这确定了查询触发和创建路径，未证明永久保留的引用链，不作为“所有框架报告均无害”或整个 App 无泄漏的结论。未盲改业务界面或屏蔽辅助功能。诊断实例已正常退出，恢复普通启动 PID 97870，无栈记录环境变量，未主动查询界面前再次为 0；原任务及两条大任务暂停位移保留。证据 `.build/v3-accessibility-leak-causal/{report.md,result.json,measurements.jsonl,allocation-stack-attribution.json,restoration.json}`。旧“installed”泄漏记录的版本头为 1.0，不能当作已安装 2.0 的对照，T19 继续保持未完成。
+
 ## 网盘文件和文件夹删除
 
 百度与夸克账号内文件树支持右键移到回收站及勾选批量删除。确认冻结账号、会话、条目和父目录；显示账号、项目名称及数量，勾选父文件夹不重复列出子项。删除逐项进行，仅发送一次副作用请求，成功回执后最多四次目录核对；部分失败明确展示并刷新。分享树不增加删除入口，移除任务记录保持原语义。

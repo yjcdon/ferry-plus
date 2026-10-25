@@ -211,7 +211,7 @@
 
   **完成标准：** 实测无整文件缓冲、完整回读副本、持续空闲轮询或残留 worker；体积增长有明确来源并符合轻量应用目标。ZIP 内 App 与已验收 App 一致；功能覆盖和阻断项复核完成，才可标记待发布。
 
-  **本地产物子集：** 已增加现有 App 的 arm64／签名校验打包脚本，当前验收候选 ZIP 约 3.49 MiB，App 约 10.88 MiB；解包后全部 4 个文件摘要与实际验收 App 相同。短空闲观察 CPU 为 0%、RSS 稳定，但 `leaks` 返回 657 块／31536 字节，尚未归因；不能据此确认资源验收通过或交付完成。证据 `.build/v3-package-validation/result.json`、`.build/v3-current-resource-validation/report.json`。T19 保持未完成。
+  **本地产物子集：** 已增加现有 App 的 arm64／签名校验打包脚本，当前验收候选 ZIP 约 3.49 MiB，App 约 10.88 MiB；解包后全部 4 个文件摘要与实际验收 App 相同。短空闲观察 CPU 为 0%、RSS 稳定；`leaks` 的工具栏辅助功能分配报告已有查询次数对照及创建栈，引用保留机制尚未证明，不能据此确认资源验收通过或交付完成。证据 `.build/v3-package-validation/result.json`、`.build/v3-current-resource-validation/report.json`、`.build/v3-accessibility-leak-causal/report.md`。T19 保持未完成。
 
 - [x] **V3-T20 网盘文件与文件夹删除**
 
