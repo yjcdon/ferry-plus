@@ -46,10 +46,15 @@ final class AppModel {
         var id: String { rawValue }
     }
 
+    /// 一次上传入口的完整选择；已有 sheet 时不覆盖，重新打开时整体替换。
+    struct UploadDraft {
+        let provider: Provider?
+        let directory: RemoteReference?
+        let files: [URL]
+    }
+
     var sheet: Sheet?
-    private(set) var uploadDraftProvider: Provider?
-    private(set) var uploadDraftDirectory: RemoteReference?
-    private(set) var uploadDraftFiles: [URL] = []
+    private(set) var uploadDraft = UploadDraft(provider: nil, directory: nil, files: [])
     /// 菜单栏发起的百度退出确认由主窗口承载，避免菜单关闭后丢失对话框。
     var isConfirmingMenuLogOut = false
     /// 菜单只请求打开；窗口未创建时保留请求，由主窗口承载下载页。
@@ -641,9 +646,7 @@ final class AppModel {
     /// 沿用主窗口选定网盘及目录上下文，先展示确认窗口，再由用户创建上传任务。
     func presentUpload(provider: Provider? = nil, directory: RemoteReference? = nil, files: [URL] = []) {
         guard sheet == nil else { return }
-        uploadDraftProvider = provider
-        uploadDraftDirectory = directory
-        uploadDraftFiles = files
+        uploadDraft = UploadDraft(provider: provider, directory: directory, files: files)
         present(.upload)
     }
 

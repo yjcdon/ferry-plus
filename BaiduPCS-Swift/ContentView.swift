@@ -23,8 +23,9 @@ struct ContentView: View {
                 case .addLink: AddLinkView()
                 case .netdiskDownload: NetdiskDownloadView()
                 case .upload:
-                    UploadView(initialProvider: model.uploadDraftProvider,
-                               initialDirectory: model.uploadDraftDirectory, files: model.uploadDraftFiles) { files, account, destination, policy in
+                    let draft = model.uploadDraft
+                    UploadView(initialProvider: draft.provider,
+                               initialDirectory: draft.directory, files: draft.files) { files, account, destination, policy in
                         try await model.addUpload(files: files, account: account, destination: destination, conflictPolicy: policy)
                     }
                 }

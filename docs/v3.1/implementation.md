@@ -63,3 +63,9 @@ Int64.fileSizeText仅封装原ByteCountFormatter(.file)，替换7处同义表达
 ## T19 CI复用打包入口
 
 CI保留预期版本核对，改调现有package-app.sh，并将脚本实际ZIP／SHA路径传给Publish。Xcode构建及签名方式未变；本机打包脚本无改动。17项隔离检查通过，含真实固定签名arm64 App打包／SHA／解包逐文件一致、错误bundle／真实x86_64／损坏签名拒绝，合法ZIP不受失败输入影响。Publish使用gh替身验证参数，不触发远端发布。主代理已复核workflow差异、脚本输出契约及报告；证据 .build/v31-t19/。本项只有CI流程改动，无需额外App编译；不把本地CI shell验证冒称GitHub Actions运行通过。
+
+## T03 收敛上传入口草稿
+
+三个草稿属性合为不可变UploadDraft，presentUpload仍先检查已有sheet再整体替换，ContentView一次读取。240组旧新草稿／初始化结果一致；全库旧属性无引用。真实App默认百度、切夸克、取消后重开恢复默认且无旧文件，均正常。证据 .build/v31-t03/。
+
+本批源码冻结后SDK26.5固定签名Release构建通过，独立SDK27现有307项测试通过，当前DEBUG Core构建及App完整类型检查通过，日志 .build/v31-wave3-{app-build,package-tests,debug-typecheck}.log。真实候选PID51260，两家目录可读，退出重开无凭据提示，原61份JSON摘要不变；GUI证据 .build/v31-wave3-ui/。无云端写入，未替换Applications稳定版；源码摘要 .build/v31-wave3-source-hashes.json，正式3.1版本及完整任务GUI验收由T20／T21完成。
