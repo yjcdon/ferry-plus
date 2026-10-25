@@ -13,8 +13,9 @@ struct StoredLogin: Codable {
 enum CredentialStore {
     private static let item = KeychainItem(account: "baidu-login", name: "登录信息")
 
+    /// 百度启动沿用读取或解码失败视为未恢复登录的策略；系统读操作共用 checked 入口。
     static func load() -> StoredLogin? {
-        item.load().flatMap { try? JSONDecoder().decode(StoredLogin.self, from: $0) }
+        (try? item.loadChecked()).flatMap { try? JSONDecoder().decode(StoredLogin.self, from: $0) }
     }
 
     static func save(_ login: StoredLogin) throws {
@@ -53,13 +54,13 @@ enum ProxyPasswordStore {
 
     /// 没有保存密码时返回空字符串。
     static func load() -> String {
-        item.load().flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        (try? item.loadChecked()).flatMap { String(data: $0, encoding: .utf8) } ?? ""
     }
 
     /// 密码为空时删除这一项。
     static func save(_ password: String) throws {
         if password.isEmpty {
-            item.delete()
+            try? item.deleteChecked()
         } else {
             try item.save(Data(password.utf8))
         }
@@ -78,10 +79,6 @@ struct KeychainItem {
         [kSecClass as String: kSecClassGenericPassword,
          kSecAttrService as String: Self.service,
          kSecAttrAccount as String: account]
-    }
-
-    func load() -> Data? {
-        try? loadChecked()
     }
 
     func loadChecked() throws -> Data? {
@@ -106,10 +103,6 @@ struct KeychainItem {
         } else {
             try check(status, operation: "保存")
         }
-    }
-
-    func delete() {
-        SecItemDelete(query as CFDictionary)
     }
 
     func deleteChecked() throws {

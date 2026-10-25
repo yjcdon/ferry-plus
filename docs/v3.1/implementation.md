@@ -105,3 +105,9 @@ CI保留预期版本核对，改调现有package-app.sh，并将脚本实际ZIP�
 Publisher传回本次完整最终IntegrityRecord，Coordinator校验归属后共用收尾；暂存mismatch仍先保存证据，已published恢复仍新读。正常新内容完整resolve4→2，真实4字节HTTP body16→8；旧A及快照读取各2不变，不声称整体流量减半。53项Coordinator、79项Publisher、49项额外检查通过，含错误record拒绝、暂停/恢复、错摘要/读错不完成、准确百度最终路径/version及两段实际进度。未修改持久格式，未增加内容缓存、后台轮询或任务。证据 .build/v31-t09/。真实百度覆盖全SHA/旧新备份内容一致性仍由T21完成。
 
 本批源码冻结后SDK26.5固定签名Release App构建与独立SDK27现有307项测试通过，日志 .build/v31-wave4-{app-build,package-tests}.log；完整生产输入摘要 .build/v31-wave4-source-hashes.json。真实候选已打开且目录读取正常，后续选择面板自动化遇窗口不可见/超时，诊断及未通过范围见 .build/v31-wave4-ui/observations.md。用户61份JSON摘要不变。本轮不写云端、不替换Applications稳定版；完整GUI验收不得因受控验证通过而省略。
+
+## T14 统一凭据 checked 基础，保留调用方策略
+
+删除KeychainItem的无错load/delete包装，百度与代理调用方显式沿用try? checked基础；夸克、上传恢复授权继续抛错，save及条目/服务/签名完全不变。全库无旧包装调用。百度读取/解码失败返回nil、代理读取失败返回空串及清空时忽略删除失败属于3.0既有可见策略，本项明确保留；不夹带新弹窗或启动失败策略。不是将全部凭据错误都改成吞错。
+
+提取完整旧新CredentialStore，Security入口仅用记录调用的协作者替代，合成最小Codable账号类型，不接触真实Keychain；5类状态×5类数据读及5类状态×6类写/删共55项输出、条目/服务与调用序列完全一致。当前真实BaiduKit/QuarkKit模型与Security框架类型检查通过；证据 .build/v31-t14/，policy.md给出四类凭据错误矩阵，before/proposal报告逐字节相同。固定签名实际App登录恢复及退出的最终验收保留在T21；本项不注销真实账号或导出凭据，也未单独覆盖当前候选App。
