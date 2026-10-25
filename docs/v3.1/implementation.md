@@ -47,3 +47,9 @@ Int64.fileSizeText仅封装原ByteCountFormatter(.file)，替换7处同义表达
 枚举与内容读取共享，查询fail-fast和inventory逐项错误保持独立。11组样本的load／matching／candidates／inventory共44项旧新结果一致，含正向匹配、坏JSON、未知版本及异常文件名。证据 .build/v31-t12/。实际设置显示60条校验记录，清理确认后取消。
 
 本批源码冻结后 SDK26.5 Release App构建／固定签名通过，独立SDK27既有包测试307项通过；日志 .build/v31-wave2-{app-build,package-tests}.log。实际运行PID48872，双账号保留，无新凭据提示，用户61份JSON摘要不变；GUI记录 .build/v31-wave2-ui/。未替换Applications稳定版，最终3.1集成验收由T20／T21完成。
+
+## T13 统一传输完成通知发送
+
+两个内容生成入口共用发送尾部，保持请求ID、授权Task、内容、触发点及上下传原有取消检查差异。21组受控真实Swift Task旧新报告一致，弱引用释放检查通过，真实通知框架typecheck通过。证据 .build/v31-t13/；未将受控通知协作者冒称实际系统通知弹窗。
+
+本批源码冻结后 SDK26.5 Release App构建／固定签名通过，独立SDK27既有包测试307项通过；日志 .build/v31-wave2-{app-build,package-tests}.log。实际运行PID48872，双账号保留，无新凭据提示，用户61份JSON摘要不变；GUI记录 .build/v31-wave2-ui/。未替换Applications稳定版，最终3.1集成验收由T20／T21完成。

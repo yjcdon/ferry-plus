@@ -975,18 +975,7 @@ final class AppModel {
         content.title = verified ? "下载完成" : "下载完成 · 未验证"
         content.body = job.provider.title + " · " + job.title + (verified ? "" : " · 未验证源文件内容")
         let request = UNNotificationRequest(identifier: job.id.uuidString, content: content, trigger: nil)
-        let authorization = notificationAuthorizationTask
-        let center = UNUserNotificationCenter.current()
-        Task {
-            if let authorization { _ = await authorization.value }
-            guard !Task.isCancelled, authorization?.isCancelled != true else { return }
-            // 系统权限可在运行中改变，首次拒绝的结果不能永久挡住后来允许的通知。
-            // 启动恢复没有新建操作时也只读当前许可，不额外弹授权。
-            let status = await center.notificationSettings().authorizationStatus
-            guard status == .authorized || status == .provisional,
-                  !Task.isCancelled, authorization?.isCancelled != true else { return }
-            try? await center.add(request)
-        }
+        sendCompletionNotification(request, checkingCancellationAfterSettings: true)
     }
 
     /// 终态已保存且 worker 移除后刷新校验记录视图并通知；不等待生命周期 lane 或系统授权。
@@ -1002,13 +991,23 @@ final class AppModel {
         content.body = job.account.provider.title + " · " + job.title +
             " · 完成 \(job.completedCount)，失败 \(job.failedCount)，跳过 \(job.skippedCount)"
         let request = UNNotificationRequest(identifier: "upload-" + job.id.uuidString, content: content, trigger: nil)
+        sendCompletionNotification(request, checkingCancellationAfterSettings: false)
+    }
+
+    /// 共用授权等待与系统权限重查；保留两种传输原有的取消检查时点，不持有 AppModel。
+    private func sendCompletionNotification(_ request: UNNotificationRequest,
+                                            checkingCancellationAfterSettings: Bool) {
         let authorization = notificationAuthorizationTask
         let center = UNUserNotificationCenter.current()
         Task {
             if let authorization { _ = await authorization.value }
             guard !Task.isCancelled, authorization?.isCancelled != true else { return }
+            // 权限可在运行中改变；授权Task的旧结果不替代当前系统许可，也不额外弹授权。
             let status = await center.notificationSettings().authorizationStatus
             guard status == .authorized || status == .provisional else { return }
+            if checkingCancellationAfterSettings {
+                guard !Task.isCancelled, authorization?.isCancelled != true else { return }
+            }
             try? await center.add(request)
         }
     }
