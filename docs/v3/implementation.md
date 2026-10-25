@@ -732,3 +732,12 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 ## 3.0 发布前产物
 
 最终业务源码 `64aa672`，App版本3.0、仅arm64、固定证书签名。ZIP为 `.build/dist/Ferry-Plus-3.0-arm64.zip`，3,757,679字节，SHA-256 `66cc2a318298a793bee60da7a53e61d8fb0273b8e7f5f6f7383ac92ceed3cf31`。App共11,798,803字节，ZIP解包4个文件的摘要均与实际验收App一致。证据 `.build/v3-package-validation/result.json`；发布前再次核对签名、版本、ZIP校验文件，文档提交不会改变二进制。
+
+
+## 3.0 正式发布
+
+2026-10-25 13:31（Asia/Shanghai），[Ferry Plus 3.0](https://github.com/yjcdon/ferry-plus/releases/tag/v3.0) 正式发布并设为最新版本。main已推送，发布标签 `v3.0` 对应提交 `b8a30d7ea80ecf9eca6254a2e29378a5a9cf5da9`；业务源码与已验证的 `64aa672` 一致，其后本版修改为文档、界面验收记录和截图。
+
+附件为 `Ferry-Plus-3.0-arm64.zip`（3,757,679字节）及91字节的SHA-256文件；GitHub返回的ZIP摘要为 `66cc2a318298a793bee60da7a53e61d8fb0273b8e7f5f6f7383ac92ceed3cf31`，与本地一致，两附件状态均uploaded。已核对发布非草稿、非预发布、latest和标签准确提交。仓库简介同步为上传、下载、内容校验与网盘文件管理。证据 `.build/release-v3/{result.json,asset-checks.json,release-published.json}`。
+
+本机默认DNS访问GitHub曾超时，发布使用命令级可信DNS结果与TLS校验完成；没有修改系统DNS、全局Git或代理设置。极端异常恢复、夸克安全覆盖继续作为后续能力，未被冒称已实现。
