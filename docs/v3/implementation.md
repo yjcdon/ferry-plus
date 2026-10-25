@@ -369,6 +369,14 @@ Release 构建及固定签名通过（`.build/v3-upload-two-tabs-app-build.log`�
 
 证据 `.build/ui-account-isolation/{report.md,result.json,guard-execution-notes.md}`、两组 `completed-after-*-exit.json`、实际 AX 与截图。两次原生系统账号菜单只有 AX 文字，未制造缺失截图。本轮不覆盖不同账号替换、同家发送中撤销、官方页面重新认证成功、通知送达或物理睡眠，T13／T15／T18 保持未完成。
 
+## 本地验收候选打包与当前资源观察
+
+新增 `Scripts/package-app.sh`，对已有 App 核对应用标识、仅 arm64 架构、版本文件名及代码签名，再生成 `.build/dist/Ferry-Plus-3.0-arm64.zip` 和 SHA-256 文件。构建模式由先行 Release 构建命令确定，打包本身不重新编译。缺失输入、其他应用、非法版本及多余参数检查通过；输入检查失败不改既有 ZIP，不据此承诺所有中途失败都回滚两份产物。
+
+当前候选 App 功能源码为 `be5eeb9`，后续仅文档及打包脚本变化。ZIP 为 3,657,758 字节（约 3.49 MiB），解包全部 4 个文件 SHA 与实际验收 App 逐项一致，签名及 arm64 复核通过，标准 `shasum -c` 通过。App 文件合计 11,413,315 字节（约 10.88 MiB），安装目录的 2.0 为 6,189,123 字节（约 5.90 MiB），增加约 4.98 MiB，大小差额来自可执行文件。证据 `.build/v3-package-validation/{result.json,bundle-file-hashes.json,invalid-input-result.json}`；安装目录未替换，候选未发布。
+
+PID 92713 的独立短空闲观察约 90 秒／45 个样本，CPU 起止及样本峰值均 0%，RSS 起止及峰值均 240112 KiB；物理 footprint 当前 121 MB、进程整个生命周期峰值 178 MB，两种指标不混用。`leaks` 返回 657 块／31536 字节，尚未完成归因，不能写成无泄漏或资源验收通过。采样器已结束，证据 `.build/v3-current-resource-validation/report.json`。此结果也不代替长时混合负载及最终交付审查，T19 保持未完成。
+
 ## 网盘文件和文件夹删除
 
 百度与夸克账号内文件树支持右键移到回收站及勾选批量删除。确认冻结账号、会话、条目和父目录；显示账号、项目名称及数量，勾选父文件夹不重复列出子项。删除逐项进行，仅发送一次副作用请求，成功回执后最多四次目录核对；部分失败明确展示并刷新。分享树不增加删除入口，移除任务记录保持原语义。
