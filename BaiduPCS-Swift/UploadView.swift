@@ -403,7 +403,8 @@ struct UploadView: View {
             }
             let disk = try model.netdisk(for: request.account.provider)
             guard disk.account == request.account, ObjectIdentifier(disk) == request.session else { throw UploadDestinationError.otherAccount }
-            let entries = try await disk.listDirectory(request.directory)
+            let environment = try model.uploadEnvironment(for: request.account)
+            let entries = try await environment.listDirectory(request.directory)
             try Task.checkCancellation()
             guard request == preflightRequest else { return }
             preflight = UploadPreflight.evaluate(summary, entries: entries, policy: request.policy,
@@ -435,12 +436,13 @@ struct UploadView: View {
             let disk = try model.netdisk(for: request.provider)
             let key = disk.account
             guard ObjectIdentifier(disk) == request.session else { throw CancellationError() }
+            let environment = try model.uploadEnvironment(for: key)
             if recentAttempted != key {
                 if restoresRecent, trail.isEmpty, let remembered = model.recentUploadDirectory(for: key), !remembered.isEmpty {
                     var parent = Self.root(for: request.provider)
                     var confirmed: [RemoteEntry] = []
                     for folder in remembered {
-                        let entries = try await disk.listDirectory(parent)
+                        let entries = try await environment.listDirectory(parent)
                         try Task.checkCancellation()
                         guard request == loadRequest, model.accountKey(for: request.provider) == key,
                               sessionIdentity == ObjectIdentifier(disk) else { return }
@@ -457,7 +459,7 @@ struct UploadView: View {
                 }
                 recentAttempted = key
             }
-            let entries = try await disk.listDirectory(request.directory)
+            let entries = try await environment.listDirectory(request.directory)
             try Task.checkCancellation()
             guard request == loadRequest, model.accountKey(for: request.provider) == key,
                   sessionIdentity == ObjectIdentifier(disk) else { return }

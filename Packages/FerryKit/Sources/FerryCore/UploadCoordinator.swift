@@ -779,7 +779,7 @@ public actor UploadCoordinator {
         }
         try Task.checkCancellation()
         if file.isDirectory {
-            try Task.checkCancellation()
+            try await validateUploadParent(parent, environment: env)
             let commit = UploadCommit(kind: .createDirectory)
             file.commits.append(commit); file.phase = .committing; try await saveFile(file)
             // 尚未调用目录策略时可准确拒绝本地意图；进入策略后的取消仍保留未知结果。
@@ -789,10 +789,18 @@ public actor UploadCoordinator {
                 throw CancellationError()
             }
             let fileID = file.id
-            _ = try await env.makeDirectory(parent: parent, name: file.remoteName!, onCreated: { [weak self] reference in
-                guard let self else { throw CancellationError() }
-                try await self.directoryCreated(reference, fileID: fileID, jobID: jobID, commitID: commit.id, account: job.account, parent: parent)
-            })
+            do {
+                _ = try await env.makeDirectory(parent: parent, name: file.remoteName!, onCreated: { [weak self] reference in
+                    guard let self else { throw CancellationError() }
+                    try await self.directoryCreated(reference, fileID: fileID, jobID: jobID, commitID: commit.id, account: job.account, parent: parent)
+                })
+            } catch let error as UploadDirectoryNotSubmitted {
+                if let index = file.commits.firstIndex(where: { $0.id == commit.id }) {
+                    file.commits[index].status = .rejected
+                }
+                try await saveFile(file)
+                throw error.underlying
+            }
             file = try await store.loadFile(id: fileID, in: jobs[jobID]!)
             try await refreshRemoteName(&file, parent: parent, environment: env)
             file.phase = .completed; try await saveFile(file)
@@ -830,7 +838,7 @@ public actor UploadCoordinator {
             file = try await store.loadFile(id: file.id, in: jobs[jobID]!)
         }
         if !prepared.isInstant {
-            prepared = try await rapidUpload(&file, localURL: localURL, environment: env)
+            prepared = try await rapidUpload(&file, localURL: localURL, parent: parent, environment: env)
         }
         try Task.checkCancellation()
         if prepared.isInstant, let reference = prepared.remoteReference {
@@ -853,7 +861,7 @@ public actor UploadCoordinator {
                     })
             }
             file = try await store.loadFile(id: file.id, in: jobs[jobID]!)
-            try Task.checkCancellation()
+            try await validateUploadParent(parent, environment: env)
             let commit = UploadCommit(kind: .merge)
             file.commits.append(commit); file.phase = .committing; try await saveFile(file)
             // 尚未调用合并策略时可准确拒绝本地意图；进入策略后的取消仍保留未知结果。
@@ -872,7 +880,7 @@ public actor UploadCoordinator {
     }
 
     /// 只在原会话未发片时尝试一次快速路径；明确未命中继续原会话，未知提交结果禁止重放。
-    private func rapidUpload(_ file: inout UploadFile, localURL: URL, environment env: UploadEnvironment) async throws -> PreparedUpload {
+    private func rapidUpload(_ file: inout UploadFile, localURL: URL, parent: RemoteReference, environment env: UploadEnvironment) async throws -> PreparedUpload {
         guard let original = file.preparation else { throw UploadDestinationError.invalidPreparation }
         guard jobs[file.jobID]?.conflictPolicy == .keepBoth,
               let proofLength = env.destination.rapidUploadProofLength, proofLength == 256 * 1024,
@@ -882,6 +890,7 @@ public actor UploadCoordinator {
         try await budget.consume(proofLength, direction: .upload)
         let result = try await budget.withPermit { [weak self] in
             guard let coordinator = self else { throw CancellationError() }
+            try await coordinator.validateUploadParent(parent, environment: env)
             return try await env.destination.rapidUpload(original, onSubmitting: { bytes in
                 try await coordinator.rapidSubmitting(fileID: fileID, jobID: jobID, requestBodyBytes: bytes)
             }, readProof: { range in
@@ -931,6 +940,15 @@ public actor UploadCoordinator {
         }
     }
 
+    /// 路径型百度目标在产生新写意图前重查身份；固定根目录及稳定 FID 网盘不增加逐片请求。
+    private func validateUploadParent(_ parent: RemoteReference, environment env: UploadEnvironment) async throws {
+        try Task.checkCancellation()
+        guard env.destination.account.provider == .baidu else { return }
+        if case .baidu(path: "/", fsID: 0) = parent { return }
+        _ = try await env.listDirectory(parent)
+        try Task.checkCancellation()
+    }
+
     /// 预创建前先保存意图；无准确回执的失败保留 pending，明确拒绝才允许重新选择名称或显式重试。
     private func prepare(_ file: inout UploadFile, fingerprint: UploadSourceFingerprint, parent: RemoteReference,
                          environment env: UploadEnvironment) async throws -> Bool {
@@ -941,6 +959,8 @@ public actor UploadCoordinator {
             guard !file.commits.contains(where: { $0.kind == .prepare && $0.status == .pending }) else {
                 throw UploadCoordinatorError.unconfirmedCommit
             }
+            // 冲突重试已在上一轮重新列目录；首次准备仍须在哈希完成后重新核对父目录。
+            if attempt == 0 { try await validateUploadParent(parent, environment: env) }
             let intent = UploadCommit(kind: .prepare)
             file.commits.append(intent)
             try await saveFile(file)

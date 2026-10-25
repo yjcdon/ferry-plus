@@ -702,3 +702,12 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 移除会话过期结果核对中把批次改为排队的操作，并限制只有实际 worker 才能通过文件状态保存驱动批次执行阶段。停止后的核对仍保存准确远端引用、文件阶段与聚合计数；批次保持原执行意图，只有明确重试／继续才启动 worker。即使同批先确认一个对象、随后另一项核对失败，也不会因 defer 调度而发送其余排队文件。
 
 独立真实 Store／Coordinator／RangeReader 多文件检查，旧源码两种场景各三项失败并 exit1；仅移除显式排队赋值仍复现，证明共享 saveFile 阶段更新也必须受 worker 约束。最终 16 项检查通过，exit0、stderr0，验证成功核对和后项抛错都不启动 worker、不新增准备／合并、聚合不改回排队，显式重试仍只上传剩余项且不重传已找回对象，连接预算归零。证据 `.build/reconcile-query-only-validation/{report.md,red-result.txt,result.txt,source-hashes.json,final-production-hashes.json}`。运行仅涉及独立模拟服务和测试文件，没有 App／账号写入；不把此修复当作未知提交协议或整个 T07／T10 已完成。
+
+
+## 百度上传目录保持准确身份
+
+上传窗口和预检复用上传环境的目录查询。百度非根目录先核对父列表中的准确路径、fsID 与目录类型，再列子项；同路径的新目录不能承接旧选择。预创建、快速上传、合并和建目录在新写意图前检查；正式新建入口也核对，确定尚未发送的检查失败将意图记为拒绝。没有增加逐分片查询、修改下载行为或存储格式。查询和服务端路径写入间仍有并发窗口，不宣称原子目录绑定。
+
+真实库与 URLProtocol 的 17 项隔离检查通过，包含实际 Coordinator 的意图前拒绝及意图后正式入口发现目录变化，两者均 POST=0、pending=0；后者仅有一条明确拒绝的建目录意图。证据 `.build/v3-baidu-upload-directory-identity/{report.md,result.txt,source-sha256.json}`。独立 SDK27 的既有包测试 307 项通过，SDK26.5 Release App 构建及固定签名通过，日志 `.build/v3-directory-identity-{package-tests,app-build}.log`。
+
+重新启动实际 App（PID 21276），通过 Computer Use 在百度根目录新建专用目录 `FerryPlus-Directory-Check-20261025-125711`，再创建 child 子目录，原生文件选择器选取 4096 字节 sample.bin 上传到 child。任务 `4A0AF236-E754-48D9-ACE5-172238A6B70A` 完成一项、零失败，完整回读记录 verified，实际 SHA-256 与本地原始值均为 `c8f5d0341d54d951a71b136e6e2afcb14d11ed8489a7ae126a8fee0df6ecf193`。准确目的目录 fsID=544800166535849，最终文件 fsID=169389770941157；截图实际目标路径正确，AX 聚合文字仍可能缓存根目录，不据此误判真实路径。随后通过 App 移除本轮任务、将本轮专用目录及内容移入网盘回收站，刷新后消失。两家上传页目录均能复用已有登录加载；原 19 个上传批次及两条大任务暂停位置保留。本次真实界面证明正常路径可用，目录替换故障由上述确定性验证覆盖，不冒充真实外部并发测试。证据 `.build/ui-directory-identity/`。

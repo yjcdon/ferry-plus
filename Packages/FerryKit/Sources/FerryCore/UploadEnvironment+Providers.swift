@@ -9,9 +9,14 @@ extension UploadEnvironment {
                              checkSession: @escaping @Sendable () async throws -> Void) throws -> UploadEnvironment {
         let destination = try BaiduUploadDestination(client: client, account: account)
         let createDirectory: @Sendable (RemoteReference, String, @Sendable (RemoteReference) async throws -> Void) async throws -> RemoteReference = { parent, name, onCreated in
-            try await checkSession()
-            try validateName(name)
-            let path = RemotePath.join(try baiduPath(parent), name)
+            let parentPath: String
+            do {
+                try await checkSession()
+                try validateName(name)
+                parentPath = try await checkedBaiduDirectoryPath(parent, client: client)
+                try await checkSession()
+            } catch { throw UploadDirectoryNotSubmitted(underlying: error) }
+            let path = RemotePath.join(parentPath, name)
             let entry = try await client.createOwnedDirectory(path)
             let reference = RemoteReference.baidu(path: entry.path, fsID: entry.fsID)
             try await onCreated(reference)
@@ -20,7 +25,8 @@ extension UploadEnvironment {
         }
         return UploadEnvironment(destination: destination, listDirectory: { reference in
             try await checkSession()
-            let path = try baiduPath(reference)
+            let path = try await checkedBaiduDirectoryPath(reference, client: client)
+            try await checkSession()
             let entries = try await client.listDirectory(path).map(BaiduNetdisk.convert)
             try await checkSession()
             return entries
@@ -115,8 +121,29 @@ extension UploadEnvironment {
         return path
     }
 
+    /// 百度路径可被同名新目录接管；上传只接受仍绑定原 fsID 的目录，根目录使用固定零标识。
+    private static func checkedBaiduDirectoryPath(_ reference: RemoteReference, client: BaiduClient) async throws -> String {
+        let path = try baiduPath(reference)
+        guard case .baidu(_, let fsID) = reference else { throw UploadDestinationError.otherAccount }
+        if path == "/", fsID == 0 { return path }
+        guard path != "/", fsID > 0 else {
+            throw UploadRecordError.invalid("目标目录身份无效，请重新选择上传目录。")
+        }
+        let entries = try await client.listDirectory(RemotePath.parent(of: path))
+        guard entries.contains(where: { $0.path == path && $0.fsID == fsID && $0.isDirectory }) else {
+            throw UploadRecordError.invalid("目标目录已变化或被删除，请重新选择上传目录。")
+        }
+        return path
+    }
+
     private static func quarkFID(_ reference: RemoteReference) throws -> String {
         guard case .quark(let fid) = reference, !fid.isEmpty else { throw UploadDestinationError.otherAccount }
         return fid
     }
+}
+
+/// 仅包装创建目录之前的只读或本地检查失败，编排可确定本次尚未提交写请求。
+struct UploadDirectoryNotSubmitted: LocalizedError {
+    let underlying: any Error
+    var errorDescription: String? { underlying.localizedDescription }
 }

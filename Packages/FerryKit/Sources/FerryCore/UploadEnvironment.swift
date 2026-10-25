@@ -9,7 +9,7 @@ public enum UploadCommitInspection: Sendable {
 /// 当前账号绑定的上传环境；查询回执必须证明准确对象，不能仅凭同名同大小认领文件。
 public struct UploadEnvironment: Sendable {
     public let destination: any UploadDestination
-    let listDirectory: @Sendable (RemoteReference) async throws -> [RemoteEntry]
+    public let listDirectory: @Sendable (RemoteReference) async throws -> [RemoteEntry]
     let createDirectory: @Sendable (RemoteReference, String) async throws -> RemoteReference
     let createDirectoryWithCheckpoint: (@Sendable (RemoteReference, String, @Sendable (RemoteReference) async throws -> Void) async throws -> RemoteReference)?
     let resolve: @Sendable (RemoteReference, Int64) async throws -> ResolvedURL
