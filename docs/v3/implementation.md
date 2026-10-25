@@ -383,6 +383,8 @@ PID 92713 的独立短空闲观察约 90 秒／45 个样本，CPU 起止及样�
 
 这确定了查询触发和创建路径，未证明永久保留的引用链，不作为“所有框架报告均无害”或整个 App 无泄漏的结论。未盲改业务界面或屏蔽辅助功能。诊断实例已正常退出，恢复普通启动 PID 97870，无栈记录环境变量，未主动查询界面前再次为 0；原任务及两条大任务暂停位移保留。证据 `.build/v3-accessibility-leak-causal/{report.md,result.json,measurements.jsonl,allocation-stack-attribution.json,restoration.json}`。旧“installed”泄漏记录的版本头为 1.0，不能当作已安装 2.0 的对照，T19 继续保持未完成。
 
+随后用公开 `NSToolbar.allowsUserCustomization` 做有界对照：实际已创建 1 个工具栏，原值就是 `false`，设定后仍 `false`；未查询前 0、一次查询后仍为 26 块／1248 字节。该开关没有缓解效果，实验代码已全部撤回，未留观察者或轮询。Release 重建并恢复普通启动 PID 99667，无实验参数或栈记录，查询前为 0。重启前后存储的三条下载解析对象相同，19 批原上传及大任务暂停位移保留；本地候选重新打包、解包签名及全文件摘要复核通过。证据 `policy-observation.json`、`policy-final-result.json`、`policy-restoration.json`、`policy-jobs-semantic-check.json` 及恢复构建日志，均在上述因果对照目录中。此项仍不构成资源验收通过。
+
 ## 网盘文件和文件夹删除
 
 百度与夸克账号内文件树支持右键移到回收站及勾选批量删除。确认冻结账号、会话、条目和父目录；显示账号、项目名称及数量，勾选父文件夹不重复列出子项。删除逐项进行，仅发送一次副作用请求，成功回执后最多四次目录核对；部分失败明确展示并刷新。分享树不增加删除入口，移除任务记录保持原语义。
