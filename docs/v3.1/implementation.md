@@ -127,3 +127,11 @@ IntegrityStore.saveIfChanged只在load及完整校验成功、整条record完全
 5组成功/失败completion等价、真实“取消只关标志”协议的旧残留/新清理对比、导出及同/不同fileID代次与关窗迟到回调验证通过。证据 .build/v31-t06-panel-fix/；独立Review .build/v31-t20/ui-review.md。正式系统导出/选源面板释放仍需T21实际任务验收，不把修正后的协作者当作真实AppKit面板通过。
 
 统一冻结后SDK26.5固定签名Release App构建、独立SDK27既有307项测试通过；日志 .build/v31-wave6-{app-build,package-tests}.log，生产输入摘要 .build/v31-wave6-source-hashes.json。T14凭据简化也包含在此真实构建内。实际候选PID59574可恢复登录并浏览，选择面板可开/取消；完整真实账号上传下载、覆盖、导出/重定位等保留T21。
+
+## 上传文件选择面板窗口归属修复
+
+独立应用模态panel.begin改为beginSheetModal(for:实际上传页NSWindow)。复用既有WindowReader，通过现有presenter的weak parentWindow回填窗口，不新增强窗口State或全局keyWindow假设；仍保持文件/目录/多选选项、单面板、弱回调与关闭取消。没有窗口时在选择边界明确提示，不启动独立面板。
+
+提取实际Presenter验证所属窗口、原选项、禁止重复面板、选择、取消重开、弱窗口与弱presenter释放，均通过；未新增正式测试类/临时App。证据 .build/v31-upload-panel-sheet/。当前实机可打开并取消附着面板；App所在Space仍影响自动化“打开”操作，文件选择成功未通过，不将此次归属修复冒称已经解决全部computer-use交互问题。
+
+统一冻结后SDK26.5固定签名Release App构建、独立SDK27既有307项测试通过；日志 .build/v31-wave6-{app-build,package-tests}.log，生产输入摘要 .build/v31-wave6-source-hashes.json。T14凭据简化也包含在此真实构建内。实际候选PID59574可恢复登录并浏览，选择面板可开/取消；完整真实账号上传下载、覆盖、导出/重定位等保留T21。

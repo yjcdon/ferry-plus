@@ -150,6 +150,9 @@ struct UploadView: View {
             resetDirectory()
         }
         .onChange(of: sessionIdentity) { resetDirectory() }
+        .background(WindowReader(window: Binding(
+            get: { panelPresenter.parentWindow }, set: { panelPresenter.parentWindow = $0 }
+        )))
         .onDisappear { panelPresenter.cancel() }
     }
 
@@ -536,7 +539,11 @@ struct UploadView: View {
     /// 面板只增加本地项目，不枚举目录、不读文件内容，也不调用网盘写入。
     private func chooseFiles() {
         let files = $files, error = $selectionError
-        panelPresenter.present { urls in Self.appendFiles(urls, files: files, error: error) }
+        guard let window = panelPresenter.parentWindow else {
+            error.wrappedValue = "无法取得上传窗口，请关闭后重新打开。"
+            return
+        }
+        panelPresenter.present(in: window) { urls in Self.appendFiles(urls, files: files, error: error) }
     }
 
     private static func appendFiles(_ urls: [URL], files: Binding<[URL]>, error: Binding<String?>) {
@@ -557,16 +564,18 @@ struct UploadView: View {
 /// 面板回调弱持有 presenter，关闭页面时取消；选择回调仅捕获文件 Binding，不持有 View。
 @MainActor
 private final class UploadOpenPanelPresenter {
+    weak var parentWindow: NSWindow?
     private var panel: NSOpenPanel?
 
-    func present(onChoose: @escaping @MainActor ([URL]) -> Void) {
+    /// 选择面板依附触发上传页的实际窗口，不创建另一个桌面的独立模态窗口。
+    func present(in window: NSWindow, onChoose: @escaping @MainActor ([URL]) -> Void) {
         guard panel == nil else { return }
         let panel = NSOpenPanel()
         panel.canChooseFiles = true; panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true; panel.canCreateDirectories = false
         panel.prompt = "添加"
         self.panel = panel
-        panel.begin { [weak self, weak panel] response in
+        panel.beginSheetModal(for: window) { [weak self, weak panel] response in
             let urls = response == .OK ? panel?.urls : nil
             self?.panel = nil
             if let urls { onChoose(urls) }
