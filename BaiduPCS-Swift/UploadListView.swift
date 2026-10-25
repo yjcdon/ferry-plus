@@ -134,18 +134,9 @@ struct UploadFilesView: View {
     @State private var isLoading = true
     @State private var error: String?
     @State private var integrityDescriptions: [UUID: String] = [:]
-    @State private var exportRequest: UUID?
-    @State private var isPreparingExport = false
-    @State private var exportDocument: IntegrityManifestDocument?
-    @State private var isExportPresented = false
-    @State private var exportError: String?
-    @State private var relocationFileID: UUID?
-    @State private var isRelocationPickerPresented = false
-    @State private var relocationRequest: RelocationRequest?
-    @State private var relocationError: String?
-    @State private var locationError: String?
-    @State private var cloudRequest: UUID?
-    @State private var cloudLocation: CloudLocation?
+    @State private var export = ExportFlow()
+    @State private var relocation = RelocationFlow()
+    @State private var location = LocationFlow()
     private let pageSize = 100
 
     private struct CloudLocation: Identifiable {
@@ -154,10 +145,35 @@ struct UploadFilesView: View {
         let directory: RemoteReference
     }
 
+    private struct CloudRequest: Equatable {
+        let id = UUID()
+        let fileID: UUID
+    }
+
     private struct RelocationRequest: Equatable {
         let id = UUID()
         let fileID: UUID
         let url: URL
+    }
+
+    /// 三个辅助流程各持有自己的请求和结果，不让导出或定位阻塞另一流程。
+    private struct ExportFlow {
+        var request: UUID?
+        var isPreparing = false
+        var document: IntegrityManifestDocument?
+        var isPresented = false
+        var error: String?
+    }
+    private struct RelocationFlow {
+        var fileID: UUID?
+        var isPickerPresented = false
+        var request: RelocationRequest?
+        var error: String?
+    }
+    private struct LocationFlow {
+        var request: CloudRequest?
+        var result: CloudLocation?
+        var error: String?
     }
 
     private struct PageRequest: Hashable {
@@ -188,10 +204,10 @@ struct UploadFilesView: View {
                     Text(job.batchStatusText).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                if isPreparingExport { ProgressView().controlSize(.small) }
+                if export.isPreparing { ProgressView().controlSize(.small) }
                 Button("导出已校验摘要…") {
-                    exportError = nil; isPreparingExport = true; exportRequest = UUID()
-                }.disabled(isPreparingExport || job == nil)
+                    export.error = nil; export.isPreparing = true; export.request = UUID()
+                }.disabled(export.isPreparing || job == nil)
                 Button { generation += 1 } label: { Image(systemName: "arrow.clockwise") }
                     .help("刷新明细").disabled(isLoading)
             }.padding()
@@ -209,51 +225,56 @@ struct UploadFilesView: View {
         }
         .frame(minWidth: 620, idealWidth: 700, minHeight: 420, idealHeight: 520)
         .task(id: page) { await load(page) }
-        .task(id: exportRequest) {
-            guard let exportRequest else { return }
-            await prepareExport(exportRequest)
+        .task(id: export.request) {
+            guard let request = export.request else { return }
+            await prepareExport(request)
         }
-        .task(id: relocationRequest?.id) {
-            guard let request = relocationRequest else { return }
+        .task(id: relocation.request?.id) {
+            guard let request = relocation.request else { return }
             await relocate(request)
         }
-        .task(id: cloudRequest) {
-            guard let fileID = cloudRequest else { return }
-            await openCloudDirectory(fileID: fileID)
+        .task(id: location.request?.id) {
+            guard let request = location.request else { return }
+            await openCloudDirectory(request)
         }
-        .sheet(item: $cloudLocation) { location in
+        .sheet(item: $location.result) { location in
             NetdiskDownloadView(initialAccount: location.account, initialDirectory: location.directory)
                 .environment(model)
         }
         .alert("无法定位文件", isPresented: Binding(
-            get: { locationError != nil }, set: { if !$0 { locationError = nil } }
-        )) { Button("好") { locationError = nil } } message: { Text(locationError ?? "") }
-        .fileImporter(isPresented: $isRelocationPickerPresented, allowedContentTypes: [.item],
+            get: { location.error != nil }, set: { if !$0 { location.error = nil } }
+        )) { Button("好") { location.error = nil } } message: { Text(location.error ?? "") }
+        .fileImporter(isPresented: $relocation.isPickerPresented, allowedContentTypes: [.item],
                       allowsMultipleSelection: false) { result in
-            guard let fileID = relocationFileID else { return }
-            relocationFileID = nil
+            guard let fileID = relocation.fileID else { return }
+            relocation.fileID = nil
             switch result {
             case .success(let urls):
-                if let url = urls.first { relocationRequest = .init(fileID: fileID, url: url) }
+                if let url = urls.first { relocation.request = .init(fileID: fileID, url: url) }
             case .failure(let failure):
-                if (failure as? CocoaError)?.code != .userCancelled { relocationError = failure.localizedDescription }
+                if (failure as? CocoaError)?.code != .userCancelled { relocation.error = failure.localizedDescription }
             }
         }
         .alert("无法重新定位源文件", isPresented: Binding(
-            get: { relocationError != nil }, set: { if !$0 { relocationError = nil } }
-        )) { Button("好") { relocationError = nil } } message: { Text(relocationError ?? "") }
-        .fileExporter(isPresented: $isExportPresented, document: exportDocument, contentType: .json,
-                      defaultFilename: "Ferry-\(jobID.uuidString.prefix(8))-SHA256") { result in
+            get: { relocation.error != nil }, set: { if !$0 { relocation.error = nil } }
+        )) { Button("好") { relocation.error = nil } } message: { Text(relocation.error ?? "") }
+        .fileExporter(isPresented: $export.isPresented, document: export.document, contentType: .json,
+                      defaultFilename: "Ferry-\(jobID.uuidString.prefix(8))-SHA256") { [request = export.request] result in
+            guard let request, export.request == request else { return }
+            export.document = nil; export.request = nil
             if case .failure(let failure) = result {
-                if (failure as? CocoaError)?.code != .userCancelled { exportError = failure.localizedDescription }
+                if (failure as? CocoaError)?.code != .userCancelled { export.error = failure.localizedDescription }
             }
         }
         .alert("无法导出摘要清单", isPresented: Binding(
-            get: { exportError != nil }, set: { if !$0 { exportError = nil } }
-        )) { Button("好") { exportError = nil } } message: { Text(exportError ?? "") }
+            get: { export.error != nil }, set: { if !$0 { export.error = nil } }
+        )) { Button("好") { export.error = nil } } message: { Text(export.error ?? "") }
         .onChange(of: job?.fileIDs.count) {
             let count = job?.fileIDs.count ?? 0
             if offset >= count { offset = max(0, ((count - 1) / pageSize) * pageSize) }
+        }
+        .onDisappear {
+            export = .init(); relocation = .init(); location = .init()
         }
     }
 
@@ -273,8 +294,8 @@ struct UploadFilesView: View {
                         Spacer()
                         Text(file.phase.displayName).foregroundStyle(.secondary)
                         Menu {
-                            Button("打开云端所在目录", systemImage: "cloud") { cloudRequest = file.id }
-                                .disabled(file.remoteReference == nil || cloudRequest != nil)
+                            Button("打开云端所在目录", systemImage: "cloud") { location.request = .init(fileID: file.id) }
+                                .disabled(file.remoteReference == nil || location.request != nil)
                             Button("在 Finder 中显示源文件", systemImage: "folder") { revealSource(file) }
                             if let replacement = file.replacement, replacement.snapshotObject != nil {
                                 Button("复制旧版本备份名称", systemImage: "doc.on.doc") {
@@ -293,9 +314,9 @@ struct UploadFilesView: View {
                     if canRelocate(file) {
                         HStack {
                             Button("重新定位源文件…") {
-                                relocationFileID = file.id; isRelocationPickerPresented = true
-                            }.controlSize(.small).disabled(relocationRequest != nil)
-                            if relocationRequest?.fileID == file.id {
+                                relocation.fileID = file.id; relocation.isPickerPresented = true
+                            }.controlSize(.small).disabled(relocation.request != nil)
+                            if relocation.request?.fileID == file.id {
                                 ProgressView().controlSize(.small)
                                 Text("正在完整核对原始内容…").font(.caption).foregroundStyle(.secondary)
                             }
@@ -322,22 +343,26 @@ struct UploadFilesView: View {
     }
 
     /// 复用任务绑定账号的既有目录浏览入口，不把旧任务转到当前另一账号。
-    private func openCloudDirectory(fileID: UUID) async {
-        defer { cloudRequest = nil }
+    private func openCloudDirectory(_ request: CloudRequest) async {
+        defer { if location.request?.id == request.id { location.request = nil } }
         do {
             guard let sourceJob = job, let coordinator = model.uploadCoordinator else { throw UploadCoordinatorError.missingJob }
             guard model.accountKey(for: sourceJob.account.provider) == sourceJob.account else {
                 throw UploadRecordError.invalid("请先登录此任务的\(sourceJob.account.provider.title)账号“\(sourceJob.accountName)”再打开云端目录。")
             }
-            let directory = try await coordinator.resultDirectory(jobID: jobID, fileID: fileID)
+            let directory = try await coordinator.resultDirectory(jobID: jobID, fileID: request.fileID)
             try Task.checkCancellation()
+            guard location.request?.id == request.id else { return }
             guard job?.account == sourceJob.account,
                   model.accountKey(for: sourceJob.account.provider) == sourceJob.account else {
                 throw UploadRecordError.invalid("账号或上传任务已变化，请重新定位。")
             }
-            cloudLocation = .init(account: sourceJob.account, directory: directory)
+            location.result = .init(account: sourceJob.account, directory: directory)
         } catch is CancellationError { }
-        catch { locationError = error.localizedDescription }
+        catch {
+            guard location.request?.id == request.id, !Task.isCancelled else { return }
+            location.error = error.localizedDescription
+        }
     }
 
     /// 从保存的授权书签定位实际源文件；失效、已移走或无权限时显示原始完整路径与原因。
@@ -350,7 +375,7 @@ struct UploadFilesView: View {
             defer { if accessed { url.stopAccessingSecurityScopedResource() } }
             guard try url.checkResourceIsReachable() else { throw CocoaError(.fileReadNoSuchFile) }
             NSWorkspace.shared.activateFileViewerSelecting([url])
-        } catch { locationError = "\(path)\n\(error.localizedDescription)" }
+        } catch { location.error = "\(path)\n\(error.localizedDescription)" }
     }
 
     /// 仅待发送且已有原始 SHA-256 的失败项可重新选源，校验云端内容时不再依赖本地文件。
@@ -364,14 +389,18 @@ struct UploadFilesView: View {
 
     /// 选择仅变更本地定位；协调器停稳旧执行器并复核完整摘要，失败保持原记录。
     private func relocate(_ request: RelocationRequest) async {
-        defer { if relocationRequest?.id == request.id { relocationRequest = nil } }
+        defer { if relocation.request?.id == request.id { relocation.request = nil } }
         do {
             guard let coordinator = model.uploadCoordinator else { throw UploadCoordinatorError.missingJob }
             try await coordinator.relocateSource(jobID: jobID, fileID: request.fileID, to: request.url)
             try Task.checkCancellation()
+            guard relocation.request?.id == request.id else { return }
             generation += 1
         } catch is CancellationError { }
-        catch { relocationError = error.localizedDescription }
+        catch {
+            guard relocation.request?.id == request.id, !Task.isCancelled else { return }
+            relocation.error = error.localizedDescription
+        }
     }
 
     private func integrityDescription(_ file: UploadFile) -> String {
@@ -389,7 +418,7 @@ struct UploadFilesView: View {
 
     /// 分页只保留目录命名和摘要，不保留完整 UploadFile／分片；每条基准来自独立校验库。
     private func prepareExport(_ request: UUID) async {
-        defer { isPreparingExport = false }
+        defer { if export.request == request { export.isPreparing = false } }
         do {
             guard let coordinator = model.uploadCoordinator, let sourceJob = job else { throw UploadCoordinatorError.missingJob }
             guard sourceJob.fileIDs.count <= IntegrityManifest.maximumEntries else {
@@ -443,12 +472,12 @@ struct UploadFilesView: View {
             let manifest = try IntegrityManifest(entries: entries)
             let document = try IntegrityManifestDocument(manifest: manifest)
             try Task.checkCancellation()
-            guard exportRequest == request, job?.account == sourceJob.account else { throw UploadCoordinatorError.missingJob }
+            guard export.request == request, job?.account == sourceJob.account else { throw UploadCoordinatorError.missingJob }
             guard model.integrityRecordsRevision == revision else { throw UploadRecordError.invalid("校验记录已变化，请重新导出") }
-            exportDocument = document; isExportPresented = true
+            export.document = document; export.isPresented = true
         } catch {
-            guard !Task.isCancelled, exportRequest == request else { return }
-            exportError = error.localizedDescription
+            guard !Task.isCancelled, export.request == request else { return }
+            export.error = error.localizedDescription
         }
     }
 

@@ -93,3 +93,9 @@ CI保留预期版本核对，改调现有package-app.sh，并将脚本实际ZIP�
 账号、会话、目录引用和列表用一个LoadedDirectoryContext同步建立和失效。1169个提取生产方法的旧新检查点一致，覆盖最近目录恢复、迟到结果、取消/失败及按钮/冻结范围；另12组目录分支等价，单一空目录视图。实际候选两家根目录及夸克目录进入/返回正常。证据 .build/v31-t02/。
 
 本批源码冻结后SDK26.5固定签名Release App构建与独立SDK27现有307项测试通过，日志 .build/v31-wave4-{app-build,package-tests}.log；完整生产输入摘要 .build/v31-wave4-source-hashes.json。真实候选已打开且目录读取正常，后续选择面板自动化遇窗口不可见/超时，诊断及未通过范围见 .build/v31-wave4-ui/observations.md。用户61份JSON摘要不变。本轮不写云端、不替换Applications稳定版；完整GUI验收不得因受控验证通过而省略。
+
+## T06 整理上传明细独立辅助流程
+
+12个分散State归入导出/源重定位/结果定位三个流程，不加全局busy。正常/并行与5种选源结果一致，100项分页及导出内容保持原规则。另单列增强：面板关闭不提前丢载荷，结果回调后释放；关窗重置后拒绝迟到回调；CloudRequest独立UUID区分同fileID两代请求，导出回调也捕获所属请求，不能清掉新流程。load及canRelocate保持字节一致。证据 .build/v31-t06/；真实任务导出/重定位及云端子sheet等待T21，不冒称已实际通过。
+
+本批源码冻结后SDK26.5固定签名Release App构建与独立SDK27现有307项测试通过，日志 .build/v31-wave4-{app-build,package-tests}.log；完整生产输入摘要 .build/v31-wave4-source-hashes.json。真实候选已打开且目录读取正常，后续选择面板自动化遇窗口不可见/超时，诊断及未通过范围见 .build/v31-wave4-ui/observations.md。用户61份JSON摘要不变。本轮不写云端、不替换Applications稳定版；完整GUI验收不得因受控验证通过而省略。
