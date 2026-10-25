@@ -64,6 +64,8 @@ brew install --cask yjcdon/ferry-plus/ferry-plus
 brew trust --cask yjcdon/ferry-plus/ferry-plus
 ```
 
+已通过 ZIP 手动安装相同版本的用户，可在安装命令中加 `--adopt`，让 Homebrew 接管内容完全相同的现有 App；不需要先卸载。版本或内容不同时，Homebrew 会拒绝接管。
+
 后续升级：
 
 ```sh
