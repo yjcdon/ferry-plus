@@ -53,3 +53,9 @@ Int64.fileSizeText仅封装原ByteCountFormatter(.file)，替换7处同义表达
 两个内容生成入口共用发送尾部，保持请求ID、授权Task、内容、触发点及上下传原有取消检查差异。21组受控真实Swift Task旧新报告一致，弱引用释放检查通过，真实通知框架typecheck通过。证据 .build/v31-t13/；未将受控通知协作者冒称实际系统通知弹窗。
 
 本批源码冻结后 SDK26.5 Release App构建／固定签名通过，独立SDK27既有包测试307项通过；日志 .build/v31-wave2-{app-build,package-tests}.log。实际运行PID48872，双账号保留，无新凭据提示，用户61份JSON摘要不变；GUI记录 .build/v31-wave2-ui/。未替换Applications稳定版，最终3.1集成验收由T20／T21完成。
+
+## T18 统一产品版本配置来源
+
+产品版本仅定义在Version.xcconfig，当前保留3.0；本机与CI读取相同脚本，Xcode两配置引用相同定义。CI tag不符明确失败，签名／bundle／构建号覆盖不变。26项隔离检查通过；工程plutil与脚本语法通过。真实本机固定签名Release构建通过；本机没有Xcode，未声称实际CI或Xcode构建通过。证据 .build/v31-t18/。
+
+本批源码冻结后 SDK26.5 Release App构建／固定签名通过，独立SDK27既有包测试307项通过；日志 .build/v31-wave2-{app-build,package-tests}.log。实际运行PID48872，双账号保留，无新凭据提示，用户61份JSON摘要不变；GUI记录 .build/v31-wave2-ui/。未替换Applications稳定版，最终3.1集成验收由T20／T21完成。

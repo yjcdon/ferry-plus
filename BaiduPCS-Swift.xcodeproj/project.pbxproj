@@ -16,6 +16,7 @@
 /* Begin PBXFileReference section */
 		18F1CB143086E87B00A59465 /* BaiduPCS-Swift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Ferry Plus.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		18F1CB403086E8A000A59465 /* Shared.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Shared.xcconfig; sourceTree = "<group>"; };
+		A31F00103086E8A000000001 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -62,6 +63,7 @@
 			isa = PBXGroup;
 			children = (
 				18F1CB403086E8A000A59465 /* Shared.xcconfig */,
+				A31F00103086E8A000000001 /* Version.xcconfig */,
 			);
 			path = Config;
 			sourceTree = "<group>";
@@ -275,6 +277,7 @@
 		};
 		18F1CB203086E87C00A59465 /* Debug */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A31F00103086E8A000000001 /* Version.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -295,7 +298,6 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.yjcdon.FerryPlus;
 				PRODUCT_NAME = "Ferry Plus";
 				ARCHS = arm64;
@@ -311,6 +313,7 @@
 		};
 		18F1CB213086E87C00A59465 /* Release */ = {
 			isa = XCBuildConfiguration;
+			baseConfigurationReference = A31F00103086E8A000000001 /* Version.xcconfig */;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
@@ -331,7 +334,6 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 3.0;
 				PRODUCT_BUNDLE_IDENTIFIER = io.github.yjcdon.FerryPlus;
 				PRODUCT_NAME = "Ferry Plus";
 				ARCHS = arm64;

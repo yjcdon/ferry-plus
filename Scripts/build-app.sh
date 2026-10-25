@@ -3,6 +3,7 @@
 set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
+version="$(bash "$repo_dir/Scripts/read-version.sh")"
 package_dir="$repo_dir/Packages/FerryKit"
 build_dir="$repo_dir/.build"
 app_dir="$build_dir/Ferry Plus.app"
@@ -55,7 +56,7 @@ swiftc -swift-version 6 -parse-as-library "${swift_flags[@]}" \
     "$repo_dir/BaiduPCS-Swift/"*.swift "${objects[@]}" \
     -o "$app_dir/Contents/MacOS/Ferry Plus"
 
-cat > "$app_dir/Contents/Info.plist" <<'PLIST'
+cat > "$app_dir/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
@@ -64,7 +65,7 @@ cat > "$app_dir/Contents/Info.plist" <<'PLIST'
     <key>CFBundleDisplayName</key><string>Ferry Plus</string>
     <key>CFBundleExecutable</key><string>Ferry Plus</string>
     <key>CFBundlePackageType</key><string>APPL</string>
-    <key>CFBundleShortVersionString</key><string>3.0</string>
+    <key>CFBundleShortVersionString</key><string>$version</string>
     <key>CFBundleVersion</key><string>1</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
