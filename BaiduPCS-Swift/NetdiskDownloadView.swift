@@ -57,7 +57,7 @@ struct NetdiskDownloadView: View {
         let accountName: String
     }
     private var isBusy: Bool { isSubmitting || deletion != nil }
-    private var browserRoot: RemoteReference { initialDirectory ?? Self.root(for: provider) }
+    private var browserRoot: RemoteReference { initialDirectory ?? provider.rootReference }
 
     init(initialAccount: AccountKey? = nil, initialDirectory: RemoteReference? = nil) {
         self.initialAccount = initialAccount
@@ -256,10 +256,6 @@ struct NetdiskDownloadView: View {
             if let result = directoryTrail(to: reference, in: child, ancestors: trail) { return result }
         }
         return nil
-    }
-
-    private static func root(for provider: Provider) -> RemoteReference {
-        provider == .baidu ? .baidu(path: "/", fsID: 0) : .quark(fid: "0")
     }
 
     /// 删除范围只来自当前树的精确条目；批量选择已有父级去重，不再递归枚举其内容。

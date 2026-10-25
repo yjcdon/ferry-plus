@@ -83,7 +83,7 @@ struct UploadView: View {
            initialTrail.last?.reference == initialDirectory {
             _trail = State(initialValue: initialTrail.map { .init(reference: $0.reference, name: $0.name, hasUnknownAncestors: false) })
         } else if let provider = initialProvider, let initialDirectory,
-                  initialDirectory.provider == provider, initialDirectory != Self.root(for: provider) {
+                  initialDirectory.provider == provider, initialDirectory != provider.rootReference {
             let name: String
             switch initialDirectory {
             case .baidu(let path, _): name = (path as NSString).lastPathComponent
@@ -325,7 +325,7 @@ struct UploadView: View {
         return model.coordinator.netdisks[provider].map { ObjectIdentifier($0) }
     }
     private var currentDirectory: RemoteReference {
-        guard let reference = trail.last?.reference, reference.provider == provider else { return Self.root(for: provider) }
+        guard let reference = trail.last?.reference, reference.provider == provider else { return provider.rootReference }
         return reference
     }
     private var loadRequest: LoadRequest {
@@ -439,7 +439,7 @@ struct UploadView: View {
             let environment = try model.uploadEnvironment(for: key)
             if recentAttempted != key {
                 if restoresRecent, trail.isEmpty, let remembered = model.recentUploadDirectory(for: key), !remembered.isEmpty {
-                    var parent = Self.root(for: request.provider)
+                    var parent = request.provider.rootReference
                     var confirmed: [RemoteEntry] = []
                     for folder in remembered {
                         let entries = try await environment.listDirectory(parent)
@@ -545,9 +545,6 @@ struct UploadView: View {
     private static func uniqueLocalURLs(_ urls: [URL]) -> [URL] {
         var seen: Set<URL> = []
         return urls.map(\.standardizedFileURL).filter { seen.insert($0).inserted }
-    }
-    private static func root(for provider: Provider) -> RemoteReference {
-        provider == .baidu ? .baidu(path: "/", fsID: 0) : .quark(fid: "0")
     }
     private func errorLabel(_ message: String) -> some View {
         Label(message, systemImage: "exclamationmark.triangle.fill")

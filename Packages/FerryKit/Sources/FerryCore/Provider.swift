@@ -7,6 +7,14 @@ public enum Provider: String, Codable, Sendable, CaseIterable, Identifiable {
 
     public var id: Self { self }
     public var title: String { self == .baidu ? "百度网盘" : "夸克网盘" }
+
+    /// 固定根目录引用供浏览与上传共用，不替代调用方已选定的目录。
+    public var rootReference: RemoteReference {
+        switch self {
+        case .baidu: .baidu(path: "/", fsID: 0)
+        case .quark: .quark(fid: "0")
+        }
+    }
 }
 
 /// 昵称变化不影响账号归属。
