@@ -74,6 +74,12 @@ DownloadKit 新增 `TransferBudget`：可取消的 FIFO 连接许可、异常自
 
 证据：`.build/v3-accessibility-leak-causal/action-query.swift`、`action-helper-results.json`、`measurements.jsonl`、`sanitized-action-cycles.json`。只保存数量、类型、返回码及不含账号／文件内容的查询结果，不保存内存图或对象正文。
 
+### 独立纯 AppKit 复现
+
+同机 macOS 27.0.1／arm64 上，独立应用仅包含一个窗口、一个标准 `NSToolbarItem`、空操作，明确关闭工具栏自定义；不依赖 SwiftUI、Ferry 模块、网络、钥匙串或任务数据。基线已有 416 个分配，不对其来源作判断。普通属性查询 1 次仍为 416；动作名称查询 1 次增至 418，再查询 10 次增至 438；全部查询辅助进程退出后，停止 AX 查询 120 秒仍为 438。新增共 22 个分配、1056 字节，脱敏类型树显示对应的 `NSAccessibilityCustomAction → _handler → __NSMallocBlock__` 子树。
+
+因此当前系统的标准 AppKit 工具栏已能独立复现同类持续保留，不能归因到 Ferry 上传 worker 或 SwiftUI 状态持有。尚无完整引用回边或保持辅助功能语义的公开 API 修复，不能将系统复现当作资源验收通过。实验 App 已正常退出，未替换生产工具栏、未提交外部问题报告。证据 `.build/v3-accessibility-minimal-repro/{AppKitRepro.swift,appkit-result.json,appkit-sanitized-types.json,provenance.json}`。属性实测为 1 次，不冒充原计划的 10 次；Ferry 内 10 次普通属性对照另有前述证据。
+
 ## 正式接口跨进程续传与回读
 
 2026-10-24 18:39～18:41（Asia/Shanghai），两个独立进程完成真实恢复验证。每家一份新随机 4194305 字节样本：首进程 PID 16105 各发送首片 4194304 字节并退出；次进程 PID 16175 复用原上传会话，不重新预创建，仅发送末片 1 字节，再合并并完整回读。两阶段记录的会话指纹一致，不导出原始 uploadID。
