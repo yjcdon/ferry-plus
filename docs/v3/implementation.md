@@ -725,3 +725,9 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 独立实际库与 URLProtocol 21 项检查通过：夸克会话检查失败、错误名称及正式暂停触发的请求前取消，在真实 Coordinator 中均为 POST=0、pending=0、唯一意图 rejected。真实写回执后的会话失败仍严格遵循会话检查→回执持久化→后置会话检查，仅一条 POST，不被错误归类为未发送。证据 `.build/v3-baidu-upload-directory-identity/quark-prewrite-report.md`。独立 SDK27 既有包测试 307 项及 SDK26.5 Release App 构建／固定签名通过，日志 `.build/v3-mkdir-preflight-{package-tests,app-build}.log`。
 
 实际 App PID22676 复用原登录，通过 Computer Use 在夸克上传页新建专用空目录 `FerryPlus-Mkdir-Preflight-20261025-1307`，进入该目录成功；随后在网盘浏览窗口只将此测试目录移入回收站，刷新后消失。原22项任务未变；证据 `.build/ui-mkdir-preflight/`。正常界面回归与确定性未发送故障验证分别记录，不把前者当成鼠标命中取消时隙的证据。
+
+## 无需本地字节的准备会话恢复
+
+仅在仍缺上传字节、需要重新分块或尚无可用准备回执时恢复本地书签授权。已确认秒传，或准备已就绪且所有待发片索引已有持久回执时，不解析本地书签，不申请本地访问权限；仍由 UploadEngine 严格验证全部回执及原远端会话，再合并和完整回读。无本地需要同时跳过可选快速证明，避免普通大文件的待发片和回执均为空时读取原路径。需要源字节时书签失败照常报告，不降级读取同名路径。
+
+独立实际 Store／Coordinator／UploadEngine／RangeReader 的 21 项检查通过，exit0、stderr0。无效书签下准确秒传及全片回执恢复完成完整 SHA，原会话核对与单次合并保留；缺片和重新分块仍拒绝且 provider 操作计数为零；百度大文件待发片为空时零快速证明调用，所有连接预算归零。证据 `.build/remote-only-resume-validation/{report.md,result.txt,source-hashes.json,actual-input-hashes.json}`。书签使用确定性无效数据验证入口拒绝路径，不冒称实测外置卷卸载；未操作 App／真实账号任务。本项不代替未知副作用或过期会话权威重建合同。

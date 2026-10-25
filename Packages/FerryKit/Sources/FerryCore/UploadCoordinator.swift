@@ -806,10 +806,15 @@ public actor UploadCoordinator {
             file.phase = .completed; try await saveFile(file)
             return
         }
+        // 只在仍需本地字节时恢复源授权；无缺片仍由引擎严格核对回执和原服务端会话。
+        let needsLocalSource: Bool
+        if let prepared = file.preparation, prepared.isReadyForTransfer, !prepared.requiresRechunking {
+            needsLocalSource = !prepared.isInstant && !Set(file.parts.map(\.index)).isSuperset(of: prepared.pendingParts)
+        } else { needsLocalSource = true }
         let localURL: URL
-        if let bookmark = file.source.bookmark { localURL = try UploadSource.resolve(bookmark: bookmark) }
+        if needsLocalSource, let bookmark = file.source.bookmark { localURL = try UploadSource.resolve(bookmark: bookmark) }
         else { localURL = file.source.url }
-        let accessed = localURL.startAccessingSecurityScopedResource()
+        let accessed = needsLocalSource && localURL.startAccessingSecurityScopedResource()
         defer { if accessed { localURL.stopAccessingSecurityScopedResource() } }
         if file.preparation == nil {
             file.phase = .preparing; try await saveFile(file)
@@ -837,7 +842,7 @@ public actor UploadCoordinator {
             })
             file = try await store.loadFile(id: file.id, in: jobs[jobID]!)
         }
-        if !prepared.isInstant {
+        if !prepared.isInstant, needsLocalSource {
             prepared = try await rapidUpload(&file, localURL: localURL, parent: parent, environment: env)
         }
         try Task.checkCancellation()
