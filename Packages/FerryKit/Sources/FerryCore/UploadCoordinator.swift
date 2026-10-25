@@ -998,18 +998,18 @@ public actor UploadCoordinator {
         return false
     }
 
-    /// 独立发布检查点先保存，再写入已经完整核验的旧字节快照摘要；稳定 ID 避免恢复时重复归档。
+    /// 独立发布检查点先保存，再归档快照实际回读时间；旧状态无时间时保留原摘要记录，不伪造本次校验。
     private func replacementCheckpoint(_ state: UploadReplacementState, jobID: UUID, fileID: UUID,
                                        phase: UploadPhase) async throws {
         guard let job = jobs[jobID], state.fileID == fileID else { throw UploadCoordinatorError.missingJob }
         var file = try await store.loadFile(id: fileID, in: job)
         file.replacement = state; file.phase = phase
         try await saveFile(file)
-        if let snapshot = state.snapshotObject, let digest = state.originalSHA256 {
+        if let snapshot = state.snapshotObject, let digest = state.originalSHA256, let verifiedAt = state.snapshotVerifiedAt {
             let expectation = try IntegrityExpectation(algorithm: .sha256, digest: digest, origin: .remoteOriginal,
                 size: state.original.size, reference: snapshot)
             let record = IntegrityRecord(id: fileID, account: job.account, reference: snapshot,
-                expectation: expectation, actualDigest: digest, status: .verified, verifiedAt: .now, uploadFileID: fileID,
+                expectation: expectation, actualDigest: digest, status: .verified, verifiedAt: verifiedAt, uploadFileID: fileID,
                 originalFileName: state.original.name)
             do { try await integrityStore.save(record) }
             catch { throw UploadCoordinatorError.persistence(error.localizedDescription) }

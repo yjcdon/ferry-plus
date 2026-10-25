@@ -689,3 +689,10 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 独立复制当前四模块，以 Swift 6.4／默认 macOS 27 SDK、macOS 14 部署目标编译，复用既有模拟服务与实际 Store／Coordinator，28 项检查通过。覆盖暂停重建后复用原 preparation、只准备一次且不重发确认片、只合并一次并完整回读；直接取消零合并；拒绝落盘失败保留 pending；策略实际完成后取消仍保持 pending，再按精确操作回执确认而不重合并；全部连接预算归零。去掉仅本次六行修复的源码对照准确失败，恢复正式源码后全项通过。证据 `.build/merge-unsent-cancel-validation/{report.md,red-result.txt,result.txt,source-hashes.json}`。未运行 App 或真实账号任务；本增量不补足百度未知合并、两家未知建目录的服务端查询、过期重建或远端 abort，T07／T10 仍未完成。
 
 父代理复核被测 57 份源文件摘要与正式源码一致，现有 307 项包测试通过（独立 SDK27 scratch 目录，未与 App 共享构建输出）。既定 SDK26.5 Release 构建／固定签名通过，正常退出旧进程后启动新 App（PID 4986）；Computer Use 确认原 22 项任务、两条大任务暂停状态及双账号登录恢复。证据 `.build/v3-merge-unsent-cancel-{package-tests,app-build}.log` 和独立验证目录中的 `rebuilt-{main,accounts}-ax.txt`。实际界面回归不等同于鼠标命中本次微小取消时隙，后者由上述有界故障注入验证。
+
+
+## 覆盖快照保留实际校验时间
+
+修复覆盖阶段检查点反复将旧版本摘要的校验时间更新为当前时间的问题。发布状态新增可选的快照实际校验时间，仅在快照完整回读成功后设置；后续 claim、发布及取消检查点沿用此时间。旧状态缺少该字段仍可恢复，原独立摘要记录保持不变；不存在旧记录时不凭恢复时间补造已验证记录，后续真实回读再补齐。本次不改变完整回读次数及发布接口。
+
+当前 State／Publisher／IntegrityService 在 SDK26.5 私有目录重新编译，原 20 场景、74 断言通过；当前 replacementCheckpoint 方法全文提取，结合实际 IntegrityStore／磁盘 JSON 的独立 SDK27 harness 15 项断言通过，覆盖四个后续阶段日期与记录不变、旧 JSON 兼容、原记录字节和修改时间不变、缺记录不造日期及新实际日期可保存。证据 `.build/replacement-publisher-validation/{timestamp-report.md,timestamp-result.txt,timestamp-source-hashes.json}`，原发布状态机回归见同目录 `result.txt`。正式 Release App 构建及独立 SDK27 既有包测试 307 项通过，日志 `.build/v3-snapshot-time-{package-tests,app-build}.log`。父代理通过 Computer Use 核对实际 App PID18563，原 22 项任务保留，两家根目录均可加载并取消，没有要求重新登录。本项时间 harness 未操作真实账号或任务；上述回归不扩展为整个版本已验收。

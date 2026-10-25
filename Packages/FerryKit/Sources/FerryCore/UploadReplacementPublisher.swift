@@ -96,6 +96,7 @@ public struct UploadReplacementPublisher: Sendable {
                   try await digest(snapshot.reference, size: snapshot.size) == state.originalSHA256 else {
                 try await conflict(&state, "旧内容快照已变化，停止覆盖", checkpoint: checkpoint)
             }
+            state.snapshotVerifiedAt = .now
             guard let current = try await find(state, name: state.original.name) else { throw UploadReplacementError.unconfirmed }
             let previous = state
             state.stage = .claimPending
@@ -196,7 +197,7 @@ public struct UploadReplacementPublisher: Sendable {
               try await digest(snapshot.reference, size: snapshot.size) == state.originalSHA256 else {
             try await conflict(&state, "独立快照与旧内容基准不一致", checkpoint: checkpoint)
         }
-        state.snapshotObject = snapshot.reference; state.stage = .snapshotReady
+        state.snapshotObject = snapshot.reference; state.snapshotVerifiedAt = .now; state.stage = .snapshotReady
         try await checkpoint(state)
     }
 

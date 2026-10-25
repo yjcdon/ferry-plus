@@ -16,6 +16,8 @@ public struct UploadReplacementState: Codable, Sendable, Equatable {
     public var account: AccountKey?
     public var originalSHA256: String?
     public var snapshotObject: RemoteReference?
+    /// 最近一次实际完整回读快照的时间；旧记录缺省 nil，不以恢复或检查点时间补造。
+    public var snapshotVerifiedAt: Date?
     public var claimedObject: RemoteReference?
     public var claimedSize: Int64?
     public var claimedSHA256: String?
@@ -87,6 +89,9 @@ public struct UploadReplacementState: Codable, Sendable, Equatable {
         }
         if let finalObject, stagedObject.map({ sameIdentity(finalObject, $0) }) != true {
             throw UploadRecordError.invalid("最终对象必须沿用暂存准确身份")
+        }
+        if snapshotVerifiedAt != nil, snapshotObject == nil || originalSHA256 == nil {
+            throw UploadRecordError.invalid("快照校验时间缺少准确对象或内容基准")
         }
         if stage != .initial {
             guard account != nil, originalSHA256 != nil else { throw UploadRecordError.invalid("覆盖发布缺少旧内容基准") }
