@@ -345,6 +345,14 @@ Release 构建及固定签名通过（`.build/v3-upload-two-tabs-app-build.log`�
 
 截图与 AX 记录：`.build/ui-directory-drop/{baidu-directory,switch-provider-root,quark-directory}.{png,txt}`；原生输入记录 `.build/ui-drag-validation/{baidu,quark}-directory-row-drag.log`。输入前以公开辅助功能核对源文件及目标窗口命中，系统产生真实 `public.file-url` 拖动载荷。此项补齐目录行拖放，不代替放下前切换、未登录、确认前换号及完整 T13／T18。
 
+## 关闭主窗口后的后台回读与资源释放
+
+当前 Release App 使用百度专用 4,194,305 字节样本，在“正在校验云端内容”阶段通过 Computer Use 执行 Command-W。公开 AX 查询确认 App 无窗口，同 PID 继续运行，09:49:32 的 verifying 于 09:50:17 变为 completed；完成后、重新打开前再次确认无窗口。活动期间的 `PreventUserIdleSystemSleep` 声明在完成后消失，系统重新打开后仍为原 PID 87461，实际窗口显示完成 2 项、失败 0、跳过 0。本地 SHA 与独立校验记录的期望／实际 SHA 和长度一致。
+
+为提供观察窗口，通过设置页将下载限速从 0 临时改为 128 KiB/s，测试后已恢复 0。专用云端目录经实际 App 移入回收站并刷新确认消失，本轮上传记录移除；原 122 份 JSON 摘要逐一不变，仅新增本轮一份独立校验依据，两条大上传仍暂停且偏移不变。证据 `.build/ui-lifecycle-validation/{report.md,result.json,progress.jsonl}`、关闭前后窗口及防休眠记录、实际 PNG／TXT。
+
+实际系统设置显示 Ferry Plus 的 `allow-notifications` 为关闭，未更改该许可；本轮不证明通知开启时送达。关闭主窗口后台完成也不代替正常退出的在途提交收尾、实际注销／换号或物理睡眠验收，T15 保持未完成。
+
 ## 网盘文件和文件夹删除
 
 百度与夸克账号内文件树支持右键移到回收站及勾选批量删除。确认冻结账号、会话、条目和父目录；显示账号、项目名称及数量，勾选父文件夹不重复列出子项。删除逐项进行，仅发送一次副作用请求，成功回执后最多四次目录核对；部分失败明确展示并刷新。分享树不增加删除入口，移除任务记录保持原语义。
