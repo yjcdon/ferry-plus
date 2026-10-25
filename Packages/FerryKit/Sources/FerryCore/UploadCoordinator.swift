@@ -1051,37 +1051,58 @@ public actor UploadCoordinator {
             guard let self else { throw CancellationError() }
             try await self.replacementCheckpoint(state, jobID: jobID, fileID: fileID, phase: .publishing)
         }
+        defer { verificationProgress[jobID] = nil; stageSamples[jobID] = nil; emit() }
+        let progress: @Sendable (Int64, Int64) async throws -> Void = { [weak self] bytes, total in
+            try Task.checkCancellation()
+            guard let self else { throw CancellationError() }
+            try await self.replacementVerificationProgress(jobID: jobID, fileID: fileID, bytes: bytes, total: total)
+        }
         let publisher = UploadReplacementPublisher(destination: strategy, integrity: integrity)
         let result = if cancelling {
-            try await publisher.cancel(state, checkpoint: checkpoint)
+            try await publisher.cancel(state, remoteVersion: file.expectation?.remoteVersion,
+                onProgress: progress, checkpoint: checkpoint)
         } else {
-            try await publisher.inspect(state, checkpoint: checkpoint)
+            try await publisher.inspect(state, remoteVersion: file.expectation?.remoteVersion,
+                onProgress: progress, checkpoint: checkpoint)
         }
         file = try await store.loadFile(id: fileID, in: jobs[jobID]!)
-        if result.stage == .published, let final = result.finalObject {
-            file.remoteReference = final; file.remoteName = result.original.name
+        if result.state.stage == .published, let final = result.state.finalObject {
+            file.remoteReference = final; file.remoteName = result.state.original.name
             try await saveFile(file)
-            try await verify(&file, environment: env)
+            if let record = result.finalIntegrityRecord {
+                try await completeVerification(&file, record: record, environment: env)
+            } else {
+                try await verify(&file, environment: env)
+            }
         }
     }
 
-    /// 暂存内容已经验证后才允许认领目标；恢复优先查询原发布槽位，最终路径再做完整回读。
+    /// 发布器完整校验暂存与最终对象；只消费本次真实记录，不再重复回读同一阶段。
     private func publishReplacement(_ file: inout UploadFile, environment env: UploadEnvironment) async throws {
         guard let state = file.replacement, let strategy = env.replacement,
               let staged = state.stagedObject ?? file.remoteReference,
               let expectation = file.expectation else { throw UploadDestinationError.invalidPreparation }
         let jobID = file.jobID, fileID = file.id
+        defer { verificationProgress[jobID] = nil; stageSamples[jobID] = nil; emit() }
         let result = try await UploadReplacementPublisher(destination: strategy, integrity: integrity).publish(state,
-            staged: staged, expectedSHA256: expectation.digest, size: file.source.size,
-            checkpoint: { [weak self] state in
+            staged: staged, expectedSHA256: expectation.digest, size: file.source.size, remoteVersion: expectation.remoteVersion,
+            onStagedVerification: { [weak self] record in
+                guard let self else { throw CancellationError() }
+                try await self.recordStagedVerification(record, jobID: jobID, fileID: fileID, environment: env)
+            }, onProgress: { [weak self] bytes, total in
+                try Task.checkCancellation()
+                guard let self else { throw CancellationError() }
+                try await self.replacementVerificationProgress(jobID: jobID, fileID: fileID, bytes: bytes, total: total)
+            }, checkpoint: { [weak self] state in
                 guard let self else { throw CancellationError() }
                 try await self.replacementCheckpoint(state, jobID: jobID, fileID: fileID, phase: .publishing)
             })
-        guard result.stage == .published, let final = result.finalObject else { throw UploadReplacementError.unconfirmed }
+        guard result.state.stage == .published, let final = result.state.finalObject,
+              let record = result.finalIntegrityRecord else { throw UploadReplacementError.unconfirmed }
         file = try await store.loadFile(id: fileID, in: jobs[jobID]!)
-        file.remoteReference = final; file.remoteName = result.original.name
+        file.remoteReference = final; file.remoteName = result.state.original.name
         try await saveFile(file)
-        try await verify(&file, environment: env)
+        try await completeVerification(&file, record: record, environment: env)
     }
 
     /// 与未决合并共用准确对象回执合同；查询失败/未确认时保持恢复标记，显式重试仍可再次查询。
@@ -1188,6 +1209,10 @@ public actor UploadCoordinator {
         guard let reference = file.remoteReference, let expectation = file.expectation, expectation.algorithm == .sha256 else {
             throw UploadDestinationError.invalidPreparation
         }
+        if let replacement = file.replacement, replacement.stage != .published {
+            try await publishReplacement(&file, environment: env)
+            return
+        }
         file.phase = .verifying; file.failedPhase = nil; file.error = nil; try await saveFile(file)
         let size = file.source.size
         let jobID = file.jobID, fileID = file.id
@@ -1204,14 +1229,58 @@ public actor UploadCoordinator {
                 guard let self else { throw CancellationError() }
                 try await self.updateVerification(jobID: jobID, fileID: fileID, bytes: bytes, total: total)
             })
+        try await completeVerification(&file, record: record, environment: env)
+    }
+
+    /// 核对记录归属后先保存实际摘要；暂存不完成任务，错摘要仍保留证据并失败。
+    private func saveVerification(_ record: IntegrityRecord, file: inout UploadFile,
+                                  environment env: UploadEnvironment) async throws {
+        try record.validate()
+        guard let expectation = file.expectation, record.account == env.destination.account,
+              record.account == jobs[file.jobID]?.account, record.reference == file.remoteReference,
+              record.uploadFileID == file.id, record.expectation?.algorithm == .sha256,
+              record.expectation?.digest == expectation.digest, record.expectation?.size == file.source.size,
+              record.remoteVersion == expectation.remoteVersion, record.expectation?.origin == .localOriginal,
+              record.status == .verified || record.status == .mismatch else {
+            throw UploadRecordError.invalid("上传校验结果与当前文件或账号不一致")
+        }
         do { try await integrityStore.save(record) }
         catch { throw UploadCoordinatorError.persistence(error.localizedDescription) }
         file.integrityRecordID = record.id
         guard record.status == .verified else { try await saveFile(file); throw UploadCoordinatorError.mismatch }
-        if let replacement = file.replacement, replacement.stage != .published {
-            try await saveFile(file)
-            try await publishReplacement(&file, environment: env)
-            return
+    }
+
+    /// 暂存的完整校验结果先持久化，之后发布器才可继续 claim 与发布。
+    private func recordStagedVerification(_ record: IntegrityRecord, jobID: UUID, fileID: UUID,
+                                          environment env: UploadEnvironment) async throws {
+        guard let job = jobs[jobID] else { throw UploadCoordinatorError.missingJob }
+        var file = try await store.loadFile(id: fileID, in: job)
+        try await saveVerification(record, file: &file, environment: env)
+        try await saveFile(file)
+    }
+
+    /// 每次暂存／最终对象的真实回读从零开始，进度不充当可恢复的摘要依据。
+    private func replacementVerificationProgress(jobID: UUID, fileID: UUID, bytes: Int64, total: Int64) async throws {
+        if bytes == 0 {
+            guard let job = jobs[jobID] else { throw UploadCoordinatorError.missingJob }
+            var file = try await store.loadFile(id: fileID, in: job)
+            guard total == file.source.size else { throw UploadRecordError.invalid("上传校验长度与源文件不一致") }
+            file.phase = .verifying; file.failedPhase = nil; file.error = nil; try await saveFile(file)
+            verificationProgress[jobID] = .init(fileID: fileID, relativePath: file.relativePath, verifiedBytes: 0, totalBytes: total)
+            stageSamples[jobID] = .init(fileID: fileID, relativePath: file.relativePath, phase: .verifying,
+                startedAt: .now, initialBytes: 0, currentBytes: 0, totalBytes: total)
+            emit()
+        } else {
+            try updateVerification(jobID: jobID, fileID: fileID, bytes: bytes, total: total)
+        }
+    }
+
+    /// 实际校验记录先落盘、完成检查点随后落盘，最后释放准备授权；各上传入口共用收尾。
+    private func completeVerification(_ file: inout UploadFile, record: IntegrityRecord,
+                                      environment env: UploadEnvironment) async throws {
+        try await saveVerification(record, file: &file, environment: env)
+        guard file.replacement == nil || file.replacement?.stage == .published else {
+            throw UploadReplacementError.unconfirmed
         }
         file.phase = .completed; file.sessionResultRecoveryRequired = nil; try await saveFile(file)
         if let prepared = file.preparation {

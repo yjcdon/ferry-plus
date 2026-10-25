@@ -24,6 +24,12 @@ public enum UploadReplacementError: LocalizedError, Sendable, Equatable {
     }
 }
 
+/// 仅传递本次调用实际取得的最终校验结果；恢复不能把持久 published 状态当作内容证明。
+public struct UploadReplacementResult: Sendable {
+    public let state: UploadReplacementState
+    public let finalIntegrityRecord: IntegrityRecord?
+}
+
 /// 独立快照、claim 核对和 no-replace 发布；不删除旧内容，也不自动重发未知写请求。
 public struct UploadReplacementPublisher: Sendable {
     private let destination: any UploadReplacementDestination
@@ -70,8 +76,10 @@ public struct UploadReplacementPublisher: Sendable {
 
     /// 暂存完整校验后 claim 当前路径绑定；只发布准确的新对象，冲突保全所有版本。
     public func publish(_ state: UploadReplacementState, staged: RemoteReference,
-                        expectedSHA256: String, size: Int64,
-                        checkpoint: @Sendable (UploadReplacementState) async throws -> Void) async throws -> UploadReplacementState {
+                        expectedSHA256: String, size: Int64, remoteVersion: String? = nil,
+                        onStagedVerification: (@Sendable (IntegrityRecord) async throws -> Void)? = nil,
+                        onProgress: (@Sendable (Int64, Int64) async throws -> Void)? = nil,
+                        checkpoint: @Sendable (UploadReplacementState) async throws -> Void) async throws -> UploadReplacementResult {
         try check(state)
         if state.stage == .conflict { throw UploadReplacementError.conflict(state.conflictReason!) }
         let expected = try IntegrityExpectation(algorithm: .sha256, digest: expectedSHA256, origin: .localOriginal,
@@ -82,13 +90,16 @@ public struct UploadReplacementPublisher: Sendable {
               state.stagedSize.map({ $0 == size }) ?? true else { throw UploadRecordError.invalid("恢复发布的暂存对象或摘要已变化") }
         var state = try await prepare(state, checkpoint: checkpoint)
         if state.stage == .published {
-            try await verifyFinal(state)
-            return state
+            let record = try await verifyFinal(state, remoteVersion: remoteVersion, onProgress: onProgress)
+            return UploadReplacementResult(state: state, finalIntegrityRecord: record)
         }
         if state.stage == .snapshotReady {
             guard let candidate = try await find(state, name: state.stagingName),
                   sameObject(candidate.reference, staged), candidate.size == size else { throw UploadReplacementError.unconfirmed }
-            guard try await digest(candidate.reference, size: size) == expected else { throw UploadReplacementError.contentMismatch }
+            let record = try await verify(candidate.reference, expectedSHA256: expected, size: size,
+                fileID: state.fileID, remoteVersion: remoteVersion, onProgress: onProgress)
+            try await onStagedVerification?(record)
+            guard record.status == .verified else { throw UploadReplacementError.contentMismatch }
             state.stagedObject = candidate.reference; state.stagedSHA256 = expected; state.stagedSize = size
             // claim 前重新校验独立快照，避免恢复后把已经变化的快照当成旧字节保障。
             guard let snapshot = try await find(state, name: state.snapshotName),
@@ -137,19 +148,28 @@ public struct UploadReplacementPublisher: Sendable {
             }
         }
         if state.stage == .restorePending { try await confirmRestoration(&state, checkpoint: checkpoint) }
-        if state.stage == .publishPending { try await confirmPublication(&state, checkpoint: checkpoint) }
+        var finalRecord: IntegrityRecord?
+        if state.stage == .publishPending {
+            finalRecord = try await confirmPublication(&state, remoteVersion: remoteVersion,
+                onProgress: onProgress, checkpoint: checkpoint)
+        }
         try check(state)
-        return state
+        return UploadReplacementResult(state: state, finalIntegrityRecord: finalRecord)
     }
 
     /// 取消只核对已发操作并恢复准确 claim，不发布新内容，也不删除快照或未知对象。
     /// 调用方应在旧 worker 收尾后以未取消任务调用，检查点保存失败仍保留原未决状态。
-    public func cancel(_ state: UploadReplacementState,
-                       checkpoint: @Sendable (UploadReplacementState) async throws -> Void) async throws -> UploadReplacementState {
+    public func cancel(_ state: UploadReplacementState, remoteVersion: String? = nil,
+                       onProgress: (@Sendable (Int64, Int64) async throws -> Void)? = nil,
+                       checkpoint: @Sendable (UploadReplacementState) async throws -> Void) async throws -> UploadReplacementResult {
         var state = state
         try check(state)
         if state.stage == .snapshotPending { try await confirmSnapshot(&state, checkpoint: checkpoint) }
-        if state.stage == .publishPending { try await confirmPublication(&state, occupiedIsConflict: true, checkpoint: checkpoint) }
+        var finalRecord: IntegrityRecord?
+        if state.stage == .publishPending {
+            finalRecord = try await confirmPublication(&state, occupiedIsConflict: true, remoteVersion: remoteVersion,
+                onProgress: onProgress, checkpoint: checkpoint)
+        }
         if state.stage == .claimPending { try await confirmClaim(&state, requireKnownIdentity: true, checkpoint: checkpoint) }
         if state.stage == .claimed {
             guard let claimed = try await find(state, name: state.claimName),
@@ -169,24 +189,29 @@ public struct UploadReplacementPublisher: Sendable {
         }
         if state.stage == .restorePending { try await confirmRestoration(&state, checkpoint: checkpoint) }
         try check(state)
-        return state
+        return UploadReplacementResult(state: state, finalIntegrityRecord: finalRecord)
     }
 
     /// 公开核对入口只查询已经提交的唯一槽位；确认 claim 后停在 claimed，不隐式发布或恢复名称。
-    public func inspect(_ state: UploadReplacementState,
-                        checkpoint: @Sendable (UploadReplacementState) async throws -> Void) async throws -> UploadReplacementState {
+    public func inspect(_ state: UploadReplacementState, remoteVersion: String? = nil,
+                        onProgress: (@Sendable (Int64, Int64) async throws -> Void)? = nil,
+                        checkpoint: @Sendable (UploadReplacementState) async throws -> Void) async throws -> UploadReplacementResult {
         var state = state
         try check(state)
+        var finalRecord: IntegrityRecord?
         switch state.stage {
         case .snapshotPending: try await confirmSnapshot(&state, checkpoint: checkpoint)
         case .claimPending: try await confirmClaim(&state, checkpoint: checkpoint)
-        case .publishPending: try await confirmPublication(&state, checkpoint: checkpoint)
+        case .publishPending:
+            finalRecord = try await confirmPublication(&state, remoteVersion: remoteVersion,
+                onProgress: onProgress, checkpoint: checkpoint)
         case .restorePending: try await confirmRestoration(&state, checkpoint: checkpoint)
-        case .published: try await verifyFinal(state)
+        case .published:
+            finalRecord = try await verifyFinal(state, remoteVersion: remoteVersion, onProgress: onProgress)
         case .initial, .snapshotReady, .claimed, .conflict: break
         }
         try check(state)
-        return state
+        return UploadReplacementResult(state: state, finalIntegrityRecord: finalRecord)
     }
 
     /// copy 未决只能查询唯一快照并完整核验，缺失时保留意图而不重发。
@@ -214,17 +239,21 @@ public struct UploadReplacementPublisher: Sendable {
 
     /// rename 回执未知时按已存暂存身份与完整摘要确认最终对象，不再发送发布请求。
     private func confirmPublication(_ state: inout UploadReplacementState, occupiedIsConflict: Bool = false,
-                                    checkpoint: @Sendable (UploadReplacementState) async throws -> Void) async throws {
+                                    remoteVersion: String?, onProgress: (@Sendable (Int64, Int64) async throws -> Void)?,
+                                    checkpoint: @Sendable (UploadReplacementState) async throws -> Void) async throws -> IntegrityRecord {
         guard let final = try await find(state, name: state.original.name) else { throw UploadReplacementError.unconfirmed }
         guard sameObject(final.reference, state.stagedObject!), final.size == state.stagedSize else {
             if occupiedIsConflict { try await conflict(&state, "取消时目标已被其他对象占用，保留所有对象", checkpoint: checkpoint) }
             throw UploadReplacementError.unconfirmed
         }
-        guard try await digest(final.reference, size: final.size) == state.stagedSHA256 else {
+        let record = try await verify(final.reference, expectedSHA256: state.stagedSHA256!, size: final.size,
+            fileID: state.fileID, remoteVersion: remoteVersion, onProgress: onProgress)
+        guard record.status == .verified else {
             try await conflict(&state, "最终对象内容已变化，保留旧内容快照", checkpoint: checkpoint)
         }
         state.finalObject = final.reference; state.stage = .published
         try await checkpoint(state)
+        return record
     }
 
     /// 恢复回执未知只查原名；误 claim 恢复后报告冲突，正常取消恢复后保留快照。
@@ -280,11 +309,26 @@ public struct UploadReplacementPublisher: Sendable {
         try await integrity.captureSHA256(size: size) { try await destination.resolve(reference: reference, size: size) }
     }
 
-    /// 发布完成后的恢复仍核对当前目标身份和新内容，不能仅凭旧 completed 记录返回成功。
-    private func verifyFinal(_ state: UploadReplacementState) async throws {
+    /// 新内容校验返回本次真实记录；每次完整读取开始于零，不复用历史摘要或进度。
+    private func verify(_ reference: RemoteReference, expectedSHA256: String, size: Int64, fileID: UUID,
+                        remoteVersion: String?, onProgress: (@Sendable (Int64, Int64) async throws -> Void)?) async throws -> IntegrityRecord {
+        try await onProgress?(0, size)
+        return try await integrity.verify(account: destination.account, reference: reference,
+            expectedSHA256: expectedSHA256, size: size, remoteVersion: remoteVersion, uploadFileID: fileID,
+            resolve: { try await destination.resolve(reference: reference, size: size) }, onProgress: onProgress)
+    }
+
+    /// 发布完成后的恢复仍完整回读当前准确对象，不能仅凭旧 completed 记录返回成功。
+    private func verifyFinal(_ state: UploadReplacementState, remoteVersion: String?,
+                             onProgress: (@Sendable (Int64, Int64) async throws -> Void)?) async throws -> IntegrityRecord {
         guard let final = try await find(state, name: state.original.name),
-              sameObject(final.reference, state.finalObject!), final.size == state.stagedSize,
-              try await digest(final.reference, size: final.size) == state.stagedSHA256 else { throw UploadReplacementError.contentMismatch }
+              sameObject(final.reference, state.finalObject!), final.size == state.stagedSize else {
+            throw UploadReplacementError.contentMismatch
+        }
+        let record = try await verify(final.reference, expectedSHA256: state.stagedSHA256!, size: final.size,
+            fileID: state.fileID, remoteVersion: remoteVersion, onProgress: onProgress)
+        guard record.status == .verified else { throw UploadReplacementError.contentMismatch }
+        return record
     }
 
     /// 冲突先保存明确终态，全部旧对象与未知对象由调用方展示，不在此删除。
