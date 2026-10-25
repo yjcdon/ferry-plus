@@ -643,3 +643,11 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 证据 `.build/ui-v3-acceptance/report.md`、`app-results.json`、`gui-download-results.json`、`gui-both-downloads-retention.json`、`user-state-after-gui.json` 及原始窗口截图。Finder跨窗口拖拽未收到载荷，不以文件选择器通过代替拖放；实际换号／注销、通知、物理睡眠、浅深色和窄窗口矩阵仍未完整覆盖，T13／T15／T18不勾选。
 
 同一App被动观察20分钟、600样本：主进程RSS采样峰值244816KiB（约239.1MiB），结束时物理占用114MB、进程物理峰值159MB（系统工具单位），结束CPU0%；应用磁盘11172KiB保持不变。证据 `.build/passive-resource-report-20261025.json`、原始JSONL及footprint/vmmap日志。测量只覆盖主进程及本轮GUI活动，没有形成独立20秒收尾空闲区间，不据此声明完整无泄漏或完成T19。
+
+## 建目录意图落盘后的未发送取消
+
+建目录意图保存完成后、进入目录策略之前若已取消，准确将本次意图保存为拒绝，再结束 worker。后续继续可以新建一次目录；取消批次重建后保持取消。拒绝检查点保存失败时仍保留原 pending；进入策略后才发生的取消仍保持未决，不能当作请求未发送。本规则与已有预创建边界一致，不改变两家目录回执持久化和未知结果查询合同。
+
+独立复制当前四模块，以 Swift 6.4／默认 macOS 27 SDK、macOS 14 部署目标编译，复用既有模拟服务与实际 Store／Coordinator，25 项检查通过。验证暂停后重建继续只建一次、直接取消不建目录、拒绝落盘失败保留 pending、策略已执行后取消不错误拒绝，以及恢复查询不重复发请求、连接预算归零。故障注入仅在独立 Store 副本的意图原子写入后短暂停住；去掉六行修复的源码对照准确失败，恢复正式源码后全项通过。证据 `.build/directory-unsent-cancel-validation/{report.md,red-result.txt,result.txt,source-hashes.json}`。未操作 App 或真实账号；本增量不补足未知预创建／建目录的准确服务端查询、远端 abort 或会话过期安全重建，T07／T10 保持未完成。
+
+父代理另核对全部 57 份被测源文件摘要与当前源码一致，现有 307 项包测试通过。测试结束后单独以既定 26.5 SDK 完成 Release App 构建及固定签名；此前并发构建因共享对象文件变更被中断，不计为有效构建。正常退出旧 App，再启动新 App（PID 2438），Computer Use 确认原 22 项任务、两条大上传的暂停状态与显示位移保留，账号菜单恢复两家原登录；未执行上传／下载或登出。证据 `.build/v3-directory-unsent-cancel-package-tests.log`、`v3-directory-unsent-cancel-app-build.log` 及独立验证目录中的 `rebuilt-main-ax.txt`、`rebuilt-accounts-ax.txt`。此现场回归不声称通过鼠标精确命中了意图落盘与网络调用之间的取消时隙。

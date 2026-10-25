@@ -753,6 +753,12 @@ public actor UploadCoordinator {
             try Task.checkCancellation()
             let commit = UploadCommit(kind: .createDirectory)
             file.commits.append(commit); file.phase = .committing; try await saveFile(file)
+            // 尚未调用目录策略时可准确拒绝本地意图；进入策略后的取消仍保留未知结果。
+            if Task.isCancelled {
+                file.commits[file.commits.count - 1].status = .rejected
+                try await saveFile(file)
+                throw CancellationError()
+            }
             let fileID = file.id
             _ = try await env.makeDirectory(parent: parent, name: file.remoteName!, onCreated: { [weak self] reference in
                 guard let self else { throw CancellationError() }
