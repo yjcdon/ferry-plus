@@ -11,10 +11,12 @@ extension UploadEnvironment {
         let createDirectory: @Sendable (RemoteReference, String, @Sendable (RemoteReference) async throws -> Void) async throws -> RemoteReference = { parent, name, onCreated in
             let parentPath: String
             do {
+                try Task.checkCancellation()
                 try await checkSession()
                 try validateName(name)
                 parentPath = try await checkedBaiduDirectoryPath(parent, client: client)
                 try await checkSession()
+                try Task.checkCancellation()
             } catch { throw UploadDirectoryNotSubmitted(underlying: error) }
             let path = RemotePath.join(parentPath, name)
             let entry = try await client.createOwnedDirectory(path)
@@ -53,9 +55,15 @@ extension UploadEnvironment {
                              checkSession: @escaping @Sendable () async throws -> Void) throws -> UploadEnvironment {
         let destination = try QuarkUploadDestination(client: client, account: account, secrets: secrets)
         let createDirectory: @Sendable (RemoteReference, String, @Sendable (RemoteReference) async throws -> Void) async throws -> RemoteReference = { parent, name, onCreated in
-            try await checkSession()
-            try validateName(name)
-            let fid = try await client.createDirectory(name: name, parentFID: quarkFID(parent))
+            let parentFID: String
+            do {
+                try Task.checkCancellation()
+                try await checkSession()
+                try validateName(name)
+                parentFID = try quarkFID(parent)
+                try Task.checkCancellation()
+            } catch { throw UploadDirectoryNotSubmitted(underlying: error) }
+            let fid = try await client.createDirectory(name: name, parentFID: parentFID)
             let reference = RemoteReference.quark(fid: fid)
             try await onCreated(reference)
             try await checkSession()

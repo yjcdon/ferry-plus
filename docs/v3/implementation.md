@@ -716,3 +716,12 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 ## 目录与核对修复后的交付候选
 
 源码提交 `ab9f76e` 包含目录身份修复，亦保留 `a37c197` 只读核对不启动上传及 `769cd4d` 快照校验时间修复。正式 App 构建后通过上述 Computer Use 实际路径；随后打包为 `.build/dist/Ferry-Plus-3.0-arm64.zip`（3,756,788 字节），SHA-256 为 `e58ef1f78509da584784b4a8a104a01a379339107ee7a6f519251824548ec1dc`。App 共 11,796,275 字节，arm64、固定签名及解包 4 个文件的逐项摘要均核对通过。证据 `.build/v3-package-validation/result.json`。这是当前已实现功能的交付候选；未知提交／过期恢复的服务端能力缺口仍如实保留，不将本轮正常上传回归扩展成全异常矩阵通过。没有推送或发布 3.0。
+
+
+## 两家建目录的确定未发送失败
+
+夸克建目录的会话、名称、父目录参数和取消检查现在与百度一致：仅在真正创建请求之前使用明确未发送错误分类，Coordinator 将相应意图记为拒绝；实际请求、准确回执持久化及请求后检查保持原语义。百度也在只读身份检查前后检查取消。没有把网络写请求失败推断为未发生。
+
+独立实际库与 URLProtocol 21 项检查通过：夸克会话检查失败、错误名称及正式暂停触发的请求前取消，在真实 Coordinator 中均为 POST=0、pending=0、唯一意图 rejected。真实写回执后的会话失败仍严格遵循会话检查→回执持久化→后置会话检查，仅一条 POST，不被错误归类为未发送。证据 `.build/v3-baidu-upload-directory-identity/quark-prewrite-report.md`。独立 SDK27 既有包测试 307 项及 SDK26.5 Release App 构建／固定签名通过，日志 `.build/v3-mkdir-preflight-{package-tests,app-build}.log`。
+
+实际 App PID22676 复用原登录，通过 Computer Use 在夸克上传页新建专用空目录 `FerryPlus-Mkdir-Preflight-20261025-1307`，进入该目录成功；随后在网盘浏览窗口只将此测试目录移入回收站，刷新后消失。原22项任务未变；证据 `.build/ui-mkdir-preflight/`。正常界面回归与确定性未发送故障验证分别记录，不把前者当成鼠标命中取消时隙的证据。
