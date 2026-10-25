@@ -331,11 +331,13 @@ Release 构建 `.build/v3-inspector-final-build.log` 通过。Computer Use 在�
 
 Release App 重新构建并固定签名后，通过 Computer Use 验证普通窗口、300 点侧栏、详情开关及浅深色。原生辅助功能请求缩到 640 点时，实际分别保持 820／960 点；搜索可见，详情开启时侧栏图标和账号入口未被挤压。测试后恢复深色外观；原 22 项任务及两条暂停大上传保留。证据 `.build/toolbar-minimum-validation/{before,normal-after,inspector-after,light-after}.{txt,png}`、`normal-size.txt`、`inspector-size.txt` 和 `app-build-extended.log`。此项只覆盖 T18 的窗口布局子集，拖放及账号生命周期矩阵仍需继续。
 
-## 全部网盘上传入口与目标切换验收
+## 上传窗口的两个网盘页签
 
-在重新构建的 3.0 App 中，Computer Use 从“全部网盘”打开上传，通过原生文件面板加入已有专用目录。未选目标时，已有待上传文件也不会默认绑定百度：上传、新建及刷新禁用，账号和目录显示未选择。随后选择百度、再切夸克，同一目录及其 3 个文件、3 个文件夹保持，渲染截图中的账号、根目录和容量正确更新。取消后仍为原 3 个下载、19 批上传，两条大任务继续暂停；原 109 份元数据摘要不变。证据 `.build/ui-upload-target-switch/{report.md,result.json,unselected-with-files.png,baidu.png,quark.png}` 及对应 AX 文字。AX 聚合账号文本返回旧值，实际渲染正确，本轮账号展示判断以截图为准。
+上传窗口只展示百度网盘、夸克网盘两个页签。主窗口已选某个网盘、或从网盘目录打开时沿用原上下文；“全部网盘”入口默认百度，并展示账号和目标目录，确认后才上传。切换页签保留待上传文件，重新读取对应账号目录及容量，不沿用另一账号的目录或迟到响应。Provider、当前目录和目录加载请求改为非空状态，移除“请选择网盘”页签及相关空状态。
 
-跨 Finder 原生拖动虽核对源与目标窗口命中，仍未出现上传确认，未据此确认拖放通过。T13／T18 继续保留未完成，另需验证目录上下文、未登录及换号矩阵。
+Release 构建及固定签名通过（`.build/v3-upload-two-tabs-app-build.log`），重新打开实际 App 后确认仅两个页签，默认百度。原生鼠标从 Finder 拖文件到百度上传窗口通过；切夸克保留文件，并继续接收本地文件及文件夹；从全部网盘主窗口拖入也打开默认百度的两页签确认。只确认选择，没有提交上传。原 3 个下载、19 批上传保留，两条大上传继续暂停，原 109 份元数据摘要不变。实际截图、AX、输入记录及摘要见 `.build/ui-upload-two-tabs/{report.md,result.json}`；账号展示以截图核对，AX 聚合文本存在旧值。两处调用方和账号／会话门槛经只读复核通过。
+
+此前 `.build/ui-upload-target-switch/` 及未选目标的拖放截图属于旧交互记录，不作为这次两页签版本的验收证据。T13／T18 的目录上下文、未登录和换号矩阵仍需继续，不能据此确认整个任务完成。
 
 ## 网盘文件和文件夹删除
 
@@ -379,11 +381,6 @@ Release App 重新构建并固定签名后，通过 Computer Use 验证普通窗
 
 补跑发现运行时暂停用例偶发在请求取消已完成、StubServer 独立线程尚未退出其 1 ms 停顿循环时，立即读取活动请求数。生产引擎仍等待 worker、URLSession 完成回调及检查点收尾；测试改为复用既有有界 waitUntil，等待服务器线程实际归零，超时仍失败，与现有暂停及共享预算用例保持一致。没有改变生产暂停逻辑或放宽资源数量要求。修改后完整 307 项既有测试通过：`.build/v3-preflight-directory-recheck-tests.log`，首次失败证据保留于 `.build/v3-preflight-directory-tests.log`。
 
-## 全部网盘入口明确选择上传目标
-
-上传页保留真正可空的网盘选择。“全部网盘”入口显示“请选择网盘”，选择前没有目标目录、账号会话、目录请求或预检请求，上传与新建目录均不可执行。选择后显示百度／夸克两段；来自明确网盘或准确目录的上下文直接选中，不增加额外确认。
-
-所有调用方已核对，独立类型检查和三项初始化／副作用入口验证通过：`.build/upload-provider-validation/result.txt`。Release 实际 App 构建通过：`.build/v3-explicit-provider-app-build.log`。构建后 Computer Use 返回 Mac 锁屏，尚未完成该版本窗口验收；不将离线门槛验证作为真实拖放或界面验收证据。
 
 ## T12 当前源码预算与慢流复验
 
