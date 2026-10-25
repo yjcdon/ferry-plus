@@ -150,6 +150,11 @@ struct UploadFilesView: View {
         let fileID: UUID
     }
 
+    private struct SourcePickerRequest: Equatable {
+        let id = UUID()
+        let fileID: UUID
+    }
+
     private struct RelocationRequest: Equatable {
         let id = UUID()
         let fileID: UUID
@@ -165,7 +170,7 @@ struct UploadFilesView: View {
         var error: String?
     }
     private struct RelocationFlow {
-        var fileID: UUID?
+        var picker: SourcePickerRequest?
         var isPickerPresented = false
         var request: RelocationRequest?
         var error: String?
@@ -245,27 +250,33 @@ struct UploadFilesView: View {
             get: { location.error != nil }, set: { if !$0 { location.error = nil } }
         )) { Button("好") { location.error = nil } } message: { Text(location.error ?? "") }
         .fileImporter(isPresented: $relocation.isPickerPresented, allowedContentTypes: [.item],
-                      allowsMultipleSelection: false) { result in
-            guard let fileID = relocation.fileID else { return }
-            relocation.fileID = nil
+                      allowsMultipleSelection: false, onCompletion: { [picker = relocation.picker] result in
+            guard let picker, relocation.picker?.id == picker.id else { return }
+            relocation.picker = nil
             switch result {
             case .success(let urls):
-                if let url = urls.first { relocation.request = .init(fileID: fileID, url: url) }
+                if let url = urls.first { relocation.request = .init(fileID: picker.fileID, url: url) }
             case .failure(let failure):
                 if (failure as? CocoaError)?.code != .userCancelled { relocation.error = failure.localizedDescription }
             }
-        }
+        }, onCancellation: { [picker = relocation.picker] in
+            guard let picker, relocation.picker?.id == picker.id else { return }
+            relocation.picker = nil; relocation.isPickerPresented = false
+        })
         .alert("无法重新定位源文件", isPresented: Binding(
             get: { relocation.error != nil }, set: { if !$0 { relocation.error = nil } }
         )) { Button("好") { relocation.error = nil } } message: { Text(relocation.error ?? "") }
-        .fileExporter(isPresented: $export.isPresented, document: export.document, contentType: .json,
-                      defaultFilename: "Ferry-\(jobID.uuidString.prefix(8))-SHA256") { [request = export.request] result in
+        .fileExporter(isPresented: $export.isPresented, document: export.document, contentTypes: [.json],
+                      defaultFilename: "Ferry-\(jobID.uuidString.prefix(8))-SHA256", onCompletion: { [request = export.request] result in
             guard let request, export.request == request else { return }
             export.document = nil; export.request = nil
             if case .failure(let failure) = result {
                 if (failure as? CocoaError)?.code != .userCancelled { export.error = failure.localizedDescription }
             }
-        }
+        }, onCancellation: { [request = export.request] in
+            guard let request, export.request == request else { return }
+            export.document = nil; export.request = nil; export.isPresented = false
+        })
         .alert("无法导出摘要清单", isPresented: Binding(
             get: { export.error != nil }, set: { if !$0 { export.error = nil } }
         )) { Button("好") { export.error = nil } } message: { Text(export.error ?? "") }
@@ -314,7 +325,7 @@ struct UploadFilesView: View {
                     if canRelocate(file) {
                         HStack {
                             Button("重新定位源文件…") {
-                                relocation.fileID = file.id; relocation.isPickerPresented = true
+                                relocation.picker = .init(fileID: file.id); relocation.isPickerPresented = true
                             }.controlSize(.small).disabled(relocation.request != nil)
                             if relocation.request?.fileID == file.id {
                                 ProgressView().controlSize(.small)

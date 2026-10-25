@@ -119,3 +119,11 @@ IntegrityStore.saveIfChanged只在load及完整校验成功、整条record完全
 独立Review发现初版真实published恢复绕过checkpoint、缺失旧proof不补齐；原手工probe不足。已抽取archiveReplacementSnapshot，普通checkpoint仍文件先写；最终本次record验证后、completed及授权释放前再保证旧proof归档。修复前真实restore+retry负例确认完成却丢proof；修复后通过公开add/restore/retry/remove的30项真实恢复检查，权限写失败/最终record失败且proof缺失均补齐原snapshot/ref/SHA/原名/实际verifiedAt，移除后仍保留。无时间旧格式不伪造依据，不增加旧快照回读或副作用重放。另36项归档及54项完整集成检查通过，证据 .build/v31-t10/。
 
 统一冻结后SDK26.5固定签名Release App构建、独立SDK27既有307项测试通过；日志 .build/v31-wave6-{app-build,package-tests}.log，生产输入摘要 .build/v31-wave6-source-hashes.json。T14凭据简化也包含在此真实构建内。实际候选PID59574可恢复登录并浏览，选择面板可开/取消；完整真实账号上传下载、覆盖、导出/重定位等保留T21。
+
+## T06 Review修复：系统取消回调
+
+独立Review依据实际SwiftUI API合同发现，原单contentType fileExporter取消不调用onCompletion，因此此前将取消模拟为failure的受控证据不代表系统取消，已更正。改用显式onCancellation清理导出载荷/请求及选源身份；completion保留成功/失败处理，关闭presentation标志不提前清载荷。SourcePickerRequest用独立UUID区分同fileID两代选择，旧取消/回调不清新选择。
+
+5组成功/失败completion等价、真实“取消只关标志”协议的旧残留/新清理对比、导出及同/不同fileID代次与关窗迟到回调验证通过。证据 .build/v31-t06-panel-fix/；独立Review .build/v31-t20/ui-review.md。正式系统导出/选源面板释放仍需T21实际任务验收，不把修正后的协作者当作真实AppKit面板通过。
+
+统一冻结后SDK26.5固定签名Release App构建、独立SDK27既有307项测试通过；日志 .build/v31-wave6-{app-build,package-tests}.log，生产输入摘要 .build/v31-wave6-source-hashes.json。T14凭据简化也包含在此真实构建内。实际候选PID59574可恢复登录并浏览，选择面板可开/取消；完整真实账号上传下载、覆盖、导出/重定位等保留T21。
