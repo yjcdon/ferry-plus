@@ -72,27 +72,33 @@ struct MainView: View {
         }
     }
     private var visibleItems: [TransferListItem] {
-        let downloads = filteredDownloads.filter(currentCategory.contains).map(TransferListItem.download)
-        let uploads = filteredUploads.filter(currentCategory.contains).map(TransferListItem.upload)
+        visibleItems(downloads: filteredDownloads, uploads: filteredUploads)
+    }
+
+    /// 同次渲染复用侧栏的过滤结果；命令入口仍通过计算属性重新取当前范围。
+    private func visibleItems(downloads: [Job], uploads: [UploadJob]) -> [TransferListItem] {
+        let downloads = downloads.filter(currentCategory.contains).map(TransferListItem.download)
+        let uploads = uploads.filter(currentCategory.contains).map(TransferListItem.upload)
         return (downloads + uploads).sorted {
             if $0.createdAt != $1.createdAt { return $0.createdAt > $1.createdAt }
             if $0.id.direction != $1.id.direction { return $0.id.direction.rawValue < $1.id.direction.rawValue }
             return $0.id.id.uuidString < $1.id.id.uuidString
         }
     }
-    private var transferScope: TransferSelection {
-        let items = visibleItems
+    private func transferScope(items: [TransferListItem]) -> TransferSelection {
         return .init(selectedItems: items.filter { selection.contains($0.id) }, visibleItems: items,
             providerFilter: providerFilter, isBusy: uploadCommand != nil,
             onAction: perform, onRemove: requestRemoval, onInspect: inspect)
     }
 
     var body: some View {
-        let items = visibleItems
-        let scope = transferScope
+        let downloads = filteredDownloads
+        let uploads = filteredUploads
+        let items = visibleItems(downloads: downloads, uploads: uploads)
+        let scope = transferScope(items: items)
         NavigationSplitView {
             SidebarView(selection: $category, providerFilter: $providerFilter,
-                        jobs: filteredDownloads, uploadJobs: filteredUploads)
+                        jobs: downloads, uploadJobs: uploads)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
         } detail: {
             // 固定详情宽度，隔离 SwiftUI inspector 与原生分栏的尺寸反馈循环。
