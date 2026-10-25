@@ -23,3 +23,9 @@
 新增 Provider.rootReference，百度仍为path=/、fsID=0，夸克仍为fid=0。四处上传／下载页面调用改用同一定义并删除两个重复方法，初始指定目录优先级与目录删除限制不变。实际候选两家上传页、下载页均成功从根目录加载。
 
 本项纳入同一次源码冻结后的SDK26.5 Release App编译／固定签名及独立SDK27包测试，307项通过；日志 `.build/v31-wave1-{app-build,package-tests}.log`。主代理复核差异后，用实际App PID43467完成双账号、上传入口及两家上传／下载根目录加载，取消后任务仍0；本轮无云端写入，61份原用户JSON摘要无变化。界面及数据对照见 `.build/v31-wave1-ui/`。当前产品版本暂保留3.0，表示3.1优化候选的早期构建，未替换 `/Applications` 稳定版，最终3.1全功能验收由T21完成。
+
+## T07 复用上传数值格式表达式
+
+Int64.fileSizeText仅封装原ByteCountFormatter(.file)，替换7处同义表达式。保留下载.byteCount、上传rounded与下载截断、两种时间宽度差异。实际旧新表达式提取的179样例一致，来源与报告在 `.build/v31-formatting-validation/`。没有宣称格式统一后运行更快。
+
+本项纳入同一次源码冻结后的SDK26.5 Release App编译／固定签名及独立SDK27包测试，307项通过；日志 `.build/v31-wave1-{app-build,package-tests}.log`。主代理复核差异后，用实际App PID43467完成双账号、上传入口及两家上传／下载根目录加载，取消后任务仍0；本轮无云端写入，61份原用户JSON摘要无变化。界面及数据对照见 `.build/v31-wave1-ui/`。当前产品版本暂保留3.0，表示3.1优化候选的早期构建，未替换 `/Applications` 稳定版，最终3.1全功能验收由T21完成。

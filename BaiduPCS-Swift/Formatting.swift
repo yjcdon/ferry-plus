@@ -16,6 +16,9 @@ extension IntegrityOrigin {
 
 extension Int64 {
     var byteCount: String { formatted(.byteCount(style: .file)) }
+
+    /// 上传容量与均速沿用 ByteCountFormatter 的文件单位、零值及本地化口径。
+    var fileSizeText: String { ByteCountFormatter.string(fromByteCount: self, countStyle: .file) }
 }
 
 extension JobProgress {
