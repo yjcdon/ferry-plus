@@ -184,3 +184,19 @@ IntegrityStore.saveIfChanged只在load及完整校验成功、整条record完全
 新增小样本的云端文件及两个任务也已通过App清理，最终下载／上传任务均为0，所有面板关闭，样本权限及临时设置已恢复。证据 `final-ui-cleanup.json` 及实际界面记录。原60条校验记录在收尾比对中缺失，用户明确确认“是，我主动清理过”；按用户意图保留清理结果，不恢复、不计作回归，也不把原61份JSON全部未变写成当前结论。原任务文件哈希保留，本轮校验依据及本地正文证据保留；初次收尾报告 `cleanup-local-audit.json` 明确保留该例外。
 
 T21通过本轮有限真实App回归；没有恢复睡眠／资源专项或扩展极端异常矩阵。T22候选打包及最终交付文档继续执行。
+
+## T22 本地候选交付（已完成）
+
+复用正式 `Scripts/package-app.sh` 打包实际验收的 `.build/Ferry Plus.app`，没有再次改变业务源码或生成另一构建。版本3.1、build 1、arm64，应用标识与固定证书签名延续3.0；本机Applications稳定版仍为3.0。
+
+| 产物 | 结果 |
+| --- | --- |
+| App | `.build/Ferry Plus.app`，11760 KiB（约11.5 MiB），3.0为11532 KiB，增加228 KiB |
+| ZIP | `.build/dist/Ferry-Plus-3.1-arm64.zip`，3818127字节（约3.6 MiB） |
+| SHA文件 | `.build/dist/Ferry-Plus-3.1-arm64.zip.sha256` |
+| ZIP SHA-256 | `b96cc05b317e1e693f99ca8a60d6829e13f7b86041ecdd45ccebcc157a1362e8` |
+| 实测二进制SHA-256 | `0cbb36d6d98c83a262b610bef007f82d46998772499663321fe5148293995a72` |
+
+实际解包后，8条目录／文件清单（4个文件）逐项核对内容、权限和符号链接，全部相同；解包签名严格验证通过，二进制SHA与GUI候选身份一致。验证用解包App副本随后移入废纸篓，保留正式候选App、ZIP、SHA及比对清单。证据 `.build/v31-delivery/package-validation.json`、`bundle-inventory.json`。README、更新记录、功能／技术／任务／审查文档均已同步本地候选状态；没有推送、创建3.1 Release或替换本机稳定版。
+
+实际收益以Review表的局部计数为准。状态／接口整理主要减少维护成本，未宣称包体缩小或未经测量的CPU／内存降低；包体增加约2%。资源所有权与有界处理已完成技术审查，未重新开展已取消的生命周期及最终资源专项。
