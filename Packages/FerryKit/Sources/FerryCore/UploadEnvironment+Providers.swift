@@ -32,9 +32,7 @@ extension UploadEnvironment {
             let entries = try await client.listDirectory(path).map(BaiduNetdisk.convert)
             try await checkSession()
             return entries
-        }, createDirectory: { parent, name in
-            try await createDirectory(parent, name, { _ in })
-        }, resolve: { reference, size in
+        }, createDirectory: createDirectory, resolve: { reference, size in
             try await checkSession()
             guard case .baidu(let path, let fsID) = reference, fsID > 0 else {
                 throw UploadDestinationError.remoteResultUnconfirmed
@@ -46,8 +44,7 @@ extension UploadEnvironment {
             let link = try await client.downloadLink(for: path)
             try await checkSession()
             return ResolvedURL(url: link.url, headers: link.headers)
-        }, createDirectoryWithCheckpoint: createDirectory,
-           replacement: try BaiduUploadReplacementDestination(client: client, account: account, checkSession: checkSession))
+        }, replacement: try BaiduUploadReplacementDestination(client: client, account: account, checkSession: checkSession))
     }
 
     /// 绑定当前夸克会话；合并未知时只按预分配 fid 查询，不能认领同名文件或重新合并。
@@ -101,9 +98,7 @@ extension UploadEnvironment {
             let entries = try await client.listDirectory(parentFID: quarkFID(reference)).map { QuarkNetdisk.convert($0) }
             try await checkSession()
             return entries
-        }, createDirectory: { parent, name in
-            try await createDirectory(parent, name, { _ in })
-        }, resolve: { reference, size in
+        }, createDirectory: createDirectory, resolve: { reference, size in
             try await checkSession()
             let link = try await client.download(fid: quarkFID(reference))
             guard link.size == nil || link.size == size else { throw UploadDestinationError.remoteResultUnconfirmed }
@@ -116,7 +111,7 @@ extension UploadEnvironment {
         }, releasePreparation: { prepared in
             guard prepared.account == account else { throw UploadDestinationError.otherAccount }
             if let reference = prepared.secretReference { try await secrets.delete(reference: reference) }
-        }, inspectPreparedResult: inspectPreparedResult, createDirectoryWithCheckpoint: createDirectory)
+        }, inspectPreparedResult: inspectPreparedResult)
     }
 
     private static func validateName(_ name: String) throws {

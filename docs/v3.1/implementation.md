@@ -29,3 +29,9 @@
 Int64.fileSizeText仅封装原ByteCountFormatter(.file)，替换7处同义表达式。保留下载.byteCount、上传rounded与下载截断、两种时间宽度差异。实际旧新表达式提取的179样例一致，来源与报告在 `.build/v31-formatting-validation/`。没有宣称格式统一后运行更快。
 
 本项纳入同一次源码冻结后的SDK26.5 Release App编译／固定签名及独立SDK27包测试，307项通过；日志 `.build/v31-wave1-{app-build,package-tests}.log`。主代理复核差异后，用实际App PID43467完成双账号、上传入口及两家上传／下载根目录加载，取消后任务仍0；本轮无云端写入，61份原用户JSON摘要无变化。界面及数据对照见 `.build/v31-wave1-ui/`。当前产品版本暂保留3.0，表示3.1优化候选的早期构建，未替换 `/Applications` 稳定版，最终3.1全功能验收由T21完成。
+
+## T08 收敛建目录回执接口
+
+仅保留必需的(parent,name,onCreated)建目录closure，普通调用传空回调，两个正式工厂全部迁移；删除可选旧字段及返回后补回调fallback。Coordinator及AppModel业务方法签名不变。隔离实际SDK/Core的23项合同检查通过，包括前置失败POST0、准确回执先持久化、真实请求失败保留pending及检查点失败不重发；报告 `.build/v31-t08/`。本轮GUI只验证正常入口／目录加载，真实创建仍留最终T21，不冒称已经实际写云端。
+
+本项纳入同一次源码冻结后的SDK26.5 Release App编译／固定签名及独立SDK27包测试，307项通过；日志 `.build/v31-wave1-{app-build,package-tests}.log`。主代理复核差异后，用实际App PID43467完成双账号、上传入口及两家上传／下载根目录加载，取消后任务仍0；本轮无云端写入，61份原用户JSON摘要无变化。界面及数据对照见 `.build/v31-wave1-ui/`。当前产品版本暂保留3.0，表示3.1优化候选的早期构建，未替换 `/Applications` 稳定版，最终3.1全功能验收由T21完成。
