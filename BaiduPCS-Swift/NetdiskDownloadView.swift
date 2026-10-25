@@ -30,21 +30,8 @@ struct NetdiskDownloadView: View {
     @State private var selectedFolder: DownloadFolder?
     @State private var folderError: String?
     @State private var showsIntegrity = false
-    @State private var mode: IntegrityMode = .none
-    @State private var algorithm: IntegrityAlgorithm = .sha256
-    @State private var digest = ""
-    @State private var candidates: [IntegrityRecord] = []
-    @State private var candidateID: UUID?
-    @State private var candidateGeneration = 0
-    @State private var candidateError: String?
-    @State private var isLoadingCandidates = false
-    @State private var manifest: IntegrityManifest?
-    @State private var manifestName: String?
-    @State private var isImportPresented = false
-    @State private var importRequest: ImportRequest?
-    @State private var isImporting = false
+    @State private var integrity = IntegritySelection()
     @State private var submission: Submission?
-    @State private var integrityError: String?
     @State private var pendingDeletion: Deletion?
     @State private var deletion: Deletion?
     @State private var deletionResult: String?
@@ -71,6 +58,48 @@ struct NetdiskDownloadView: View {
         var title: String {
             switch self { case .none: "不指定"; case .manual: "输入摘要"; case .history: "历史校验记录"; case .manifest: "JSON 清单" }
         }
+    }
+    /// 各模式保留自己的草稿；切换模式只取消不再适用的选择和异步导入。
+    private struct IntegritySelection {
+        var mode: IntegrityMode = .none
+        var manual = ManualDraft()
+        var history = HistoryDraft()
+        var manifest = ManifestDraft()
+        var error: String?
+
+        mutating func modeChanged() {
+            error = nil
+            if mode != .history { history.selectedID = nil }
+            if mode != .manifest { manifest.request = nil; manifest.isImporting = false }
+        }
+
+        /// 换文件或浏览上下文时清除校验依据，沿用算法偏好及候选刷新代次。
+        mutating func reset() {
+            mode = .none; manual.digest = ""
+            history.selectedID = nil; history.candidates = []; history.error = nil
+            manifest = ManifestDraft(); error = nil
+        }
+    }
+    private struct ManualDraft {
+        var algorithm: IntegrityAlgorithm = .sha256
+        var digest = ""
+    }
+    private struct HistoryDraft {
+        var candidates: [IntegrityRecord] = []
+        var selectedID: UUID?
+        var generation = 0
+        var error: String?
+        var isLoading = false
+    }
+    private struct ManifestDraft {
+        var imported: ImportedManifest?
+        var isPresented = false
+        var request: ImportRequest?
+        var isImporting = false
+    }
+    private struct ImportedManifest {
+        let document: IntegrityManifest
+        let name: String
     }
     private struct CandidateRequest: Hashable {
         let account: AccountKey
@@ -155,9 +184,9 @@ struct NetdiskDownloadView: View {
             get: { deletionResult != nil }, set: { if !$0 { deletionResult = nil } }
         )) { Button("好") { deletionResult = nil } } message: { Text(deletionResult ?? "") }
         .task(id: candidate) { await loadCandidates(candidate) }
-        .task(id: importRequest?.id) {
-            guard let importRequest else { return }
-            await importManifest(importRequest)
+        .task(id: integrity.manifest.request?.id) {
+            guard let request = integrity.manifest.request else { return }
+            await importManifest(request)
         }
         .task(id: submission?.id) {
             guard let submission else { return }
@@ -166,18 +195,14 @@ struct NetdiskDownloadView: View {
         .onChange(of: sessionIdentity) { resetTree() }
         .onChange(of: provider) { resetTree() }
         .onChange(of: tree?.selection) { resetIntegrity() }
-        .onChange(of: mode) {
-            integrityError = nil
-            if mode != .history { candidateID = nil }
-            if mode != .manifest { importRequest = nil; isImporting = false }
-        }
-        .fileImporter(isPresented: $isImportPresented, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
+        .onChange(of: integrity.mode) { integrity.modeChanged() }
+        .fileImporter(isPresented: $integrity.manifest.isPresented, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
             switch result {
             case .success(let urls):
-                guard mode == .manifest, !isSubmitting, let url = urls.first else { return }
-                integrityError = nil; isImporting = true; importRequest = .init(url: url)
+                guard integrity.mode == .manifest, !isSubmitting, let url = urls.first else { return }
+                integrity.error = nil; integrity.manifest.isImporting = true; integrity.manifest.request = .init(url: url)
             case .failure(let error):
-                if (error as? CocoaError)?.code != .userCancelled { integrityError = error.localizedDescription }
+                if (error as? CocoaError)?.code != .userCancelled { integrity.error = error.localizedDescription }
             }
         }
     }
@@ -191,9 +216,9 @@ struct NetdiskDownloadView: View {
         return entries.count == 1 && !entries[0].isDirectory ? entries[0] : nil
     }
     private var candidateRequest: CandidateRequest? {
-        guard mode == .history, let file = singleFile, let account = treeAccount, let session = treeSession,
+        guard integrity.mode == .history, let file = singleFile, let account = treeAccount, let session = treeSession,
               model.accountKey(for: provider) == account, sessionIdentity == session else { return nil }
-        return .init(account: account, reference: file.reference, size: file.size, session: session, generation: generation, reload: candidateGeneration,
+        return .init(account: account, reference: file.reference, size: file.size, session: session, generation: generation, reload: integrity.history.generation,
                      integrityRevision: model.integrityRecordsRevision)
     }
 
@@ -307,7 +332,7 @@ struct NetdiskDownloadView: View {
             if let tree { FileSelectionSummary(entries: tree.selectedEntries) }
             integrityControls
             if let folderError { errorLabel(folderError) }
-            if let integrityError { errorLabel(integrityError) }
+            if let error = integrity.error { errorLabel(error) }
             HStack {
                 DownloadFolderPicker(selection: $selectedFolder, error: $folderError).disabled(isBusy)
                 Spacer()
@@ -315,7 +340,7 @@ struct NetdiskDownloadView: View {
                 Button("取消", role: .cancel) { dismiss() }.keyboardShortcut(.cancelAction).disabled(deletion != nil)
                 Button("下载", action: beginDownload)
                     .keyboardShortcut(.defaultAction)
-                    .disabled((tree?.selection.isEmpty ?? true) || isBusy || isImporting || folderError != nil)
+                    .disabled((tree?.selection.isEmpty ?? true) || isBusy || integrity.manifest.isImporting || folderError != nil)
             }
         }
     }
@@ -323,7 +348,7 @@ struct NetdiskDownloadView: View {
     private var integrityControls: some View {
         DisclosureGroup("内容校验", isExpanded: $showsIntegrity) {
             VStack(alignment: .leading, spacing: 8) {
-                Picker("校验依据", selection: $mode) {
+                Picker("校验依据", selection: $integrity.mode) {
                     Text(IntegrityMode.none.title).tag(IntegrityMode.none)
                     if singleFile != nil {
                         Text(IntegrityMode.manual.title).tag(IntegrityMode.manual)
@@ -331,7 +356,7 @@ struct NetdiskDownloadView: View {
                     }
                     Text(IntegrityMode.manifest.title).tag(IntegrityMode.manifest)
                 }.pickerStyle(.menu).fixedSize()
-                switch mode {
+                switch integrity.mode {
                 case .none:
                     Text("没有明确校验依据时，完成后显示“未验证源文件内容”。")
                         .font(.caption).foregroundStyle(.secondary)
@@ -347,11 +372,11 @@ struct NetdiskDownloadView: View {
 
     private var manualInput: some View {
         HStack {
-            Picker("算法", selection: $algorithm) {
+            Picker("算法", selection: $integrity.manual.algorithm) {
                 Text("SHA-256").tag(IntegrityAlgorithm.sha256)
                 Text("MD5").tag(IntegrityAlgorithm.md5)
             }.labelsHidden().frame(width: 110)
-            TextField(algorithm == .sha256 ? "64 位十六进制 SHA-256" : "32 位十六进制 MD5", text: $digest)
+            TextField(integrity.manual.algorithm == .sha256 ? "64 位十六进制 SHA-256" : "32 位十六进制 MD5", text: $integrity.manual.digest)
                 .textFieldStyle(.roundedBorder).font(.system(.body, design: .monospaced))
         }
     }
@@ -359,22 +384,22 @@ struct NetdiskDownloadView: View {
     @ViewBuilder private var historyInput: some View {
         Text("历史校验记录仅作为候选。请明确选择期望版本；不能据此认定云端内容仍未变化。")
             .font(.caption).foregroundStyle(.secondary)
-        if isLoadingCandidates { ProgressView("正在读取候选…").controlSize(.small) }
-        else if let candidateError {
-            errorLabel(candidateError)
-            Button("重新读取候选") { candidateGeneration += 1 }
-        } else if candidates.isEmpty { Text("没有与账号、文件身份及大小匹配的已验证校验记录。").font(.caption).foregroundStyle(.secondary) }
+        if integrity.history.isLoading { ProgressView("正在读取候选…").controlSize(.small) }
+        else if let error = integrity.history.error {
+            errorLabel(error)
+            Button("重新读取候选") { integrity.history.generation += 1 }
+        } else if integrity.history.candidates.isEmpty { Text("没有与账号、文件身份及大小匹配的已验证校验记录。").font(.caption).foregroundStyle(.secondary) }
         else {
-            Picker("历史版本", selection: $candidateID) {
+            Picker("历史版本", selection: $integrity.history.selectedID) {
                 Text("请选择期望版本").tag(UUID?.none)
-                ForEach(candidates) { record in
+                ForEach(integrity.history.candidates) { record in
                     if let expectation = record.expectation {
                         Text("\(record.verifiedAt?.formatted(date: .abbreviated, time: .shortened) ?? "未知时间") · \(expectation.algorithm == .sha256 ? "SHA-256" : "MD5") · \(expectation.origin.displayName) · \(expectation.digest.prefix(12))…")
                             .tag(Optional(record.id))
                     }
                 }
             }
-            if let selected = candidates.first(where: { $0.id == candidateID }), let expectation = selected.expectation {
+            if let selected = integrity.history.candidates.first(where: { $0.id == integrity.history.selectedID }), let expectation = selected.expectation {
                 Text(expectation.digest).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
             }
         }
@@ -383,11 +408,11 @@ struct NetdiskDownloadView: View {
     private var manifestInput: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Button("导入 JSON 清单…") { isImportPresented = true }.disabled(isImporting)
-                if isImporting { ProgressView().controlSize(.small) }
-                if let manifest {
-                    Text("\(manifestName ?? "JSON 清单") · \(manifest.entries.count) 项").lineLimit(1).truncationMode(.middle)
-                    Button("清除") { self.manifest = nil; manifestName = nil; mode = .none }
+                Button("导入 JSON 清单…") { integrity.manifest.isPresented = true }.disabled(integrity.manifest.isImporting)
+                if integrity.manifest.isImporting { ProgressView().controlSize(.small) }
+                if let imported = integrity.manifest.imported {
+                    Text("\(imported.name) · \(imported.document.entries.count) 项").lineLimit(1).truncationMode(.middle)
+                    Button("清除") { integrity.manifest.imported = nil; integrity.mode = .none }
                 }
             }
             Text("最多 4 MiB、10000 项。按完整相对路径及大小匹配；未列出的文件保持未验证。")
@@ -400,10 +425,7 @@ struct NetdiskDownloadView: View {
         tree = nil; treeAccount = nil; treeSession = nil; errorMessage = nil
         resetIntegrity(); generation += 1
     }
-    private func resetIntegrity() {
-        mode = .none; digest = ""; candidateID = nil; candidates = []; candidateError = nil
-        manifest = nil; manifestName = nil; importRequest = nil; isImportPresented = false; isImporting = false; integrityError = nil
-    }
+    private func resetIntegrity() { integrity.reset() }
 
     /// 文件树绑定准确账号与客户端实例，重登录及代理替换后旧会话不能发布目录。
     private func load() async {
@@ -446,17 +468,17 @@ struct NetdiskDownloadView: View {
     }
 
     private func loadCandidates(_ request: CandidateRequest?) async {
-        guard let request else { candidates = []; isLoadingCandidates = false; return }
-        isLoadingCandidates = true; candidateError = nil
+        guard let request else { integrity.history.candidates = []; integrity.history.isLoading = false; return }
+        integrity.history.isLoading = true; integrity.history.error = nil
         do {
             try Task.checkCancellation()
             let result = try await model.integrityStore.candidates(account: request.account, reference: request.reference, size: request.size)
             try Task.checkCancellation()
             guard candidateRequest == request else { return }
-            candidates = result; isLoadingCandidates = false
+            integrity.history.candidates = result; integrity.history.isLoading = false
         } catch {
             guard !Task.isCancelled, candidateRequest == request else { return }
-            candidateError = error.localizedDescription; isLoadingCandidates = false
+            integrity.history.error = error.localizedDescription; integrity.history.isLoading = false
         }
     }
 
@@ -464,44 +486,44 @@ struct NetdiskDownloadView: View {
         do {
             let manifest = try await IntegrityManifestDocument.read(at: request.url)
             try Task.checkCancellation()
-            guard importRequest?.id == request.id, mode == .manifest else { return }
-            self.manifest = manifest; manifestName = request.url.lastPathComponent; isImporting = false
+            guard integrity.manifest.request?.id == request.id, integrity.mode == .manifest else { return }
+            integrity.manifest.imported = .init(document: manifest, name: request.url.lastPathComponent); integrity.manifest.isImporting = false
         } catch {
-            guard !Task.isCancelled, importRequest?.id == request.id else { return }
-            manifest = nil; manifestName = nil; integrityError = error.localizedDescription; isImporting = false
+            guard !Task.isCancelled, integrity.manifest.request?.id == request.id else { return }
+            integrity.manifest.imported = nil; integrity.error = error.localizedDescription; integrity.manifest.isImporting = false
         }
     }
 
     /// 确认前检查摘要格式及显式历史选择，错误输入不会触发目录枚举或创建任务。
     private func beginDownload() {
-        guard !isBusy, !isImporting, !selectedEntries.isEmpty, let key = treeAccount, let session = treeSession,
+        guard !isBusy, !integrity.manifest.isImporting, !selectedEntries.isEmpty, let key = treeAccount, let session = treeSession,
               key == model.accountKey(for: provider), session == sessionIdentity else { return }
         do {
             let choice: Choice
-            switch mode {
+            switch integrity.mode {
             case .none: choice = .none
             case .manual:
                 guard let file = singleFile else { throw UploadRecordError.invalid("手输摘要只适用于一个文件") }
-                let value = digest.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-                let length = algorithm == .sha256 ? 64 : 32
+                let value = integrity.manual.digest.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+                let length = integrity.manual.algorithm == .sha256 ? 64 : 32
                 guard value.utf8.count == length, value.utf8.allSatisfy({ (48...57).contains($0) || (97...102).contains($0) }) else {
-                    throw UploadRecordError.invalid("\(algorithm == .sha256 ? "SHA-256" : "MD5") 应为 \(length) 位十六进制摘要")
+                    throw UploadRecordError.invalid("\(integrity.manual.algorithm == .sha256 ? "SHA-256" : "MD5") 应为 \(length) 位十六进制摘要")
                 }
-                _ = try IntegrityExpectation(algorithm: algorithm, digest: value, origin: .userProvided, size: file.size, reference: file.reference)
-                choice = .manual(algorithm, value)
+                _ = try IntegrityExpectation(algorithm: integrity.manual.algorithm, digest: value, origin: .userProvided, size: file.size, reference: file.reference)
+                choice = .manual(integrity.manual.algorithm, value)
             case .history:
-                guard let candidateID, let record = candidates.first(where: { $0.id == candidateID }) else {
+                guard let candidateID = integrity.history.selectedID, let record = integrity.history.candidates.first(where: { $0.id == candidateID }) else {
                     throw UploadRecordError.invalid("请明确选择要比较的历史校验基准")
                 }
                 choice = .history(record)
             case .manifest:
-                guard let manifest else { throw UploadRecordError.invalid("请先导入校验清单") }
+                guard let manifest = integrity.manifest.imported?.document else { throw UploadRecordError.invalid("请先导入校验清单") }
                 choice = .manifest(manifest)
             }
-            integrityError = nil; isSubmitting = true
+            integrity.error = nil; isSubmitting = true
             submission = .init(entries: selectedEntries, account: key, session: session, generation: generation,
                                folder: selectedFolder, choice: choice)
-        } catch { integrityError = error.localizedDescription; showsIntegrity = true }
+        } catch { integrity.error = error.localizedDescription; showsIntegrity = true }
     }
 
     /// 清单只对本次冻结的远端文件作引用匹配；取消、换号或换会话后不创建任务。
@@ -545,7 +567,7 @@ struct NetdiskDownloadView: View {
             dismiss()
         } catch {
             guard !Task.isCancelled else { return }
-            integrityError = error.localizedDescription; showsIntegrity = true
+            integrity.error = error.localizedDescription; showsIntegrity = true
         }
     }
 
