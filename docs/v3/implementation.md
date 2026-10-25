@@ -696,3 +696,9 @@ T04／T05 按各自协议适配范围完成逐项核对，不与 T07／T09／T17
 修复覆盖阶段检查点反复将旧版本摘要的校验时间更新为当前时间的问题。发布状态新增可选的快照实际校验时间，仅在快照完整回读成功后设置；后续 claim、发布及取消检查点沿用此时间。旧状态缺少该字段仍可恢复，原独立摘要记录保持不变；不存在旧记录时不凭恢复时间补造已验证记录，后续真实回读再补齐。本次不改变完整回读次数及发布接口。
 
 当前 State／Publisher／IntegrityService 在 SDK26.5 私有目录重新编译，原 20 场景、74 断言通过；当前 replacementCheckpoint 方法全文提取，结合实际 IntegrityStore／磁盘 JSON 的独立 SDK27 harness 15 项断言通过，覆盖四个后续阶段日期与记录不变、旧 JSON 兼容、原记录字节和修改时间不变、缺记录不造日期及新实际日期可保存。证据 `.build/replacement-publisher-validation/{timestamp-report.md,timestamp-result.txt,timestamp-source-hashes.json}`，原发布状态机回归见同目录 `result.txt`。正式 Release App 构建及独立 SDK27 既有包测试 307 项通过，日志 `.build/v3-snapshot-time-{package-tests,app-build}.log`。父代理通过 Computer Use 核对实际 App PID18563，原 22 项任务保留，两家根目录均可加载并取消，没有要求重新登录。本项时间 harness 未操作真实账号或任务；上述回归不扩展为整个版本已验收。
+
+## 核对远端结果不隐式恢复上传
+
+移除会话过期结果核对中把批次改为排队的操作，并限制只有实际 worker 才能通过文件状态保存驱动批次执行阶段。停止后的核对仍保存准确远端引用、文件阶段与聚合计数；批次保持原执行意图，只有明确重试／继续才启动 worker。即使同批先确认一个对象、随后另一项核对失败，也不会因 defer 调度而发送其余排队文件。
+
+独立真实 Store／Coordinator／RangeReader 多文件检查，旧源码两种场景各三项失败并 exit1；仅移除显式排队赋值仍复现，证明共享 saveFile 阶段更新也必须受 worker 约束。最终 16 项检查通过，exit0、stderr0，验证成功核对和后项抛错都不启动 worker、不新增准备／合并、聚合不改回排队，显式重试仍只上传剩余项且不重传已找回对象，连接预算归零。证据 `.build/reconcile-query-only-validation/{report.md,red-result.txt,result.txt,source-hashes.json,final-production-hashes.json}`。运行仅涉及独立模拟服务和测试文件，没有 App／账号写入；不把此修复当作未知提交协议或整个 T07／T10 已完成。

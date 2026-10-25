@@ -368,7 +368,6 @@ public actor UploadCoordinator {
                 let parentPath = file.relativePath.split(separator: "/").dropLast().joined(separator: "/")
                 guard let parent = directories[parentPath] else { throw UploadCoordinatorError.missingParent(parentPath) }
                 try await recoverSessionResult(&file, parent: parent, environment: env)
-                if !job.cancellationRequested { jobs[id]!.phase = .queued }
             } else if file.commits.contains(where: { $0.status == .pending }) {
                 let parentPath = file.relativePath.split(separator: "/").dropLast().joined(separator: "/")
                 guard let parent = directories[parentPath] else { throw UploadCoordinatorError.missingParent(parentPath) }
@@ -1224,6 +1223,7 @@ public actor UploadCoordinator {
     }
 
     /// 文件状态先落盘，聚合随后保存；恢复时可从每文件检查点重建聚合。
+    /// 只有实际 worker 驱动批次阶段；停止后的核对仅保存检查点，继续由显式重试或恢复决定。
     private func saveFile(_ file: UploadFile) async throws {
         guard let job = jobs[file.jobID] else { throw UploadCoordinatorError.missingJob }
         do {
@@ -1234,7 +1234,7 @@ public actor UploadCoordinator {
             jobs[file.jobID]!.completedCount += (file.phase == .completed ? 1 : 0) - (previous.phase == .completed ? 1 : 0)
             jobs[file.jobID]!.failedCount += (file.phase == .failed ? 1 : 0) - (previous.phase == .failed ? 1 : 0)
             jobs[file.jobID]!.skippedCount += (file.phase == .skipped ? 1 : 0) - (previous.phase == .skipped ? 1 : 0)
-            if !jobs[file.jobID]!.isPaused && !jobs[file.jobID]!.cancellationRequested {
+            if workers[file.jobID] != nil, !jobs[file.jobID]!.isPaused && !jobs[file.jobID]!.cancellationRequested {
                 jobs[file.jobID]!.phase = file.phase.isTerminal ? .queued : file.phase
             }
             try await persistJob(file.jobID)
