@@ -59,3 +59,7 @@ Int64.fileSizeText仅封装原ByteCountFormatter(.file)，替换7处同义表达
 产品版本仅定义在Version.xcconfig，当前保留3.0；本机与CI读取相同脚本，Xcode两配置引用相同定义。CI tag不符明确失败，签名／bundle／构建号覆盖不变。26项隔离检查通过；工程plutil与脚本语法通过。真实本机固定签名Release构建通过；本机没有Xcode，未声称实际CI或Xcode构建通过。证据 .build/v31-t18/。
 
 本批源码冻结后 SDK26.5 Release App构建／固定签名通过，独立SDK27既有包测试307项通过；日志 .build/v31-wave2-{app-build,package-tests}.log。实际运行PID48872，双账号保留，无新凭据提示，用户61份JSON摘要不变；GUI记录 .build/v31-wave2-ui/。未替换Applications稳定版，最终3.1集成验收由T20／T21完成。
+
+## T19 CI复用打包入口
+
+CI保留预期版本核对，改调现有package-app.sh，并将脚本实际ZIP／SHA路径传给Publish。Xcode构建及签名方式未变；本机打包脚本无改动。17项隔离检查通过，含真实固定签名arm64 App打包／SHA／解包逐文件一致、错误bundle／真实x86_64／损坏签名拒绝，合法ZIP不受失败输入影响。Publish使用gh替身验证参数，不触发远端发布。主代理已复核workflow差异、脚本输出契约及报告；证据 .build/v31-t19/。本项只有CI流程改动，无需额外App编译；不把本地CI shell验证冒称GitHub Actions运行通过。

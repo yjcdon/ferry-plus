@@ -46,11 +46,13 @@ jobs:
       - name: Verify and package
         run: |
           app="build/Build/Products/Release/Ferry Plus.app"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$app/Contents/Info.plist")" = "io.github.yjcdon.FerryPlus"
-          test "$(lipo -archs "$app/Contents/MacOS/Ferry Plus")" = "arm64"
-          codesign --verify --strict "$app"
-          ditto -c -k --keepParent "$app" "Ferry-Plus-$VERSION-arm64.zip"
-          shasum -a 256 "Ferry-Plus-$VERSION-arm64.zip" | tee "Ferry-Plus-$VERSION-arm64.zip.sha256"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$VERSION"
+          artifacts="$(bash Scripts/package-app.sh "$app")"
+          {
+            IFS= read -r archive
+            IFS= read -r checksum
+          } <<< "$artifacts"
+          printf 'ARCHIVE_PATH=%s\nCHECKSUM_PATH=%s\n' "$archive" "$checksum" >> "$GITHUB_ENV"
 
       - name: Publish
         env:
@@ -58,5 +60,5 @@ jobs:
         run: |
           prerelease=""
           case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" "Ferry-Plus-$VERSION-arm64.zip" "Ferry-Plus-$VERSION-arm64.zip.sha256" \
+          gh release create "$GITHUB_REF_NAME" "$ARCHIVE_PATH" "$CHECKSUM_PATH" \
             --title "Ferry Plus $VERSION" --notes-file notes.md $prerelease
