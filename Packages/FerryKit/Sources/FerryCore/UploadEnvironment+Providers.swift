@@ -38,7 +38,8 @@ extension UploadEnvironment {
             let link = try await client.downloadLink(for: path)
             try await checkSession()
             return ResolvedURL(url: link.url, headers: link.headers)
-        }, createDirectoryWithCheckpoint: createDirectory)
+        }, createDirectoryWithCheckpoint: createDirectory,
+           replacement: try BaiduUploadReplacementDestination(client: client, account: account, checkSession: checkSession))
     }
 
     /// 绑定当前夸克会话；合并未知时只按预分配 fid 查询，不能认领同名文件或重新合并。

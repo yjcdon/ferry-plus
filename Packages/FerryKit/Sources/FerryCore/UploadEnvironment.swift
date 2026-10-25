@@ -17,6 +17,8 @@ public struct UploadEnvironment: Sendable {
     /// 查询原预分配对象；未找到只表示结果未确认，不表示对象权威不存在。
     let inspectPreparedResult: @Sendable (PreparedUpload, RemoteReference) async throws -> UploadCommitInspection
     let releasePreparation: @Sendable (PreparedUpload) async throws -> Void
+    /// 只有已具备独立快照、路径认领和不覆盖发布能力的网盘才提供此策略。
+    let replacement: (any UploadReplacementDestination)?
 
     /// 在绑定账号的准确父目录下新建目录；失败可能已产生远端副作用，调用方不得自动重试。
     public func makeDirectory(parent: RemoteReference, name: String) async throws -> RemoteReference {
@@ -40,12 +42,14 @@ public struct UploadEnvironment: Sendable {
                 inspectCommit: @escaping @Sendable (UploadCommit, UploadFile, RemoteReference) async throws -> UploadCommitInspection = { _, _, _ in .unconfirmed },
                 releasePreparation: @escaping @Sendable (PreparedUpload) async throws -> Void = { _ in },
                 inspectPreparedResult: @escaping @Sendable (PreparedUpload, RemoteReference) async throws -> UploadCommitInspection = { _, _ in .unconfirmed },
-                createDirectoryWithCheckpoint: (@Sendable (RemoteReference, String, @Sendable (RemoteReference) async throws -> Void) async throws -> RemoteReference)? = nil) {
+                createDirectoryWithCheckpoint: (@Sendable (RemoteReference, String, @Sendable (RemoteReference) async throws -> Void) async throws -> RemoteReference)? = nil,
+                replacement: (any UploadReplacementDestination)? = nil) {
         self.destination = destination; self.listDirectory = listDirectory; self.createDirectory = createDirectory
         self.resolve = resolve; self.inspectCommit = inspectCommit
         self.releasePreparation = releasePreparation
         self.inspectPreparedResult = inspectPreparedResult
         self.createDirectoryWithCheckpoint = createDirectoryWithCheckpoint
+        self.replacement = replacement
     }
 }
 

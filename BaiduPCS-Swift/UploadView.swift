@@ -141,7 +141,10 @@ struct UploadView: View {
             guard let submission else { return }
             await submit(submission)
         }
-        .onChange(of: provider) { resetDirectory() }
+        .onChange(of: provider) {
+            if provider != .baidu, policy == .replace { policy = .keepBoth }
+            resetDirectory()
+        }
         .onChange(of: sessionIdentity) { resetDirectory() }
         .onDisappear { panelPresenter.cancel() }
     }
@@ -279,12 +282,13 @@ struct UploadView: View {
                 Picker("同名文件", selection: $policy) {
                     Text("保留两份").tag(UploadConflictPolicy.keepBoth)
                     Text("跳过").tag(UploadConflictPolicy.skip)
-                    Text("覆盖（暂不可用）").tag(UploadConflictPolicy.replace).disabled(true)
+                    Text(provider == .baidu ? "安全覆盖（保留旧版本）" : "覆盖（暂不可用）")
+                        .tag(UploadConflictPolicy.replace).disabled(provider != .baidu)
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
                 .fixedSize()
-                .help("覆盖须先验证网盘的并发保护和旧版本恢复能力，目前尚未开放。")
+                .help(provider == .baidu ? "新文件校验后再发布；并发冲突时停止覆盖，旧版本另存为云端备份。" : "夸克的安全覆盖能力尚未验证。")
                 .disabled(isSubmitting)
                 Spacer()
             }
@@ -293,6 +297,10 @@ struct UploadView: View {
                 .foregroundStyle(.secondary)
                 .lineLimit(2)
                 .textSelection(.enabled)
+            if policy == .replace {
+                Text("同名文件会保留独立云端旧版本。合并文件夹时，备份空间会逐项检查；文件与文件夹的类型冲突不覆盖。")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             if let directoryNotice {
                 Text(directoryNotice).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             }
@@ -332,7 +340,7 @@ struct UploadView: View {
         return "/" + trail.map { ($0.hasUnknownAncestors ? "…/" : "") + $0.name }.joined(separator: "/")
     }
     private var canSubmit: Bool {
-        canUseDirectory && !files.isEmpty && policy != .replace && !isCheckingPreflight && preflight?.canUpload == true
+        canUseDirectory && !files.isEmpty && (policy != .replace || provider == .baidu) && !isCheckingPreflight && preflight?.canUpload == true
     }
     private var preflightRequest: PreflightRequest? {
         let directory = currentDirectory
@@ -357,8 +365,10 @@ struct UploadView: View {
                         Text("单文件大小上限未知，以服务端结果为准。")
                         Text("同名项目 \(result.conflictCount) · 类型冲突 \(result.typeConflictCount) · 合并文件夹 \(result.mergingDirectoryCount)")
                         Text("这里只预览当前目录的根项目；子目录同名项在执行时逐项检查。预览不会锁定容量或目标。")
-                        if result.requiredLowerBound != result.requiredUpperBound {
-                            Text("跳过策略下所需空间尚不确定，最多需 \(ByteCountFormatter.string(fromByteCount: result.requiredUpperBound, countStyle: .file))。")
+                        if let upper = result.requiredUpperBound, result.requiredLowerBound != upper {
+                            Text("跳过策略下所需空间尚不确定，最多需 \(ByteCountFormatter.string(fromByteCount: upper, countStyle: .file))。")
+                        } else if result.requiredUpperBound == nil && !result.spaceEstimateOverflow {
+                            Text("文件夹内的旧版本备份空间尚未计入，将在执行时逐项检查。")
                         }
                         if result.summary.issueCount > 0 {
                             Text("发现 \(result.summary.issueCount) 个源问题；请处理后重新添加或刷新。")
@@ -371,7 +381,8 @@ struct UploadView: View {
                         .font(.caption).foregroundStyle(.secondary)
                 }.frame(maxHeight: 120)
             }
-            if result.insufficientSpace { errorLabel("目标剩余容量不足，请清理空间或减少本次上传内容。") }
+            if result.spaceEstimateOverflow { errorLabel("所选文件和备份所需容量超出可计算范围，请减少本次上传内容。") }
+            else if result.insufficientSpace { errorLabel("目标剩余容量不足，请清理空间或减少本次上传内容。") }
             if result.summary.issueCount > 0 { errorLabel("所选源文件存在无法上传的项目，请展开检查。") }
         }
     }

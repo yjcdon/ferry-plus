@@ -94,6 +94,47 @@ extension BaiduClient {
         }
     }
 
+    /// 将当前路径绑定的文件改为唯一名称，同名时明确失败；只确认本次服务回执，身份与内容由调用方另行核对。
+    public func renameWithoutReplacing(path: String, newName: String) async throws {
+        guard BaiduUploadSession.validPath(path), Self.validSingleName(newName) else { throw BaiduError.invalidFileName }
+        try await manageWithoutReplacing(operation: "rename", path: path, destinationDirectory: nil, newName: newName)
+    }
+
+    /// 创建独立旧版本快照，同名时不覆盖；不在写入后追加列表查询，以免把查询失败误报为复制未发生。
+    public func copyWithoutReplacing(path: String, destinationDirectory: String, newName: String) async throws {
+        guard BaiduUploadSession.validPath(path), Self.validSingleName(newName),
+              destinationDirectory == "/" || BaiduUploadSession.validPath(destinationDirectory) else { throw BaiduError.invalidFileName }
+        try await manageWithoutReplacing(operation: "copy", path: path, destinationDirectory: destinationDirectory, newName: newName)
+    }
+
+    /// 单文件管理请求只发送一次；批量外层错误不能遮住该文件明确的同名冲突或缺失回执。
+    private func manageWithoutReplacing(operation: String, path: String, destinationDirectory: String?, newName: String) async throws {
+        let account = try await validate()
+        var item = ["path": path, "newname": newName]
+        if let destinationDirectory { item["dest"] = destinationDirectory; item["ondup"] = "fail" }
+        let filelist = String(decoding: try JSONEncoder().encode([item]), as: UTF8.self)
+        let url = URLEncoding.url(Host.pan + "/api/filemanager", [
+            ("opera", operation), ("app_id", Host.panAppID), ("clienttype", "0"), ("web", "1"), ("bdstoken", account.bdstoken),
+        ])
+        let request = BaiduRequest.form([("async", "0"), ("ondup", "fail"), ("filelist", filelist)],
+            url: url, endpoint: .pcsFile, cookies: cookies(),
+            headers: ["User-Agent": UserAgent.netdisk, "Referer": Host.pan + "/"])
+        let (json, response) = try await json(request)
+        guard (200..<300).contains(response.statusCode) else { throw BaiduError.httpStatus(response.statusCode) }
+        guard let outer = json["errno"].int else { throw BaiduError.invalidResponse }
+        let message = json["show_msg"].string ?? json["errmsg"].string
+        if outer != 0, outer != 12 { throw BaiduError(code: outer, message: message, endpoint: .pcsFile) }
+        guard json["info"].array.count == 1, let code = json["info"][0]["errno"].int,
+              let actual = json["info"][0]["path"].string,
+              actual.utf8.elementsEqual(path.utf8) else { throw BaiduError.invalidResponse }
+        if code != 0 { throw BaiduError(code: code, message: json["info"][0]["errmsg"].string ?? message, endpoint: .pcsFile) }
+        guard outer == 0 else { throw BaiduError(code: outer, message: message, endpoint: .pcsFile) }
+    }
+
+    private static func validSingleName(_ name: String) -> Bool {
+        !name.isEmpty && name != "." && name != ".." && !name.contains("/") && !name.contains("\0")
+    }
+
     static func pathListJSON(_ paths: [String]) throws -> String {
         struct Item: Encodable { let path: String }
         struct List: Encodable { let list: [Item] }

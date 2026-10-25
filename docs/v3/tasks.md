@@ -107,6 +107,8 @@
 
   **完成标准：** 两家分别证明替换具备并发保护且旧内容可恢复，不能以可恢复旧版本代替并发保护；原目标在执行期间变化不会被误覆盖；不使用先删后传；新对象身份改变时重新建立或验证校验关联。安全能力不足为发布阻断，不允许仅隐藏覆盖选项就勾选完成。
 
+  **百度增量已实现：** server copy 独立旧字节快照、路径 claim 后准确 ID／SHA 核对、no-replace 发布与恢复已接入正式队列及上传界面。四种真实服务调度、74 项发布器和 52 项正式 Coordinator 检查通过；实际 App A→B 覆盖完成，再下载最终 B、独立 A 快照及 claim A，三份 SHA／长度匹配原始基准。移除测试任务后旧版本摘要和原名仍独立保留。19 项容量预览检查及 307 项既有包测试通过。证据见 `.build/v3-overwrite-claim-probe/`、`replacement-{publisher,coordinator}-validation/`、`ui-safe-replacement/`。夸克仍需等价源绑定保护，双网盘完整 T09 不勾选。
+
 - [ ] **V3-T10 实现跨阶段恢复和部分失败重试**
 
   **依赖：** V3-T06、V3-T07、V3-T08、V3-T09。**覆盖：** V3-F04、V3-F09、V3-F10、V3-F11、V3-F14、V3-F15。
@@ -213,7 +215,7 @@
 
   **完成标准：** 实测无整文件缓冲、完整回读副本、持续空闲轮询或残留 worker；体积增长有明确来源并符合轻量应用目标。ZIP 内 App 与已验收 App 一致；功能覆盖和阻断项复核完成，才可标记待发布。
 
-  **本地产物子集：** 已增加现有 App 的 arm64／签名校验打包脚本，当前验收候选 ZIP 约 3.49 MiB，App 约 10.88 MiB；解包后全部 4 个文件摘要与实际验收 App 相同。短空闲观察 CPU 为 0%、RSS 稳定；`leaks` 的工具栏辅助功能分配报告已有查询次数对照及创建栈，引用保留机制尚未证明，不能据此确认资源验收通过或交付完成。证据 `.build/v3-package-validation/result.json`、`.build/v3-current-resource-validation/report.json`、`.build/v3-accessibility-leak-causal/report.md`。T19 保持未完成。
+  **本地产物子集：** 已增加现有 App 的 arm64／签名校验打包脚本，百度安全覆盖候选 ZIP 约 3.58 MiB，App 约 11.22 MiB；解包后全部 4 个文件摘要与实际验收 App 相同。早先候选的短空闲观察 CPU 为 0%、RSS 稳定，不代替本次最终混合负载复测；`leaks` 的工具栏辅助功能分配报告已有查询次数对照及创建栈，引用保留机制尚未证明，不能据此确认资源验收通过或交付完成。证据 `.build/v3-package-validation/result.json`、`.build/v3-current-resource-validation/report.json`、`.build/v3-accessibility-leak-causal/report.md`。T19 保持未完成。
 
   **一次性查询补充：** 同一普通 App 中，一次性辅助进程仅查询上传工具栏按钮的动作名称，退出后每次仍增加 6 个分配、288 字节；普通属性查询 10 次不增加。已排除必须由常驻 CUA 客户端保留才能复现的假设，仍需解决目标 App 内的动作对象保留；不以系统类型名认定无害。详见执行记录“工具栏动作查询的独立进程对照”。
 

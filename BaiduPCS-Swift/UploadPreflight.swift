@@ -24,8 +24,9 @@ nonisolated struct UploadPreflightResult: Sendable {
     let typeConflictCount: Int
     let mergingDirectoryCount: Int
     let requiredLowerBound: Int64
-    let requiredUpperBound: Int64
-    var insufficientSpace: Bool { availableBytes.map { requiredLowerBound > $0 } ?? false }
+    let requiredUpperBound: Int64?
+    let spaceEstimateOverflow: Bool
+    var insufficientSpace: Bool { spaceEstimateOverflow || (availableBytes.map { requiredLowerBound > $0 } ?? false) }
     var canUpload: Bool { summary.issueCount == 0 && !insufficientSpace }
 }
 
@@ -46,22 +47,33 @@ nonisolated enum UploadPreflight {
         for entry in entries where names.contains(key(entry.name)) { matches[key(entry.name)] = entry }
         var conflicts = 0, types = 0, merged = 0
         var lower: Int64 = 0, upper: Int64 = 0
+        var upperKnown = true, overflow = false
+        func add(_ bytes: Int64, to value: inout Int64) {
+            let (sum, exceeded) = value.addingReportingOverflow(bytes)
+            if exceeded || bytes < 0 { overflow = true }
+            else { value = sum }
+        }
         for root in summary.roots {
             guard let entry = matches[key(root.name)] else {
-                lower += root.bytes; upper += root.bytes; continue
+                add(root.bytes, to: &lower); add(root.bytes, to: &upper); continue
             }
             if root.isDirectory && entry.isDirectory {
-                merged += 1; upper += root.bytes
-                if policy != .skip { lower += root.bytes }
+                merged += 1; add(root.bytes, to: &upper)
+                if policy != .skip { add(root.bytes, to: &lower) }
+                if policy == .replace { upperKnown = false }
             } else {
                 conflicts += 1
                 if root.isDirectory != entry.isDirectory { types += 1 }
-                if policy != .skip { lower += root.bytes; upper += root.bytes }
+                if policy != .skip { add(root.bytes, to: &lower); add(root.bytes, to: &upper) }
+                if policy == .replace && !root.isDirectory && !entry.isDirectory {
+                    add(entry.size, to: &lower); add(entry.size, to: &upper)
+                }
             }
         }
         return .init(summary: summary, availableBytes: availableBytes, capacityReason: capacityReason,
                      conflictCount: conflicts, typeConflictCount: types, mergingDirectoryCount: merged,
-                     requiredLowerBound: lower, requiredUpperBound: upper)
+                     requiredLowerBound: lower, requiredUpperBound: upperKnown && !overflow ? upper : nil,
+                     spaceEstimateOverflow: overflow)
     }
 
     private static func key(_ name: String) -> String {

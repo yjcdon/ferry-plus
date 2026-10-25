@@ -276,10 +276,20 @@ struct UploadFilesView: View {
                             Button("打开云端所在目录", systemImage: "cloud") { cloudRequest = file.id }
                                 .disabled(file.remoteReference == nil || cloudRequest != nil)
                             Button("在 Finder 中显示源文件", systemImage: "folder") { revealSource(file) }
+                            if let replacement = file.replacement, replacement.snapshotObject != nil {
+                                Button("复制旧版本备份名称", systemImage: "doc.on.doc") {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(replacement.snapshotName, forType: .string)
+                                }
+                            }
                         } label: { Label("定位", systemImage: "location") }
                             .menuStyle(.borderlessButton).fixedSize().help("定位文件")
                     }
                     Text(integrityDescription(file)).font(.caption).foregroundStyle(.secondary)
+                    if let replacement = file.replacement, replacement.snapshotObject != nil {
+                        Text("已保留独立旧版本备份，可在云端所在目录下载恢复。")
+                            .font(.caption).foregroundStyle(.secondary).help(replacement.snapshotName)
+                    }
                     if canRelocate(file) {
                         HStack {
                             Button("重新定位源文件…") {

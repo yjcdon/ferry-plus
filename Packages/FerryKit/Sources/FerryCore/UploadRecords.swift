@@ -130,17 +130,26 @@ public struct IntegrityRecord: Codable, Sendable, Hashable, Identifiable {
     public var verifiedAt: Date?
     public var uploadFileID: UUID?
     public var error: String?
+    /// 独立旧版本备份保留原文件名，移除传输记录后仍能识别可恢复内容。
+    public var originalFileName: String?
 
     public init(id: UUID = UUID(), account: AccountKey, reference: RemoteReference,
                 remoteVersion: String? = nil, expectation: IntegrityExpectation? = nil,
                 actualDigest: String? = nil, status: IntegrityStatus = .pending,
-                verifiedAt: Date? = nil, uploadFileID: UUID? = nil, error: String? = nil) {
+                verifiedAt: Date? = nil, uploadFileID: UUID? = nil, error: String? = nil,
+                originalFileName: String? = nil) {
         self.id = id; self.account = account; self.reference = reference; self.remoteVersion = remoteVersion
         self.expectation = expectation; self.actualDigest = actualDigest?.lowercased(); self.status = status
         self.verifiedAt = verifiedAt; self.uploadFileID = uploadFileID; self.error = error
+        self.originalFileName = originalFileName
     }
 
     public func validate() throws {
+        if let originalFileName {
+            guard LocalPath.isSafe(originalFileName), !originalFileName.contains("/") else {
+                throw UploadRecordError.invalid("旧版本备份的原文件名无效")
+            }
+        }
         guard !account.accountID.isEmpty, account.provider == reference.provider, !reference.identifier.isEmpty else {
             throw UploadRecordError.invalid("校验记录的账号或远端身份无效")
         }
@@ -192,6 +201,8 @@ public struct UploadFile: Codable, Sendable, Equatable, Identifiable {
     public var commits: [UploadCommit]
     public var remoteReference: RemoteReference?
     public var integrityRecordID: UUID?
+    /// 安全覆盖的独立快照、唯一暂存名称和发布检查点；旧记录缺失时为 nil。
+    public var replacement: UploadReplacementState?
 
     public init(id: UUID = UUID(), jobID: UUID, relativePath: String, isDirectory: Bool = false,
                 source: UploadLocalSource, phase: UploadPhase = .preparing) {
@@ -206,6 +217,13 @@ public struct UploadFile: Codable, Sendable, Equatable, Identifiable {
         if let remoteName {
             guard LocalPath.isSafe(remoteName), !remoteName.contains("/") else {
                 throw UploadRecordError.invalid("上传远端名称无效")
+            }
+        }
+        if let replacement {
+            try replacement.validate()
+            guard !isDirectory, replacement.fileID == id,
+                  account == nil || replacement.parent.provider == account?.provider else {
+                throw UploadRecordError.invalid("覆盖检查点与上传文件或网盘不一致")
             }
         }
         try expectation?.validate()

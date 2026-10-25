@@ -29,6 +29,26 @@ public struct IntegrityService: Sendable {
         var record = IntegrityRecord(account: account, reference: reference, remoteVersion: remoteVersion,
                                      expectation: expectation, uploadFileID: uploadFileID)
         try record.validate()
+        let actual = try await readSHA256(size: size, resolve: resolve, onProgress: onProgress)
+        record.actualDigest = actual
+        record.status = actual == expectation.digest ? .verified : .mismatch
+        record.verifiedAt = .now
+        if record.status == .mismatch { record.error = "云端文件 SHA-256 与原始内容基准不一致" }
+        try record.validate()
+        return record
+    }
+
+    /// 覆盖前完整回读准确旧对象，取得内容基准；调用方在 resolve 中固定对象身份及版本。
+    /// 仅返回实际 SHA-256，不生成已校验记录；取消后重新调用从首字节重算。
+    public func captureSHA256(size: Int64, resolve: @Sendable () async throws -> ResolvedURL,
+                              onProgress: (@Sendable (_ verifiedBytes: Int64, _ totalBytes: Int64) async throws -> Void)? = nil) async throws -> String {
+        guard size >= 0 else { throw UploadRecordError.invalid("回读对象大小不能为负数") }
+        return try await readSHA256(size: size, resolve: resolve, onProgress: onProgress)
+    }
+
+    /// 范围成功后才推进同一个摘要；验证和基准采集共用重试、空对象探测及单范围缓冲。
+    private func readSHA256(size: Int64, resolve: @Sendable () async throws -> ResolvedURL,
+                            onProgress: (@Sendable (_ verifiedBytes: Int64, _ totalBytes: Int64) async throws -> Void)?) async throws -> String {
         try Task.checkCancellation()
         var location = try await resolve()
         var hasher = SHA256()
@@ -46,13 +66,7 @@ public struct IntegrityService: Sendable {
             try await onProgress?(offset, size)
         }
         try Task.checkCancellation()
-        let actual = hasher.finalize().map { String(format: "%02x", $0) }.joined()
-        record.actualDigest = actual
-        record.status = actual == expectation.digest ? .verified : .mismatch
-        record.verifiedAt = .now
-        if record.status == .mismatch { record.error = "云端文件 SHA-256 与原始内容基准不一致" }
-        try record.validate()
-        return record
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
     }
 
     /// 失败范围丢弃后整体重读，避免半段与重试完整段重复进入 SHA-256。

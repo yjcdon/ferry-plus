@@ -12,7 +12,7 @@ public enum UploadCoordinatorError: Error, LocalizedError, Sendable {
         case .missingSelections: "上传检查点缺少完整源选择，请重新添加任务"
         case .scanIssue(let message): "上传源扫描未完成：\(message)"
         case .missingParent(let path): "上传父目录尚未成功创建：\(path)"
-        case .unsafeReplacement: "网盘安全覆盖能力尚未验证，当前任务不能覆盖已有文件"
+        case .unsafeReplacement: "当前网盘或项目类型不支持安全覆盖，原有内容未改动"
         case .unconfirmedCommit: "远端提交结果仍未核对，已保留记录；不能重复提交或移除"
         case .rejectedCommit(let message): "远端提交已拒绝：\(message)"
         case .persistence(let message): "上传检查点保存失败：\(message)"
@@ -337,6 +337,10 @@ public actor UploadCoordinator {
         guard let job = jobs[id] else { throw UploadCoordinatorError.missingJob }
         for fileID in job.fileIDs {
             var file = try await store.loadFile(id: fileID, in: job)
+            if file.replacement?.requiresCancellationRecovery == true {
+                let env = try await environment(job.account)
+                try await recoverReplacement(&file, environment: env, cancelling: true)
+            }
             if file.commits.contains(where: { $0.status == .pending }) ||
                 (file.sessionResultRecoveryRequired == true && file.remoteReference == nil) { throw UploadCoordinatorError.unconfirmedCommit }
             if ![.completed, .skipped].contains(file.phase) {
@@ -357,6 +361,9 @@ public actor UploadCoordinator {
         var directories: [String: RemoteReference] = ["": job.destination]
         for fileID in job.fileIDs {
             var file = try await store.loadFile(id: fileID, in: job)
+            if file.replacement?.requiresCancellationRecovery == true {
+                try await recoverReplacement(&file, environment: env, cancelling: job.cancellationRequested)
+            }
             if file.sessionResultRecoveryRequired == true {
                 let parentPath = file.relativePath.split(separator: "/").dropLast().joined(separator: "/")
                 guard let parent = directories[parentPath] else { throw UploadCoordinatorError.missingParent(parentPath) }
@@ -391,6 +398,7 @@ public actor UploadCoordinator {
         for fileID in job.fileIDs {
             let file = try await store.loadFile(id: fileID, in: job)
             if file.commits.contains(where: { $0.status == .pending }) ||
+                file.replacement?.requiresCancellationRecovery == true ||
                 (file.sessionResultRecoveryRequired == true && file.remoteReference == nil) {
                 throw UploadCoordinatorError.unconfirmedCommit
             }
@@ -723,6 +731,11 @@ public actor UploadCoordinator {
             file.phase = .completed; try await saveFile(file); return
         }
         if !file.isDirectory, file.remoteReference != nil {
+            if let replacement = file.replacement,
+               ![.initial, .snapshotPending, .snapshotReady].contains(replacement.stage) {
+                try await publishReplacement(&file, environment: env)
+                return
+            }
             if !hadPendingCommit { try await refreshRemoteName(&file, parent: parent, environment: env) }
             try await verify(&file, environment: env); return
         }
@@ -738,7 +751,13 @@ public actor UploadCoordinator {
                 }
                 switch job.conflictPolicy {
                 case .skip: file.phase = .skipped; try await saveFile(file); return
-                case .replace: throw UploadCoordinatorError.unsafeReplacement
+                case .replace:
+                    guard env.replacement != nil, !file.isDirectory, !existing.isDirectory else {
+                        throw UploadCoordinatorError.unsafeReplacement
+                    }
+                    let replacement = try UploadReplacementState(fileID: file.id, parent: parent, original: existing)
+                    file.replacement = replacement
+                    file.remoteName = replacement.stagingName
                 case .keepBoth:
                     let used = Set(entries.map { LocalPath.key($0.name) })
                     var number = 1; var candidate = LocalPath.numbered(original, number)
@@ -747,6 +766,17 @@ public actor UploadCoordinator {
                 }
             } else { file.remoteName = original }
             try await saveFile(file)
+        }
+        if let replacement = file.replacement,
+           [.initial, .snapshotPending].contains(replacement.stage) {
+            guard let strategy = env.replacement else { throw UploadCoordinatorError.unsafeReplacement }
+            let jobID = file.jobID, fileID = file.id
+            _ = try await UploadReplacementPublisher(destination: strategy, integrity: integrity).prepare(replacement,
+                checkpoint: { [weak self] state in
+                    guard let self else { throw CancellationError() }
+                    try await self.replacementCheckpoint(state, jobID: jobID, fileID: fileID, phase: .preparing)
+                })
+            file = try await store.loadFile(id: fileID, in: jobs[jobID]!)
         }
         try Task.checkCancellation()
         if file.isDirectory {
@@ -946,7 +976,7 @@ public actor UploadCoordinator {
                 switch job.conflictPolicy {
                 case .skip:
                     file.phase = .skipped; try await saveFile(file); return false
-                case .replace: throw UploadCoordinatorError.unsafeReplacement
+                case .replace: throw UploadDestinationError.nameConflict
                 case .keepBoth:
                     guard attempt < 3 else { throw UploadDestinationError.nameConflict }
                     let entries = try await env.listDirectory(parent)
@@ -966,6 +996,68 @@ public actor UploadCoordinator {
     private func isNameConflict(_ error: any Error) -> Bool {
         if case UploadDestinationError.nameConflict = error { return true }
         return false
+    }
+
+    /// 独立发布检查点先保存，再写入已经完整核验的旧字节快照摘要；稳定 ID 避免恢复时重复归档。
+    private func replacementCheckpoint(_ state: UploadReplacementState, jobID: UUID, fileID: UUID,
+                                       phase: UploadPhase) async throws {
+        guard let job = jobs[jobID], state.fileID == fileID else { throw UploadCoordinatorError.missingJob }
+        var file = try await store.loadFile(id: fileID, in: job)
+        file.replacement = state; file.phase = phase
+        try await saveFile(file)
+        if let snapshot = state.snapshotObject, let digest = state.originalSHA256 {
+            let expectation = try IntegrityExpectation(algorithm: .sha256, digest: digest, origin: .remoteOriginal,
+                size: state.original.size, reference: snapshot)
+            let record = IntegrityRecord(id: fileID, account: job.account, reference: snapshot,
+                expectation: expectation, actualDigest: digest, status: .verified, verifiedAt: .now, uploadFileID: fileID,
+                originalFileName: state.original.name)
+            do { try await integrityStore.save(record) }
+            catch { throw UploadCoordinatorError.persistence(error.localizedDescription) }
+        }
+    }
+
+    /// 核对入口只查询原意图；取消入口可以无覆盖恢复原名称，已经发布的内容继续保留并完整校验。
+    private func recoverReplacement(_ file: inout UploadFile, environment env: UploadEnvironment,
+                                    cancelling: Bool) async throws {
+        guard let state = file.replacement, let strategy = env.replacement else {
+            throw UploadCoordinatorError.unsafeReplacement
+        }
+        let jobID = file.jobID, fileID = file.id
+        let checkpoint: @Sendable (UploadReplacementState) async throws -> Void = { [weak self] state in
+            guard let self else { throw CancellationError() }
+            try await self.replacementCheckpoint(state, jobID: jobID, fileID: fileID, phase: .publishing)
+        }
+        let publisher = UploadReplacementPublisher(destination: strategy, integrity: integrity)
+        let result = if cancelling {
+            try await publisher.cancel(state, checkpoint: checkpoint)
+        } else {
+            try await publisher.inspect(state, checkpoint: checkpoint)
+        }
+        file = try await store.loadFile(id: fileID, in: jobs[jobID]!)
+        if result.stage == .published, let final = result.finalObject {
+            file.remoteReference = final; file.remoteName = result.original.name
+            try await saveFile(file)
+            try await verify(&file, environment: env)
+        }
+    }
+
+    /// 暂存内容已经验证后才允许认领目标；恢复优先查询原发布槽位，最终路径再做完整回读。
+    private func publishReplacement(_ file: inout UploadFile, environment env: UploadEnvironment) async throws {
+        guard let state = file.replacement, let strategy = env.replacement,
+              let staged = state.stagedObject ?? file.remoteReference,
+              let expectation = file.expectation else { throw UploadDestinationError.invalidPreparation }
+        let jobID = file.jobID, fileID = file.id
+        let result = try await UploadReplacementPublisher(destination: strategy, integrity: integrity).publish(state,
+            staged: staged, expectedSHA256: expectation.digest, size: file.source.size,
+            checkpoint: { [weak self] state in
+                guard let self else { throw CancellationError() }
+                try await self.replacementCheckpoint(state, jobID: jobID, fileID: fileID, phase: .publishing)
+            })
+        guard result.stage == .published, let final = result.finalObject else { throw UploadReplacementError.unconfirmed }
+        file = try await store.loadFile(id: fileID, in: jobs[jobID]!)
+        file.remoteReference = final; file.remoteName = result.original.name
+        try await saveFile(file)
+        try await verify(&file, environment: env)
     }
 
     /// 与未决合并共用准确对象回执合同；查询失败/未确认时保持恢复标记，显式重试仍可再次查询。
@@ -1092,6 +1184,11 @@ public actor UploadCoordinator {
         catch { throw UploadCoordinatorError.persistence(error.localizedDescription) }
         file.integrityRecordID = record.id
         guard record.status == .verified else { try await saveFile(file); throw UploadCoordinatorError.mismatch }
+        if let replacement = file.replacement, replacement.stage != .published {
+            try await saveFile(file)
+            try await publishReplacement(&file, environment: env)
+            return
+        }
         file.phase = .completed; file.sessionResultRecoveryRequired = nil; try await saveFile(file)
         if let prepared = file.preparation {
             do {
