@@ -339,6 +339,12 @@ Release 构建及固定签名通过（`.build/v3-upload-two-tabs-app-build.log`�
 
 此前 `.build/ui-upload-target-switch/` 及未选目标的拖放截图属于旧交互记录，不作为这次两页签版本的验收证据。T13／T18 的目录上下文、未登录和换号矩阵仍需继续，不能据此确认整个任务完成。
 
+## 两家网盘目录行实际拖放验收
+
+在 `1ca42fd` 对应 Release App 中，使用原生鼠标将 Finder 的专用 `batch-a.bin` 分别拖到百度、夸克浏览树中的专用目录行。两次均打开上传确认页，带入原网盘、账号、文件及准确目录；截图与面包屑分别为 `/FerryPlus-V3-Directory-20261024-2155`、`/FerryPlus-V3-Directory-Quark-20261024-2208`。从百度目标切换到夸克后，待选文件保留、目录回到夸克根目录，没有沿用百度路径。全程未确认上传。
+
+截图与 AX 记录：`.build/ui-directory-drop/{baidu-directory,switch-provider-root,quark-directory}.{png,txt}`；原生输入记录 `.build/ui-drag-validation/{baidu,quark}-directory-row-drag.log`。输入前以公开辅助功能核对源文件及目标窗口命中，系统产生真实 `public.file-url` 拖动载荷。此项补齐目录行拖放，不代替放下前切换、未登录、确认前换号及完整 T13／T18。
+
 ## 网盘文件和文件夹删除
 
 百度与夸克账号内文件树支持右键移到回收站及勾选批量删除。确认冻结账号、会话、条目和父目录；显示账号、项目名称及数量，勾选父文件夹不重复列出子项。删除逐项进行，仅发送一次副作用请求，成功回执后最多四次目录核对；部分失败明确展示并刷新。分享树不增加删除入口，移除任务记录保持原语义。
