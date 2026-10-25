@@ -45,7 +45,35 @@ Ferry Plus 是一款简洁的 macOS 原生百度网盘、夸克网盘文件传�
 
 ## 安装
 
+### ZIP 安装
+
 从 [3.1 Release](https://github.com/yjcdon/ferry-plus/releases/tag/v3.1) 下载 `Ferry-Plus-3.1-arm64.zip`，解压后把 `Ferry Plus.app` 拖到“应用程序”文件夹即可，无需 DMG。发布页同时提供 SHA-256 校验文件。
+
+### Homebrew 安装
+
+安装定义直接维护在本仓库的 `Casks/ferry-plus.rb` 中。首次使用先添加安装源，再安装：
+
+```sh
+brew tap yjcdon/ferry-plus https://github.com/yjcdon/ferry-plus
+brew install --cask yjcdon/ferry-plus/ferry-plus
+```
+
+如果新版 Homebrew 提示安装源尚未信任，先明确授权这个软件，再重新安装：
+
+```sh
+brew trust --cask yjcdon/ferry-plus/ferry-plus
+```
+
+后续升级：
+
+```sh
+brew update
+brew upgrade --cask yjcdon/ferry-plus/ferry-plus
+```
+
+Homebrew 与 ZIP 使用相同的 Release 文件，仅支持 Apple Silicon、macOS 14 及以上。Homebrew 安装同样受 macOS 首次启动安全检查约束。普通卸载只移除 App，保留本机账号和任务数据。
+
+维护安装源时，每次发布新版需同步更新 `Casks/ferry-plus.rb` 的 `version` 和 ZIP 的 `sha256`；`livecheck` 用于检测 GitHub 最新 Release，不会自动修改安装定义。
 
 可与原版 Ferry 共存；两者的登录凭据、设置及任务数据独立。
 
