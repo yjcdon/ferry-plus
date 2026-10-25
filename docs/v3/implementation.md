@@ -325,6 +325,12 @@ Release 构建 `.build/v3-inspector-final-build.log` 通过。Computer Use 在�
 
 独立当前源码编译、3 个有效 XML 页、14 个拒绝场景、3 个引擎恢复场景通过。正式接口和引擎对专用 4096 字节原会话完成真实只读查询，返回原回执，新增上传次数为 0。证据 `.build/v3-list-parts-validation/report.md`；统一 307 项既有包测试及实际 App 构建通过：`.build/v3-delete-results-listparts-tests.log`、`.build/v3-netdisk-delete-app-build.log`。真实多页尚未制造；会话过期自动重建和 abort 仍未完成，不据此勾选完整恢复或取消任务。
 
+## 窄窗口与详情栏布局修复
+
+实际 App 在 640 点宽度时搜索入口被工具栏挤掉；仅提高到 720 点，侧栏拉到 300 点后仍会消失。主窗口最小宽度调整为 820 点，详情栏开启时为 960 点，沿用现有详情显示状态，不引入尺寸监听或循环布局更新。
+
+Release App 重新构建并固定签名后，通过 Computer Use 验证普通窗口、300 点侧栏、详情开关及浅深色。原生辅助功能请求缩到 640 点时，实际分别保持 820／960 点；搜索可见，详情开启时侧栏图标和账号入口未被挤压。测试后恢复深色外观；原 22 项任务及两条暂停大上传保留。证据 `.build/toolbar-minimum-validation/{before,normal-after,inspector-after,light-after}.{txt,png}`、`normal-size.txt`、`inspector-size.txt` 和 `app-build-extended.log`。此项只覆盖 T18 的窗口布局子集，拖放及账号生命周期矩阵仍需继续。
+
 ## 网盘文件和文件夹删除
 
 百度与夸克账号内文件树支持右键移到回收站及勾选批量删除。确认冻结账号、会话、条目和父目录；显示账号、项目名称及数量，勾选父文件夹不重复列出子项。删除逐项进行，仅发送一次副作用请求，成功回执后最多四次目录核对；部分失败明确展示并刷新。分享树不增加删除入口，移除任务记录保持原语义。

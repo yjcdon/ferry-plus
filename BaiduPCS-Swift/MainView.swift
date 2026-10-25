@@ -107,7 +107,8 @@ struct MainView: View {
                 }
             }
         }
-        .frame(minWidth: 640, minHeight: 400)
+        // 保留最大侧栏下的工具栏空间；详情开启时同时容纳任务列表和固定详情栏。
+        .frame(minWidth: isInspectorPresented ? 960 : 820, minHeight: 400)
         .dropDestination(for: URL.self) { urls, _ in
             let files = urls.filter(\.isFileURL)
             guard !files.isEmpty, model.sheet == nil else { return false }
