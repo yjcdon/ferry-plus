@@ -41,3 +41,9 @@ Int64.fileSizeText仅封装原ByteCountFormatter(.file)，替换7处同义表达
 同次body共享下载、上传过滤及可见排序，动作计算属性和跨await范围仍实时读取。720组旧新组合一致，过滤各3→1、排序2→1；不新增状态缓存。证据 .build/v31-t01/。实际GUI核对空列表的网盘／方向／分类及搜索，有任务范围的真实回归留T21。
 
 本批源码冻结后 SDK26.5 Release App构建／固定签名通过，独立SDK27既有包测试307项通过；日志 .build/v31-wave2-{app-build,package-tests}.log。实际运行PID48872，双账号保留，无新凭据提示，用户61份JSON摘要不变；GUI记录 .build/v31-wave2-ui/。未替换Applications稳定版，最终3.1集成验收由T20／T21完成。
+
+## T12 复用校验记录扫描基础
+
+枚举与内容读取共享，查询fail-fast和inventory逐项错误保持独立。11组样本的load／matching／candidates／inventory共44项旧新结果一致，含正向匹配、坏JSON、未知版本及异常文件名。证据 .build/v31-t12/。实际设置显示60条校验记录，清理确认后取消。
+
+本批源码冻结后 SDK26.5 Release App构建／固定签名通过，独立SDK27既有包测试307项通过；日志 .build/v31-wave2-{app-build,package-tests}.log。实际运行PID48872，双账号保留，无新凭据提示，用户61份JSON摘要不变；GUI记录 .build/v31-wave2-ui/。未替换Applications稳定版，最终3.1集成验收由T20／T21完成。

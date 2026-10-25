@@ -149,8 +149,7 @@ public actor IntegrityStore {
     }
 
     public func load(id: UUID) throws -> IntegrityRecord {
-        let record: IntegrityRecord = try UploadDiskRecord.read(at: recordURL(id))
-        try record.validate()
+        let record = try readValidatedRecord(at: recordURL(id))
         guard record.id == id else { throw UploadRecordError.invalid("校验记录 ID 不一致") }
         return record
     }
@@ -158,12 +157,9 @@ public actor IntegrityStore {
     /// 版本未知时不将历史记录自动当作当前原始基准，调用方可展示候选让用户指定。
     public func matching(account: AccountKey, reference: RemoteReference, remoteVersion: String) throws -> [IntegrityRecord] {
         guard !remoteVersion.isEmpty else { throw UploadRecordError.invalid("校验关联缺少远端版本") }
-        guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
-        let urls = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
         var matches: [IntegrityRecord] = []
-        for url in urls where url.pathExtension == "json" {
-            let record: IntegrityRecord = try UploadDiskRecord.read(at: url)
-            try record.validate()
+        for url in try recordURLs() {
+            let record = try readValidatedRecord(at: url)
             if record.account == account, record.reference == reference, record.remoteVersion == remoteVersion {
                 matches.append(record)
             }
@@ -177,12 +173,9 @@ public actor IntegrityStore {
         guard !account.accountID.isEmpty, account.provider == reference.provider, size >= 0 else {
             throw UploadRecordError.invalid("校验候选查询的账号、文件或大小无效")
         }
-        guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
-        let urls = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
         var result: [IntegrityRecord] = []
-        for url in urls where url.pathExtension == "json" {
-            let record: IntegrityRecord = try UploadDiskRecord.read(at: url)
-            try record.validate()
+        for url in try recordURLs() {
+            let record = try readValidatedRecord(at: url)
             if record.account == account, record.reference == reference, record.status == .verified,
                let expectation = record.expectation, expectation.size == size {
                 result.append(record)
@@ -193,11 +186,7 @@ public actor IntegrityStore {
 
     /// 捕获当前 JSON 清单并验证版本、内容及文件名；无法识别的原始记录保留并逐项报告。
     public func inventory() throws -> Inventory {
-        guard FileManager.default.fileExists(atPath: directory.path) else {
-            return Inventory(recordIDs: [], failures: [])
-        }
-        let urls = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "json" }.sorted { $0.lastPathComponent < $1.lastPathComponent }
+        let urls = try recordURLs().sorted { $0.lastPathComponent < $1.lastPathComponent }
         var ids: [UUID] = []
         var failures: [CleanupFailure] = []
         for url in urls {
@@ -234,6 +223,20 @@ public actor IntegrityStore {
     public func moveToTrash(id: UUID) throws {
         _ = try load(id: id)
         try FileManager.default.trashItem(at: recordURL(id), resultingItemURL: nil)
+    }
+
+    /// 只共享当前目录快照，不缓存记录；查询保留枚举顺序，清理调用方自行排序。
+    private func recordURLs() throws -> [URL] {
+        guard FileManager.default.fileExists(atPath: directory.path) else { return [] }
+        return try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "json" }
+    }
+
+    /// 校验磁盘内容；文件名与 ID 的对应关系仍由需要该约束的调用方检查。
+    private func readValidatedRecord(at url: URL) throws -> IntegrityRecord {
+        let record: IntegrityRecord = try UploadDiskRecord.read(at: url)
+        try record.validate()
+        return record
     }
 
     private func recordURL(_ id: UUID) -> URL { directory.appendingPathComponent(id.uuidString + ".json") }
