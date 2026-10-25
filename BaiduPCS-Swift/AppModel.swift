@@ -777,8 +777,6 @@ final class AppModel {
         self.sheet = sheet
     }
 
-    var canDownloadFromNetdisk: Bool { true }
-
     /// 应用变为活跃时调用。剪贴板中有新复制的分享链接时，打开添加链接，由 sheet 填入。
     /// 已有 sheet、剪贴板已经读过（包括手动打开添加链接时），或链接已经是一个任务的来源时不打开。
     func detectCopiedLink() async {
