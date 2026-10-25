@@ -18,13 +18,7 @@ struct MainView: View {
     @State private var uploadDetail: UploadDetailRequest?
     @State private var revealedUploadID: UUID?
     @State private var localVerification: LocalVerificationRequest?
-    @State private var downloadRemovalQueue: [DownloadRemovalRequest] = []
-    @State private var downloadRemovalErrors: [String] = []
-    @State private var manualIntegrityRemoval: ManualIntegrityRemoval?
-    @State private var removalManifestDocument: IntegrityManifestDocument?
-    @State private var exportsRemovalManifest = false
-    @State private var showsIntegrityRemovalConfirmation = false
-    @State private var isRemovingDownloads = false
+    @State private var downloadRemoval = DownloadRemovalFlow()
 
     private struct DownloadRemovalRequest: Identifiable {
         let job: Job
@@ -36,6 +30,38 @@ struct MainView: View {
         let request: DownloadRemovalRequest
         let manifest: IntegrityManifest?
         let preparationError: String?
+    }
+
+    /// 系统先关闭展示再回调按钮或导出结果，期间保留阶段载荷，不提前丢弃移除依据。
+    private struct DownloadRemovalFlow {
+        enum Phase {
+            case idle
+            case processing
+            case awaitingDecision(ManualIntegrityRemoval, presented: Bool)
+            case exporting(ManualIntegrityRemoval, IntegrityManifestDocument, presented: Bool)
+        }
+        var queue: [DownloadRemovalRequest] = []
+        var errors: [String] = []
+        var phase: Phase = .idle
+
+        var isIdle: Bool { if case .idle = phase { true } else { false } }
+        var pending: ManualIntegrityRemoval? {
+            switch phase {
+            case .awaitingDecision(let pending, _), .exporting(let pending, _, _): pending
+            case .idle, .processing: nil
+            }
+        }
+        var isDecisionPresented: Bool {
+            get { if case .awaitingDecision(_, let presented) = phase { presented } else { false } }
+            set { if case .awaitingDecision(let pending, _) = phase { phase = .awaitingDecision(pending, presented: newValue) } }
+        }
+        var isExportPresented: Bool {
+            get { if case .exporting(_, _, let presented) = phase { presented } else { false } }
+            set { if case .exporting(let pending, let document, _) = phase { phase = .exporting(pending, document, presented: newValue) } }
+        }
+        var exportDocument: IntegrityManifestDocument? {
+            if case .exporting(_, let document, _) = phase { document } else { nil }
+        }
     }
 
 
@@ -161,35 +187,39 @@ struct MainView: View {
             CompletedFileVerificationSheet(jobID: request.jobID, file: request.file)
         }
         .sheet(item: $uploadDetail) { detail in UploadFilesView(jobID: detail.id, title: detail.title) }
-        .confirmationDialog("保留校验依据", isPresented: $showsIntegrityRemovalConfirmation, presenting: manualIntegrityRemoval) { pending in
+        .confirmationDialog("保留校验依据", isPresented: Binding(
+            get: { downloadRemoval.isDecisionPresented }, set: { downloadRemoval.isDecisionPresented = $0 }
+        ), presenting: downloadRemoval.pending) { pending in
             if let manifest = pending.manifest {
                 Button("导出清单并移除…") {
                     do {
-                        removalManifestDocument = try IntegrityManifestDocument(manifest: manifest)
-                        exportsRemovalManifest = true
+                        let document = try IntegrityManifestDocument(manifest: manifest)
+                        downloadRemoval.phase = .exporting(pending, document, presented: true)
                     } catch { operationError = error.localizedDescription }
                 }
             }
             Button("放弃依据并移除", role: .destructive) {
-                manualIntegrityRemoval = nil
+                downloadRemoval.phase = .idle
                 Task { await removeDownload(pending.request, disposition: .discardUnarchivable); await drainDownloadRemovals() }
             }
             Button("取消", role: .cancel) { cancelDownloadRemoval() }
         } message: { pending in
             Text(pending.preparationError ?? "“\(pending.request.job.title)”中部分摘要尚未通过校验，或缺少准确账号及云端对象关联。导出清单后可用于以后的下载；已验证且关联明确的记录会自动保留。")
         }
-        .onChange(of: showsIntegrityRemovalConfirmation) { _, presented in
-            if !presented, manualIntegrityRemoval != nil, !exportsRemovalManifest { cancelDownloadRemoval() }
+        .onChange(of: downloadRemoval.isDecisionPresented) { _, presented in
+            if !presented, case .awaitingDecision(_, presented: false) = downloadRemoval.phase { cancelDownloadRemoval() }
         }
-        .fileExporter(isPresented: $exportsRemovalManifest, document: removalManifestDocument,
-                      contentTypes: [.json], defaultFilename: manualIntegrityRemoval.map { "下载校验-\($0.request.id.uuidString).json" } ?? "下载校验.json", onCompletion: { result in
-            guard let pending = manualIntegrityRemoval, let manifest = pending.manifest else { return }
-            manualIntegrityRemoval = nil
+        .fileExporter(isPresented: Binding(
+            get: { downloadRemoval.isExportPresented }, set: { downloadRemoval.isExportPresented = $0 }
+        ), document: downloadRemoval.exportDocument,
+                      contentTypes: [.json], defaultFilename: downloadRemoval.pending.map { "下载校验-\($0.request.id.uuidString).json" } ?? "下载校验.json", onCompletion: { result in
+            guard let pending = downloadRemoval.pending, let manifest = pending.manifest else { return }
+            downloadRemoval.phase = .idle
             switch result {
             case .success:
                 Task { await removeDownload(pending.request, disposition: .exportedManifest(manifest)); await drainDownloadRemovals() }
             case .failure(let error):
-                if (error as NSError).code != NSUserCancelledError { downloadRemovalErrors.append(error.localizedDescription) }
+                if (error as NSError).code != NSUserCancelledError { downloadRemoval.errors.append(error.localizedDescription) }
                 cancelDownloadRemoval()
             }
         }, onCancellation: cancelDownloadRemoval)
@@ -268,7 +298,7 @@ struct MainView: View {
     }
 
     private func requestRemoval(_ ids: [TransferTaskID], _ removal: JobRemoval) {
-        guard uploadCommand == nil, downloadRemovalQueue.isEmpty, !isRemovingDownloads else { return }
+        guard uploadCommand == nil, downloadRemoval.queue.isEmpty, downloadRemoval.isIdle else { return }
         let wanted = Set(ids)
         let targets = visibleItems.filter { wanted.contains($0.id) }
         let downloads = targets.compactMap { item -> Job? in
@@ -293,35 +323,34 @@ struct MainView: View {
     /// 固定本次远端清理选择；确认后再次与当前可见范围相交，避免筛选改变扩大删除范围。
     private func remove(_ pending: PendingTransferRemoval) {
         let visible = Set(visibleItems.map(\.id))
-        downloadRemovalQueue = pending.downloads.filter { visible.contains(.init(direction: .download, id: $0.id)) }
+        downloadRemoval.queue = pending.downloads.filter { visible.contains(.init(direction: .download, id: $0.id)) }
             .map { .init(job: $0, removal: pending.removal, cleanup: pending.cleanup[$0.id]) }
-        downloadRemovalErrors = []
-        if !downloadRemovalQueue.isEmpty { Task { await drainDownloadRemovals() } }
+        downloadRemoval.errors = []
+        if !downloadRemoval.queue.isEmpty { Task { await drainDownloadRemovals() } }
         let uploads = pending.uploads.filter { visible.contains(.init(direction: .upload, id: $0.id)) }
         if !uploads.isEmpty { uploadCommand = .init(action: .remove, jobs: uploads) }
     }
 
     /// 一批任务逐个保存依据；每个任务单独清单，避免不同任务的同名路径误合并。
     private func drainDownloadRemovals() async {
-        guard !isRemovingDownloads, manualIntegrityRemoval == nil else { return }
-        isRemovingDownloads = true
-        defer { isRemovingDownloads = false }
-        while let request = downloadRemovalQueue.first {
+        guard downloadRemoval.isIdle else { return }
+        downloadRemoval.phase = .processing
+        defer { if case .processing = downloadRemoval.phase { downloadRemoval.phase = .idle } }
+        while let request = downloadRemoval.queue.first {
             guard visibleItems.contains(where: { $0.id == .init(direction: .download, id: request.id) }),
                   model.coordinator.jobs.contains(where: { $0.id == request.id }) else {
-                downloadRemovalQueue.removeFirst()
+                downloadRemoval.queue.removeFirst()
                 continue
             }
             do {
                 if let manifest = try model.coordinator.removalIntegrityManifest(request.id) {
-                    manualIntegrityRemoval = .init(request: request, manifest: manifest, preparationError: nil)
-                    showsIntegrityRemovalConfirmation = true
+                    downloadRemoval.phase = .awaitingDecision(
+                        .init(request: request, manifest: manifest, preparationError: nil), presented: true)
                     return
                 }
             } catch {
-                manualIntegrityRemoval = .init(request: request, manifest: nil,
-                    preparationError: "无法导出此任务的校验清单：" + error.localizedDescription + " 任务将保留；也可明确放弃不能归档的依据后移除。")
-                showsIntegrityRemovalConfirmation = true
+                downloadRemoval.phase = .awaitingDecision(.init(request: request, manifest: nil,
+                    preparationError: "无法导出此任务的校验清单：" + error.localizedDescription + " 任务将保留；也可明确放弃不能归档的依据后移除。"), presented: true)
                 return
             }
             await removeDownload(request, disposition: .preserve)
@@ -332,7 +361,7 @@ struct MainView: View {
     /// 真正删除前由 Core 重新核对清单与归档；失败保留列表选择，不把空废纸篓失败数组当作成功。
     private func removeDownload(_ request: DownloadRemovalRequest, disposition: DownloadIntegrityDisposition) async {
         guard visibleItems.contains(where: { $0.id == .init(direction: .download, id: request.id) }) else {
-            if downloadRemovalQueue.first?.id == request.id { downloadRemovalQueue.removeFirst() }
+            if downloadRemoval.queue.first?.id == request.id { downloadRemoval.queue.removeFirst() }
             return
         }
         do {
@@ -340,23 +369,26 @@ struct MainView: View {
                                    cleanupConfirmed: request.cleanup, integrityDisposition: disposition)
             selection.remove(.init(direction: .download, id: request.id))
         } catch {
-            downloadRemovalErrors.append(request.job.title + "：" + error.localizedDescription)
+            downloadRemoval.errors.append(request.job.title + "：" + error.localizedDescription)
         }
-        if downloadRemovalQueue.first?.id == request.id { downloadRemovalQueue.removeFirst() }
+        if downloadRemoval.queue.first?.id == request.id { downloadRemoval.queue.removeFirst() }
     }
 
+    /// 取消后清空后续项；已开始的异步移除保留处理锁，直至其返回。
     private func cancelDownloadRemoval() {
-        manualIntegrityRemoval = nil
-        downloadRemovalQueue = []
-        removalManifestDocument = nil
+        switch downloadRemoval.phase {
+        case .processing: break
+        default: downloadRemoval.phase = .idle
+        }
+        downloadRemoval.queue = []
         publishDownloadRemovalErrors()
     }
 
     /// 完成或取消本批次时只发布已经发生的失败；清空缓冲，避免下一次操作重复提示。
     private func publishDownloadRemovalErrors() {
-        guard !downloadRemovalErrors.isEmpty else { return }
-        operationError = downloadRemovalErrors.joined(separator: "\n")
-        downloadRemovalErrors = []
+        guard !downloadRemoval.errors.isEmpty else { return }
+        operationError = downloadRemoval.errors.joined(separator: "\n")
+        downloadRemoval.errors = []
     }
 
     /// 独立上传 actor 操作按当前范围路由，确认／错误状态由主窗口持有，菜单关闭不丢失。
