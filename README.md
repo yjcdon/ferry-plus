@@ -6,7 +6,7 @@
 
 Ferry Plus 是一款简洁的 macOS 原生百度网盘、夸克网盘文件传输工具，基于 [Ferry](https://github.com/yiquncode/BaiduPCS-Swift)，使用 Swift 和 SwiftUI 开发，专为 Apple Silicon Mac 构建。
 
-[下载 Ferry Plus 3.0](https://github.com/yjcdon/ferry-plus/releases/tag/v3.0) · [更新记录](CHANGELOG.md)
+[下载 Ferry Plus 3.1](https://github.com/yjcdon/ferry-plus/releases/tag/v3.1) · [更新记录](CHANGELOG.md)
 
 支持两家网盘的本地文件／文件夹上传、分享链接及账号内文件下载。两个账号可同时登录，上传和下载统一管理，传输速度受网盘服务和账号权限限制。
 
@@ -27,11 +27,11 @@ Ferry Plus 是一款简洁的 macOS 原生百度网盘、夸克网盘文件传�
 
 3.0 的双网盘上传／下载、完整内容校验、网盘删除已有真实 App 验证；实现与验证范围见 [3.0 功能清单](docs/v3/features.md)、[架构设计](docs/v3/architecture.md) 和 [任务清单](docs/v3/tasks.md)。
 
-## 3.1 优化候选
+## 3.1 优化版
 
 3.1 已完成19项代码整理和技术审查，减少任务列表重复筛选、上传检查点读取、百度安全覆盖回读和校验记录重复写入，统一界面状态、通知及构建打包流程。沿用3.0的登录、数据格式与主要交互。
 
-实际3.1 App已通过百度、夸克分片上传和独立下载的完整内容核对，以及百度覆盖新旧版本回读、网盘删除、筛选、源文件重选和导出取消／重开等界面回归。本地候选ZIP与SHA文件已生成，解包与实测App逐文件一致；尚未发布或替换已安装的3.0。范围和结果见 [3.1任务清单](docs/v3.1/tasks.md)、[实施记录](docs/v3.1/implementation.md) 和 [技术审查](docs/v3.1/review.md)。
+实际3.1 App已通过百度、夸克分片上传和独立下载的完整内容核对，以及百度覆盖新旧版本回读、网盘删除、筛选、源文件重选和导出取消／重开等界面回归。Release提供实测App的ZIP与SHA文件，发布包只包含应用程序，不包含本机登录凭据或用户数据。范围和结果见 [3.1任务清单](docs/v3.1/tasks.md)、[实施记录](docs/v3.1/implementation.md) 和 [技术审查](docs/v3.1/review.md)。
 
 ## 使用边界
 
@@ -45,7 +45,7 @@ Ferry Plus 是一款简洁的 macOS 原生百度网盘、夸克网盘文件传�
 
 ## 安装
 
-从 [3.0 Release](https://github.com/yjcdon/ferry-plus/releases/tag/v3.0) 下载 `Ferry-Plus-3.0-arm64.zip`，解压后把 `Ferry Plus.app` 拖到“应用程序”文件夹即可，无需 DMG。发布页同时提供 SHA-256 校验文件。
+从 [3.1 Release](https://github.com/yjcdon/ferry-plus/releases/tag/v3.1) 下载 `Ferry-Plus-3.1-arm64.zip`，解压后把 `Ferry Plus.app` 拖到“应用程序”文件夹即可，无需 DMG。发布页同时提供 SHA-256 校验文件。
 
 可与原版 Ferry 共存；两者的登录凭据、设置及任务数据独立。
 
