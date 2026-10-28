@@ -72,8 +72,6 @@ struct UploadConfirmationView: View {
             }.padding()
             Divider()
             HStack {
-                Text("上传完成后会校验云端内容。")
-                    .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 if isSubmitting { ProgressView().controlSize(.small) }
                 Button("取消", role: .cancel) { dismiss() }
@@ -195,7 +193,7 @@ struct UploadConfirmationView: View {
                 Spacer()
             }
             if policy == .replace {
-                Text("同名文件会保留独立云端旧版本。合并文件夹时，备份空间会逐项检查；文件与文件夹的类型冲突不覆盖。")
+                Text("覆盖时会保留旧版本。")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
@@ -211,35 +209,27 @@ struct UploadConfirmationView: View {
         } else if let result = preflight {
             VStack(alignment: .leading, spacing: 6) {
                 Text("\(result.summary.fileCount) 个文件 · \(result.summary.directoryCount) 个文件夹 · \(ByteCountFormatter.string(fromByteCount: result.summary.totalBytes, countStyle: .file))")
-                Text(result.availableBytes.map { "剩余容量：" + ByteCountFormatter.string(fromByteCount: $0, countStyle: .file) } ?? "剩余容量未知（\(result.capacityReason ?? "服务端未提供可靠容量")）")
-                    .textSelection(.enabled)
-                DisclosureGroup("上传前检查") {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("单文件大小上限未知，以服务端结果为准。")
-                            Text("同名项目 \(result.conflictCount) · 类型冲突 \(result.typeConflictCount) · 合并文件夹 \(result.mergingDirectoryCount)")
-                            Text("这里只预览当前目录的根项目；子目录同名项在执行时逐项检查。预览不会锁定容量或目标。")
-                            if let upper = result.requiredUpperBound, result.requiredLowerBound != upper {
-                                Text("跳过策略下所需空间尚不确定，最多需 \(ByteCountFormatter.string(fromByteCount: upper, countStyle: .file))。")
-                            } else if result.requiredUpperBound == nil && !result.spaceEstimateOverflow {
-                                Text("文件夹内的旧版本备份空间尚未计入，将在执行时逐项检查。")
-                            }
-                            if result.summary.issueCount > 0 {
-                                Text("发现 \(result.summary.issueCount) 个源问题；请处理后重新检查。")
-                                ForEach(Array(result.summary.issues.enumerated()), id: \.offset) { _, message in
-                                    Text(message).textSelection(.enabled)
-                                }
-                                if result.summary.issueCount > result.summary.issues.count { Text("仅显示前 20 个问题。") }
-                            }
-                        }.frame(maxWidth: .infinity, alignment: .leading)
-                    }.frame(maxHeight: 120)
+                    .font(.caption).foregroundStyle(.secondary)
+                if result.spaceEstimateOverflow {
+                    errorLabel("所选文件和备份所需容量超出可计算范围，请减少本次上传内容。")
+                } else if result.insufficientSpace {
+                    errorLabel("目标剩余容量不足，请清理空间或减少本次上传内容。")
                 }
-                if result.spaceEstimateOverflow { errorLabel("所选文件和备份所需容量超出可计算范围，请减少本次上传内容。") }
-                else if result.insufficientSpace { errorLabel("目标剩余容量不足，请清理空间或减少本次上传内容。") }
-                if result.summary.issueCount > 0 { errorLabel("所选源文件存在无法上传的项目，请展开检查。") }
-                Button("重新检查") { preflightGeneration += 1 }
-                    .disabled(isSubmitting || !isContextCurrent)
-            }.font(.caption).foregroundStyle(.secondary)
+                if result.summary.issueCount > 0 {
+                    errorLabel("所选文件中有 \(result.summary.issueCount) 项无法上传，请处理后重新检查。")
+                    ForEach(Array(result.summary.issues.enumerated()), id: \.offset) { _, message in
+                        errorLabel(message)
+                    }
+                    if result.summary.issueCount > result.summary.issues.count {
+                        Text("仅显示前 20 个问题。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if result.summary.issueCount > 0 || result.insufficientSpace {
+                    Button("重新检查") { preflightGeneration += 1 }
+                        .disabled(isSubmitting || !isContextCurrent)
+                }
+            }
         }
     }
 
