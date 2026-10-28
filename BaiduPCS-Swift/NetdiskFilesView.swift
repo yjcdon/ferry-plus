@@ -263,7 +263,7 @@ struct NetdiskFilesView: View {
             sortHeader(.modified).frame(width: dateWidth, alignment: .leading)
                 .overlay(alignment: .leading) { ColumnResizeHandle(width: $dateWidth, minimum: 48, maximum: 600).frame(width: 16, height: 24).offset(x: -8) }
             sortHeader(.size, alignment: .trailing).frame(width: sizeWidth, alignment: .trailing)
-                .overlay(alignment: .leading) { ColumnResizeHandle(width: $sizeWidth, minimum: 48, maximum: 400).frame(width: 16, height: 24).offset(x: -8) }
+                .overlay(alignment: .leading) { ColumnResizeHandle(width: $sizeWidth, adjacentWidth: $dateWidth, minimum: 48, maximum: 400).frame(width: 16, height: 24).offset(x: -8) }
         }
     }
 
@@ -389,28 +389,33 @@ struct NetdiskFilesView: View {
 /// 原生鼠标事件以窗口坐标计算位移，列边界移动时拖动起点保持不变。
 private struct ColumnResizeHandle: NSViewRepresentable {
     @Binding var width: CGFloat
+    var adjacentWidth: Binding<CGFloat>? = nil
     let minimum: CGFloat
     let maximum: CGFloat
 
     func makeNSView(context: Context) -> ResizeView {
-        ResizeView(width: $width, minimum: minimum, maximum: maximum)
+        ResizeView(width: $width, adjacentWidth: adjacentWidth, minimum: minimum, maximum: maximum)
     }
 
     func updateNSView(_ view: ResizeView, context: Context) {
         view.width = $width
+        view.adjacentWidth = adjacentWidth
         view.minimum = minimum
         view.maximum = maximum
     }
 
     final class ResizeView: NSView {
         var width: Binding<CGFloat>
+        var adjacentWidth: Binding<CGFloat>?
         var minimum: CGFloat
         var maximum: CGFloat
         private var initialX: CGFloat = 0
         private var initialWidth: CGFloat = 0
+        private var initialAdjacentWidth: CGFloat = 0
 
-        init(width: Binding<CGFloat>, minimum: CGFloat, maximum: CGFloat) {
+        init(width: Binding<CGFloat>, adjacentWidth: Binding<CGFloat>?, minimum: CGFloat, maximum: CGFloat) {
             self.width = width
+            self.adjacentWidth = adjacentWidth
             self.minimum = minimum
             self.maximum = maximum
             super.init(frame: .zero)
@@ -425,10 +430,16 @@ private struct ColumnResizeHandle: NSViewRepresentable {
         override func mouseDown(with event: NSEvent) {
             initialX = event.locationInWindow.x
             initialWidth = width.wrappedValue
+            initialAdjacentWidth = adjacentWidth?.wrappedValue ?? 0
         }
         override func mouseDragged(with event: NSEvent) {
-            let delta = event.locationInWindow.x - initialX
-            width.wrappedValue = min(maximum, max(minimum, initialWidth - delta))
+            var delta = event.locationInWindow.x - initialX
+            delta = min(initialWidth - minimum, max(initialWidth - maximum, delta))
+            if let adjacentWidth {
+                delta = min(600 - initialAdjacentWidth, max(48 - initialAdjacentWidth, delta))
+                adjacentWidth.wrappedValue = initialAdjacentWidth + delta
+            }
+            width.wrappedValue = initialWidth - delta
         }
     }
 }
