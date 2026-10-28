@@ -223,7 +223,6 @@ private struct NetdiskSettingsView: View {
                     .foregroundStyle(.secondary)
             }
 
-            IntegrityRecordSettingsSection()
         }
         .formStyle(.grouped)
         .autocorrectionDisabled()
@@ -246,105 +245,6 @@ private struct NetdiskSettingsView: View {
     private func normalizedFolder(_ input: String, defaultValue: String) -> String {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? defaultValue : RemotePath.normalized(trimmed)
-    }
-}
-
-/// 校验依据独立于任务保存；清理只处理用户确认的有限快照，结果如实展示部分失败。
-private struct IntegrityRecordSettingsSection: View {
-    @Environment(AppModel.self) private var model
-    @State private var inventory: IntegrityStore.Inventory?
-    @State private var pendingInventory: IntegrityStore.Inventory?
-    @State private var isLoading = false
-    @State private var isCleaning = false
-    @State private var showsConfirmation = false
-    @State private var problem: String?
-    @State private var resultSummary: String?
-    @State private var resultFailures: [IntegrityStore.CleanupFailure] = []
-
-    private var failures: [IntegrityStore.CleanupFailure] {
-        resultFailures.isEmpty ? (inventory?.failures ?? []) : resultFailures
-    }
-
-    var body: some View {
-        Section {
-            LabeledContent("已保存校验记录") {
-                if isLoading { ProgressView().controlSize(.small) }
-                else if let inventory { Text("\(inventory.totalCount) 条") }
-                else { Text("读取失败").foregroundStyle(.secondary) }
-            }
-            HStack {
-                Button("清理校验记录…", role: .destructive) { prepareConfirmation() }
-                    .disabled(isLoading || isCleaning || (inventory?.recordIDs.isEmpty ?? true))
-                Spacer()
-                if isCleaning { ProgressView().controlSize(.small) }
-            }
-            if let resultSummary {
-                Text(resultSummary).font(.caption).foregroundStyle(.secondary)
-            }
-            if let problem {
-                Label(problem, systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.orange).textSelection(.enabled)
-            }
-            if !failures.isEmpty {
-                DisclosureGroup("\(failures.count) 条记录未清理，查看原因") {
-                    ScrollView {
-                        Text(failures.map { "\($0.fileName)：\($0.reason)" }.joined(separator: "\n"))
-                            .font(.caption).textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }.frame(maxHeight: 100)
-                }
-            }
-        } header: {
-            Text("内容校验")
-        } footer: {
-            Text("清理后，将无法再使用这些记录核对文件。")
-                .foregroundStyle(.secondary)
-        }
-        .task(id: model.integrityRecordsRevision) { await reloadInventory() }
-        .alert("清理校验记录？", isPresented: $showsConfirmation) {
-            Button("取消", role: .cancel) { pendingInventory = nil }
-            Button("移到废纸篓", role: .destructive) { cleanConfirmedRecords() }
-        } message: {
-            Text("将 \(pendingInventory?.recordIDs.count ?? 0) 条校验记录移到废纸篓？任务和文件会保留。")
-        }
-    }
-
-    /// 重新捕获清理范围，确认窗口打开后产生的新记录不加入本轮。
-    private func prepareConfirmation() {
-        guard !isLoading, !isCleaning else { return }
-        Task {
-            await reloadInventory()
-            guard let inventory, !inventory.recordIDs.isEmpty else { return }
-            pendingInventory = inventory
-            showsConfirmation = true
-        }
-    }
-
-    /// 读取失败保留原文件；只有明确有效的 ID 才会出现在可确认清理列表。
-    private func reloadInventory() async {
-        isLoading = true
-        defer { isLoading = false }
-        do {
-            inventory = try await model.integrityStore.inventory()
-            problem = nil
-        } catch {
-            inventory = nil
-            problem = error.localizedDescription
-        }
-    }
-
-    /// 确认后逐项移入废纸篓；部分成功也通知详情刷新，失败文件及原因完整保留。
-    private func cleanConfirmedRecords() {
-        guard !isCleaning, let snapshot = pendingInventory else { return }
-        pendingInventory = nil; isCleaning = true
-        Task {
-            let result = await model.integrityStore.moveToTrash(ids: snapshot.recordIDs)
-            resultFailures = snapshot.failures + result.failures
-            resultSummary = "已清理 \(result.deletedIDs.count) 条，保留 \(resultFailures.count) 条。"
-            if !result.deletedIDs.isEmpty { model.integrityRecordsRevision += 1 }
-            await reloadInventory()
-            isCleaning = false
-        }
     }
 }
 
