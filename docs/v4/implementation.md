@@ -70,7 +70,7 @@
 | S-05 | NetdiskFilesView 调用 createUploadDirectory；上传确认不再创建目录 | 两家新建实测 |
 | S-06 | DirectoryBrowserState 和 FileTree 负责根与节点读取；确认页独立管理提交状态 | 源码及受控检查通过 |
 | S-07 | NetdiskFilesView 复用 FileTree 和 FileTreeRow；DownloadConfirmationView 管理保存位置 | 旧完整页面壳无业务引用；浏览与下载实测 |
-| S-08 | UploadFilesView 查询目录后交给工作区导航；账号核对和失败提示保留 | 两家上传结果定位实测；新补备份定位待界面验证 |
+| S-08 | UploadFilesView 查询目录后交给工作区导航；账号核对和失败提示保留 | 两家上传结果定位及百度旧版本备份定位实测 |
 | S-09 | WorkspaceState 保存待上传草稿，MainView 合并并生成冻结确认请求 | 实际追加、移除和取消通过；拖放待实测 |
 | S-10 | 工作区导航偏好保存目录，停止读写旧上传专用最近目录 | 旧符号和键无业务引用；位置恢复已部分实测 |
 | S-11 | MainView、应用菜单和 DemoData 使用新入口；AddLinkView 保留共享树 | 快捷键和两家分享下载实测；拖放待实测 |
