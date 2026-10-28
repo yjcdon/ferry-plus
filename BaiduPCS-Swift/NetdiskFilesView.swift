@@ -38,6 +38,7 @@ struct NetdiskFilesView: View {
         let id = UUID()
         let context: DirectoryContext
         let targets: [(entry: RemoteEntry, parent: RemoteReference)]
+        let relatedTransfers: [String]
     }
     private var isBusy: Bool { creation != nil || deletion != nil }
     private var sessionIdentity: ObjectIdentifier? {
@@ -133,7 +134,7 @@ struct NetdiskFilesView: View {
             Button("取消", role: .cancel) { pendingDeletion = nil }
             Button("移到回收站", role: .destructive) { pendingDeletion = nil; deletion = request }
         } message: { request in
-            Text("\(request.context.provider.title) · \(accountName)\n\n\(request.targets.prefix(10).map { $0.entry.name }.joined(separator: "\n"))\n\n共 \(request.targets.count) 项。文件夹及其内容将移入网盘回收站，可能影响正在进行的传输。已下载到 Mac 的文件不会删除。")
+            Text("\(request.context.provider.title) · \(accountName)\n\n\(request.targets.prefix(10).map { $0.entry.name }.joined(separator: "\n"))\n\n共 \(request.targets.count) 项。文件夹及其内容将移入网盘回收站，可能影响正在进行的传输。" + (request.relatedTransfers.isEmpty ? "" : "\n相关传输：\(request.relatedTransfers.joined(separator: "、"))"))
         }
     }
 
@@ -311,7 +312,45 @@ struct NetdiskFilesView: View {
             if path.dropLast().contains(where: { references.contains($0.reference) }) { continue }
             targets.append((entry, path.dropLast().last?.reference ?? context.reference))
         }
-        pendingDeletion = .init(context: context, targets: targets)
+        pendingDeletion = .init(context: context, targets: targets,
+                                relatedTransfers: relatedTransfers(for: targets.map(\.entry), account: context.account))
+    }
+
+    /// 只使用任务已有的远端位置和当前已知目录关系，不查询整个网盘。
+    private func relatedTransfers(for targets: [RemoteEntry], account: AccountKey) -> [String] {
+        func contains(_ reference: RemoteReference) -> Bool {
+            targets.contains { target in
+                if target.reference == reference { return true }
+                guard target.isDirectory else { return false }
+                if case let .baidu(path, _) = target.reference, case let .baidu(other, _) = reference {
+                    return other.hasPrefix(path.hasSuffix("/") ? path : path + "/")
+                }
+                return browser.path(to: reference)?.dropLast().contains(where: { $0.reference == target.reference }) == true
+            }
+        }
+        let downloads = model.coordinator.jobs.filter { job in
+            guard job.accountKey == account, job.phase == .transferring || job.phase == .downloading else { return false }
+            var references = job.files.compactMap(\.remoteReference)
+            if case .netdisk(let entries) = job.source {
+                references += entries.map(\.reference)
+                if job.phase == .transferring && entries.contains(where: { entry in
+                    guard entry.isDirectory else { return false }
+                    return targets.contains { target in
+                        if case let .baidu(path, _) = entry.reference, case let .baidu(other, _) = target.reference {
+                            return other.hasPrefix(path.hasSuffix("/") ? path : path + "/")
+                        }
+                        return browser.trail.contains(where: { $0.reference == entry.reference }) ||
+                            browser.path(to: target.reference)?.dropLast().contains(where: { $0.reference == entry.reference }) == true
+                    }
+                }) { return true }
+            }
+            if let directory = job.transferDirectory { references.append(directory.reference) }
+            return references.contains(where: contains)
+        }.map(\.title)
+        let uploads = model.uploadJobs.filter {
+            $0.account == account && !$0.phase.isTerminal && contains($0.destination)
+        }.map(\.title)
+        return Array((downloads + uploads).prefix(3))
     }
 
     private func validFolderName(_ name: String) -> Bool {
