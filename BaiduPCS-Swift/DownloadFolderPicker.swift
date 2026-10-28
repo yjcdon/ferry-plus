@@ -2,7 +2,7 @@ import AppKit
 import FerryCore
 import SwiftUI
 
-/// 新任务的“保存到”菜单。默认是设置中的下载目录。用“其他…”选择的目录只用于这个任务，不修改设置。
+/// 新任务的“下载到”菜单。默认是设置中的下载目录。用“其他…”选择的目录只用于这个任务，不修改设置。
 ///
 /// 选择目录时立即创建 bookmark。创建失败时不选中这个目录，由调用方显示 `error`。
 struct DownloadFolderPicker: View {
@@ -24,7 +24,7 @@ struct DownloadFolderPicker: View {
     }
 
     var body: some View {
-        Picker("保存到", selection: destination) {
+        Picker("下载到", selection: destination) {
             FolderLabel(url: model.currentFolder.url).tag(Destination.settings)
             ForEach(chosenFolders, id: \.self) { folder in
                 FolderLabel(url: folder.url).tag(Destination.chosen(folder))

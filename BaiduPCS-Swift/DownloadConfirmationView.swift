@@ -29,7 +29,7 @@ struct DownloadConfirmationView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("下载到本机").font(.headline)
+                Text("下载到本地").font(.headline)
                 Spacer()
             }.padding()
             Divider()
