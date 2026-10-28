@@ -103,6 +103,8 @@ struct NetdiskFilesView: View {
         .task(id: creation?.id) { if let creation { await createFolder(creation) } }
         .task(id: deletion?.id) { if let deletion { await delete(deletion) } }
         .focusedSceneValue(\.focusTaskSearch, { searchFocusRequest += 1 })
+        .onChange(of: loadID.account) { _, _ in operationMessage = nil }
+        .onChange(of: loadID.session) { _, _ in operationMessage = nil }
         .onChange(of: showsNewFolder || pendingDeletion != nil || isBusy) { _, presented in
             browser.isOperationPresented = presented
         }
@@ -328,7 +330,9 @@ struct NetdiskFilesView: View {
             if browser.currentDirectory == request.context.reference { browser.revealCreated(entry) }
             operationMessage = browser.query.isEmpty ? "已创建“\(entry.name)”。" : "已创建“\(entry.name)”，若未显示请清除筛选查看。"
         } catch {
-            if !Task.isCancelled { operationMessage = "无法确认文件夹是否已创建，请刷新后查看。\n\(error.localizedDescription)" }
+            if !Task.isCancelled && isCurrent(request.context) {
+                operationMessage = "无法确认文件夹是否已创建，请刷新后查看。\n\(error.localizedDescription)"
+            }
         }
     }
 
@@ -353,6 +357,7 @@ struct NetdiskFilesView: View {
                 if !isCurrent(request.context) { break }
             }
         }
+        guard isCurrent(request.context), !Task.isCancelled else { return }
         let unconfirmed = request.targets.count - confirmed
         operationMessage = "已移入回收站 \(confirmed) 项。" +
             (unconfirmed > 0 ? "\n无法确认 \(unconfirmed) 项。" : "") +
