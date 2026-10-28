@@ -342,8 +342,7 @@ struct MainView: View {
 
     private func presentDownload(_ context: DirectoryContext, _ entries: [RemoteEntry]) {
         guard canPresentConfirmation, !entries.isEmpty else { return }
-        downloadConfirmation = .init(account: context.account, session: context.session, entries: entries,
-                                     directory: context.reference, pathDescription: context.pathDescription)
+        downloadConfirmation = .init(account: context.account, session: context.session, entries: entries)
     }
 
     /// 详情关闭后再导航，避免 sheet 销毁使云端定位请求一起消失。

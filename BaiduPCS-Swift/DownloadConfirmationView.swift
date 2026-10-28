@@ -7,8 +7,6 @@ struct DownloadConfirmationTarget: Identifiable {
     let account: AccountKey
     let session: ObjectIdentifier
     let entries: [RemoteEntry]
-    var directory: RemoteReference? = nil
-    var pathDescription: String? = nil
 }
 
 /// 普通下载只确认所选文件与保存位置，枚举和内容检查继续由现有下载任务执行。
@@ -36,9 +34,7 @@ struct DownloadConfirmationView: View {
             }.padding()
             Divider()
             VStack(alignment: .leading, spacing: 14) {
-                source
                 selectedItems
-                FileSelectionSummary(entries: target.entries)
                 if !isContextCurrent {
                     errorLabel("登录状态已变化，请关闭窗口后重新选择下载文件。")
                 }
@@ -73,27 +69,6 @@ struct DownloadConfirmationView: View {
     private var isContextCurrent: Bool {
         !contextInvalidated && model.accountKey(for: target.account.provider) == target.account &&
         sessionIdentity == target.session
-    }
-
-    private var accountName: String {
-        guard model.accountKey(for: target.account.provider) == target.account else { return target.account.accountID }
-        return model.coordinator.accountNames[target.account.provider] ?? target.account.accountID
-    }
-
-    private var sourceDescription: String {
-        if let description = target.pathDescription { return description }
-        guard let directory = target.directory else { return "已选文件" }
-        switch directory {
-        case .baidu(let path, _): return path
-        case .quark(let fid): return fid == "0" ? "根目录" : "当前文件夹"
-        }
-    }
-
-    private var source: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text("\(target.account.provider.title) · \(accountName)").font(.subheadline.bold())
-            Text(sourceDescription).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
-        }
     }
 
     private var selectedItems: some View {

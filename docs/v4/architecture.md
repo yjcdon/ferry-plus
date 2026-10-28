@@ -114,7 +114,7 @@ UploadConfirmationView 复用原本地文件区域、同名策略、UploadPrefli
 
 ### 5.2 下载确认与内容校验
 
-DownloadConfirmationView 接收冻结的 AccountKey、会话、RemoteEntry 数组及来源目录，仅展示来源、文件和本次保存位置。取消不创建任务；点击下载时核对固定会话并同步调用一次 AppModel.addNetdiskJob，然后关闭确认。目录递归继续由已经持久化的任务执行，入队后沿用已有暂停、取消和失败规则。
+DownloadConfirmationView 接收冻结的 AccountKey、会话和 RemoteEntry 数组，仅展示文件和本次保存位置。取消不创建任务；点击下载时核对固定会话并同步调用一次 AppModel.addNetdiskJob，然后关闭确认。目录递归继续由已经持久化的任务执行，入队后沿用已有暂停、取消和失败规则。
 
 按用户最新要求，删除确认页的 IntegritySelection、手动摘要、历史候选查询、JSON 导入及相关异步请求和草稿，不另建隐藏模式，也不自动把历史候选升级为可信当前依据。确认页不再需要入队前递归或等待历史记录。
 
