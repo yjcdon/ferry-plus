@@ -25,6 +25,7 @@ struct UploadConfirmationView: View {
     @State private var selectionError: String?
     @State private var submitError: String?
     @State private var preflight: UploadPreflightResult?
+    @State private var checkedRequest: PreflightRequest?
     @State private var preflightError: String?
     @State private var isCheckingPreflight = false
     @State private var preflightGeneration = 0
@@ -272,12 +273,13 @@ struct UploadConfirmationView: View {
 
     private var canSubmit: Bool {
         isContextCurrent && !isSubmitting && !files.isEmpty && !isCheckingPreflight &&
-        (policy != .replace || target.account.provider == .baidu) && preflight?.canUpload == true
+        (policy != .replace || target.account.provider == .baidu) &&
+        checkedRequest == preflightRequest && preflight?.canUpload == true
     }
 
     /// 只做可取消的源元数据、容量和目录读取；目标身份失效后不发布过期检查结果。
     private func checkPreflight(_ request: PreflightRequest?) async {
-        preflight = nil; preflightError = nil; isCheckingPreflight = request != nil
+        preflight = nil; checkedRequest = nil; preflightError = nil; isCheckingPreflight = request != nil
         guard let request else { return }
         do {
             let summary = try await UploadPreflight.inspect(request.files)
@@ -296,6 +298,7 @@ struct UploadConfirmationView: View {
             guard request == preflightRequest else { return }
             preflight = UploadPreflight.evaluate(summary, entries: entries, policy: request.policy,
                                                   availableBytes: available, capacityReason: capacityReason)
+            checkedRequest = request
             isCheckingPreflight = false
         } catch {
             guard !Task.isCancelled, request == preflightRequest else { return }

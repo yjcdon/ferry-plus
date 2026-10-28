@@ -163,18 +163,16 @@ struct MainView: View {
     private func workspaceEvents<Content: View>(_ content: Content, items: [TransferListItem],
                                                scope: TransferSelection) -> some View {
         content
-        .dropDestination(for: URL.self) { urls, _ in
-            let files = urls.filter(\.isFileURL)
-            guard !workspace.isFiles, !files.isEmpty, canPresentConfirmation else { return false }
-            workspace.prepareUpload(files)
-            return true
-        }
         #if DEBUG
         .task { await showDemoSelection() }
         #endif
         .onChange(of: model.workspaceRequest?.id, initial: true) { _, _ in
             consumeWorkspaceRequest()
         }
+        .onChange(of: hasWorkspacePresentation, initial: true) { _, presented in
+            model.isWorkspaceDialogPresented = presented
+        }
+        .onDisappear { model.isWorkspaceDialogPresented = false }
         .onChange(of: workspace.browser.context != nil) { _, ready in
             if ready { presentRequestedUpload() }
         }
@@ -288,9 +286,13 @@ struct MainView: View {
     }
 
     private var canPresentConfirmation: Bool {
-        model.sheet == nil && uploadConfirmation == nil && downloadConfirmation == nil && uploadDetail == nil &&
-        localVerification == nil && !workspace.browser.isOperationPresented && pendingRemoval == nil &&
-        downloadRemoval.isIdle && operationError == nil
+        model.sheet == nil && !hasWorkspacePresentation && !model.isConfirmingMenuLogOut && model.untrashedItems.isEmpty
+    }
+
+    /// 只由主窗口实际流程推导占用；不反读反馈给 AppModel 的标记，避免关闭后自锁。
+    private var hasWorkspacePresentation: Bool {
+        uploadConfirmation != nil || downloadConfirmation != nil || uploadDetail != nil || localVerification != nil ||
+        workspace.browser.isOperationPresented || pendingRemoval != nil || !downloadRemoval.isIdle || operationError != nil
     }
 
     private var filesContent: some View {
@@ -326,8 +328,10 @@ struct MainView: View {
     /// 来自列表的目标一次冻结；展开和刷新不能改写已经显示的确认。
     private func presentUpload(_ context: DirectoryContext, _ files: [URL]) {
         guard canPresentConfirmation else { return }
+        var seen = Set<URL>()
+        let selected = (workspace.pendingFiles + files).map(\.standardizedFileURL).filter { seen.insert($0).inserted }
         uploadConfirmation = .init(account: context.account, session: context.session, directory: context.reference,
-                                   trail: context.hasUnknownAncestors ? nil : context.trail, files: files)
+                                   trail: context.hasUnknownAncestors ? nil : context.trail, files: selected)
     }
 
     private func presentDownload(_ context: DirectoryContext, _ entries: [RemoteEntry]) {
@@ -393,6 +397,12 @@ struct MainView: View {
         TransferListView(items: items, category: currentCategory, searchText: query, selection: $selection, scope: scope,
                          onLocateUpload: locateUpload)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .dropDestination(for: URL.self) { urls, _ in
+                let files = urls.filter(\.isFileURL)
+                guard !files.isEmpty, canPresentConfirmation else { return false }
+                workspace.prepareUpload(files)
+                return true
+            }
             .edgeBar(.top) {
                 Picker("传输方向", selection: $direction) {
                     ForEach(TransferDirectionFilter.allCases) { Text($0.title).tag($0) }

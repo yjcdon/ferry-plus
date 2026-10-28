@@ -45,6 +45,8 @@ final class AppModel {
     }
 
     var sheet: Sheet?
+    /// 主窗口自己的确认／详情占用展示时，分享入口不能再打开另一层 sheet。
+    var isWorkspaceDialogPresented = false
     var workspaceRequest: WorkspaceRequest?
     /// 菜单栏发起的百度退出确认由主窗口承载，避免菜单关闭后丢失对话框。
     var isConfirmingMenuLogOut = false
@@ -748,9 +750,14 @@ final class AppModel {
         } else { coordinator.netdisks[.quark] = nil }
     }
 
-    /// 已经显示了一个 sheet 时什么也不做：替换它会丢掉用户在其中的操作，例如已打开的分享。
+    /// 分享入口与主窗口的确认、详情共用展示占用规则，避免剪贴板自动打开嵌套 sheet。
+    private var canPresentShare: Bool {
+        sheet == nil && !isWorkspaceDialogPresented && !isConfirmingMenuLogOut && untrashedItems.isEmpty
+    }
+
+    /// 已有确认或详情时不覆盖当前操作；手动与剪贴板分享使用同一入口条件。
     private func present(_ sheet: Sheet) {
-        guard self.sheet == nil else { return }
+        guard canPresentShare else { return }
         self.sheet = sheet
     }
 
@@ -758,14 +765,14 @@ final class AppModel {
     /// 已有 sheet、剪贴板已经读过（包括手动打开添加链接时），或链接已经是一个任务的来源时不打开。
     func detectCopiedLink() async {
         let changeCount = NSPasteboard.general.changeCount
-        guard !isShuttingDown, settings.detectsCopiedLinks, coordinator.isStarted, sheet == nil,
+        guard !isShuttingDown, settings.detectsCopiedLinks, coordinator.isStarted, canPresentShare,
               pasteboardCheck?.changeCount != changeCount else { return }
         guard let link = await shareLinkOnPasteboard(), !Task.isCancelled, !isShuttingDown,
-              settings.detectsCopiedLinks, sheet == nil,
+              settings.detectsCopiedLinks, canPresentShare,
               NSPasteboard.general.changeCount == changeCount,
               !coordinator.jobs.contains(where: { $0.link?.surl == link.surl }) else { return }
         openMainWindow?()
-        sheet = .addLink
+        present(.addLink)
     }
 
     /// 检测期间剪贴板变化或任务取消时不读取、缓存或打开过时结果，留待下次检测。
