@@ -261,11 +261,10 @@ struct NetdiskFilesView: View {
 
     private var columnHeaders: some View {
         HStack(spacing: 8) {
-            sortHeader(.name)
-            Spacer()
+            sortHeader(.name).frame(maxWidth: .infinity, alignment: .leading)
             sortHeader(.modified).frame(width: dateWidth, alignment: .leading)
                 .overlay(alignment: .leading) { resizeHandle(width: $dateWidth, start: $dateDragStart, minimum: 80, maximum: 300) }
-            sortHeader(.size).frame(width: sizeWidth, alignment: .trailing)
+            sortHeader(.size, alignment: .trailing).frame(width: sizeWidth, alignment: .trailing)
                 .overlay(alignment: .leading) { resizeHandle(width: $sizeWidth, start: $sizeDragStart, minimum: 60, maximum: 200) }
         }
     }
@@ -273,8 +272,8 @@ struct NetdiskFilesView: View {
     /// 拖动列左边界调整宽度，标题和文件行共用同一宽度。
     private func resizeHandle(width: Binding<CGFloat>, start: Binding<CGFloat?>, minimum: CGFloat, maximum: CGFloat) -> some View {
         Rectangle().fill(Color.secondary.opacity(0.35)).frame(width: 1, height: 14)
-            .frame(width: 8, height: 20).contentShape(Rectangle())
-            .offset(x: -4)
+            .frame(width: 16, height: 24).contentShape(Rectangle())
+            .offset(x: -8)
             .onHover { hovering in
                 if hovering { NSCursor.resizeLeftRight.set() } else { NSCursor.arrow.set() }
             }
@@ -288,7 +287,7 @@ struct NetdiskFilesView: View {
     }
 
     /// 列标题直接切换同级条目的排序，再次点击当前列反转方向，不发起目录请求。
-    private func sortHeader(_ sort: DirectoryBrowserState.Sort) -> some View {
+    private func sortHeader(_ sort: DirectoryBrowserState.Sort, alignment: Alignment = .leading) -> some View {
         Button {
             if browser.sort == sort { browser.descending.toggle() }
             else { browser.sort = sort; browser.descending = false }
@@ -300,6 +299,8 @@ struct NetdiskFilesView: View {
                         .font(.caption2)
                 }
             }
+            .frame(maxWidth: .infinity, minHeight: 24, alignment: alignment)
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityLabel("按\(sort.title)排序")
