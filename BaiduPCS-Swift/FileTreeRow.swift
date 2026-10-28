@@ -63,7 +63,7 @@ struct FileTreeRow<Entry: FileTreeEntry, Badge: View, Columns: View>: View {
                 } else {
                     HStack {
                         ProgressView().controlSize(.small)
-                        Text("正在加载…").foregroundStyle(.secondary)
+                        Text("加载中").foregroundStyle(.secondary)
                     }
                 }
             } label: {

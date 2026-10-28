@@ -293,7 +293,7 @@ private struct ShareBrowser: View {
                 Button("重试") { retryAttempt += 1 }
             }
         } else {
-            ProgressView("正在加载…")
+            ProgressView("加载中")
         }
     }
 }

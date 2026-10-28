@@ -280,7 +280,7 @@ struct UploadFilesView: View {
     }
 
     @ViewBuilder private var content: some View {
-        if isLoading { ProgressView("正在读取明细…") }
+        if isLoading { ProgressView("加载中") }
         else if let error {
             ContentUnavailableView {
                 Label("无法读取明细", systemImage: "exclamationmark.triangle")

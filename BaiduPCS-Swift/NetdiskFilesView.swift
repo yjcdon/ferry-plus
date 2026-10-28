@@ -189,14 +189,6 @@ struct NetdiskFilesView: View {
                 .disabled(isBusy || browser.isLoading).help("刷新当前目录")
         }
         ToolbarItem(placement: .primaryAction) {
-            Menu {
-                Picker("排序", selection: $browser.sort) {
-                    ForEach(DirectoryBrowserState.Sort.allCases) { Text($0.title).tag($0) }
-                }
-                Toggle("降序", isOn: $browser.descending)
-            } label: { Label("排序", systemImage: "arrow.up.arrow.down") }
-        }
-        ToolbarItem(placement: .primaryAction) {
             TextField("搜索当前目录", text: $browser.query)
                 .textFieldStyle(.roundedBorder).frame(width: 150).focused($searchFocused)
                 .accessibilityLabel("搜索当前目录")
@@ -244,15 +236,37 @@ struct NetdiskFilesView: View {
                 Button("重试") { browser.refresh() }
                 Button("重新登录") { model.presentLogin(for: browser.provider) }
             }
-        } else { ProgressView("正在读取网盘…").frame(maxWidth: .infinity, maxHeight: .infinity) }
+        } else { ProgressView("加载中").frame(maxWidth: .infinity, maxHeight: .infinity) }
     }
 
     private var columnHeaders: some View {
         HStack(spacing: 8) {
-            Text("名称"); Spacer()
-            Text("修改日期").frame(width: dateWidth, alignment: .leading)
-            Text("大小").frame(width: sizeWidth, alignment: .trailing)
+            sortHeader(.name)
+            Spacer()
+            sortHeader(.modified).frame(width: dateWidth, alignment: .leading)
+            sortHeader(.size).frame(width: sizeWidth, alignment: .trailing)
         }
+    }
+
+    /// 列标题直接切换同级条目的排序，再次点击当前列反转方向，不发起目录请求。
+    private func sortHeader(_ sort: DirectoryBrowserState.Sort) -> some View {
+        Button {
+            if browser.sort == sort { browser.descending.toggle() }
+            else { browser.sort = sort; browser.descending = false }
+        } label: {
+            HStack(spacing: 4) {
+                Text(sort.title)
+                if browser.sort == sort {
+                    Image(systemName: browser.descending ? "chevron.down" : "chevron.up")
+                        .font(.caption2)
+                }
+            }
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("按\(sort.title)排序")
+        .accessibilityValue(browser.sort == sort ? (browser.descending ? "降序" : "升序") : "未排序")
+        .help("点击按\(sort.title)排序，再次点击切换升降序")
+        .disabled(isBusy || browser.isLoading)
     }
 
     @ViewBuilder private func badge(_ entry: RemoteEntry) -> some View {
