@@ -134,7 +134,6 @@ struct UploadFilesView: View {
     @State private var isLoading = true
     @State private var error: String?
     @State private var integrityDescriptions: [UUID: String] = [:]
-    @State private var export = ExportFlow()
     @State private var relocation = RelocationFlow()
     @State private var location = LocationFlow()
     private let pageSize = 100
@@ -156,14 +155,7 @@ struct UploadFilesView: View {
         let url: URL
     }
 
-    /// 三个辅助流程各持有自己的请求和结果，不让导出或定位阻塞另一流程。
-    private struct ExportFlow {
-        var request: UUID?
-        var isPreparing = false
-        var document: IntegrityManifestDocument?
-        var isPresented = false
-        var error: String?
-    }
+    /// 源文件重定位与云端定位各自持有请求和结果。
     private struct RelocationFlow {
         var picker: SourcePickerRequest?
         var isPickerPresented = false
@@ -203,10 +195,6 @@ struct UploadFilesView: View {
                     Text(job.batchStatusText).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer()
-                if export.isPreparing { ProgressView().controlSize(.small) }
-                Button("导出已校验摘要…") {
-                    export.error = nil; export.isPreparing = true; export.request = UUID()
-                }.disabled(export.isPreparing || job == nil)
                 Button { generation += 1 } label: { Image(systemName: "arrow.clockwise") }
                     .help("刷新明细").disabled(isLoading)
             }.padding()
@@ -224,10 +212,6 @@ struct UploadFilesView: View {
         }
         .frame(minWidth: 620, idealWidth: 700, minHeight: 420, idealHeight: 520)
         .task(id: page) { await load(page) }
-        .task(id: export.request) {
-            guard let request = export.request else { return }
-            await prepareExport(request)
-        }
         .task(id: relocation.request?.id) {
             guard let request = relocation.request else { return }
             await relocate(request)
@@ -256,26 +240,12 @@ struct UploadFilesView: View {
         .alert("无法重新定位源文件", isPresented: Binding(
             get: { relocation.error != nil }, set: { if !$0 { relocation.error = nil } }
         )) { Button("好") { relocation.error = nil } } message: { Text(relocation.error ?? "") }
-        .fileExporter(isPresented: $export.isPresented, document: export.document, contentTypes: [.json],
-                      defaultFilename: "Ferry-\(jobID.uuidString.prefix(8))-SHA256", onCompletion: { [request = export.request] result in
-            guard let request, export.request == request else { return }
-            export.document = nil; export.request = nil
-            if case .failure(let failure) = result {
-                if (failure as? CocoaError)?.code != .userCancelled { export.error = failure.localizedDescription }
-            }
-        }, onCancellation: { [request = export.request] in
-            guard let request, export.request == request else { return }
-            export.document = nil; export.request = nil; export.isPresented = false
-        })
-        .alert("无法导出摘要清单", isPresented: Binding(
-            get: { export.error != nil }, set: { if !$0 { export.error = nil } }
-        )) { Button("好") { export.error = nil } } message: { Text(export.error ?? "") }
         .onChange(of: job?.fileIDs.count) {
             let count = job?.fileIDs.count ?? 0
             if offset >= count { offset = max(0, ((count - 1) / pageSize) * pageSize) }
         }
         .onDisappear {
-            export = .init(); relocation = .init(); location = .init()
+            relocation = .init(); location = .init()
         }
     }
 
@@ -411,78 +381,6 @@ struct UploadFilesView: View {
         if file.isDirectory { return "目录项目，不进行文件内容校验" }
         if file.integrityRecordID != nil { return integrityDescriptions[file.id] ?? "正在核对校验记录…" }
         return file.phase == .completed ? "已完成，未关联校验记录" : "尚未生成校验记录"
-    }
-
-    private struct ExportFile {
-        let path: String
-        let remoteName: String
-        let size: Int64
-        let digest: String
-    }
-
-    /// 分页只保留目录命名和摘要，不保留完整 UploadFile／分片；每条基准来自独立校验库。
-    private func prepareExport(_ request: UUID) async {
-        defer { if export.request == request { export.isPreparing = false } }
-        do {
-            guard let coordinator = model.uploadCoordinator, let sourceJob = job else { throw UploadCoordinatorError.missingJob }
-            guard sourceJob.fileIDs.count <= IntegrityManifest.maximumEntries else {
-                throw UploadRecordError.invalid("一次最多导出 10000 个清单项目，请拆分上传批次")
-            }
-            let store = model.integrityStore
-            let revision = model.integrityRecordsRevision
-            var directoryNames: [String: String] = [:]
-            var verified: [ExportFile] = []
-            for offset in stride(from: 0, to: sourceJob.fileIDs.count, by: pageSize) {
-                try Task.checkCancellation()
-                let page = try await coordinator.files(jobID: jobID, offset: offset, limit: pageSize)
-                let expectedIDs = Array(sourceJob.fileIDs.dropFirst(offset).prefix(pageSize))
-                guard page.map(\.id) == expectedIDs else { throw UploadRecordError.invalid("上传清单已变化，请重新导出") }
-                for file in page {
-                    try Task.checkCancellation()
-                    if file.isDirectory {
-                        if let name = file.remoteName { directoryNames[file.relativePath] = name }
-                        continue
-                    }
-                    guard file.phase == .completed, let id = file.integrityRecordID else { continue }
-                    let record: IntegrityRecord
-                    do { record = try await store.load(id: id) }
-                    catch { if Self.isMissingRecord(error) { continue }; throw error }
-                    guard record.status == .verified, record.account == sourceJob.account,
-                          record.uploadFileID == file.id, record.reference == file.remoteReference,
-                          let expectation = record.expectation, expectation.algorithm == .sha256,
-                          expectation.origin == .localOriginal, expectation.size == file.source.size,
-                          file.expectation?.algorithm == .sha256, file.expectation?.digest == expectation.digest,
-                          let name = file.remoteName else {
-                        throw UploadRecordError.invalid("文件缺少可确认归属的已验证原始摘要：\(file.relativePath)")
-                    }
-                    verified.append(.init(path: file.relativePath, remoteName: name, size: expectation.size, digest: expectation.digest))
-                }
-            }
-            guard !verified.isEmpty else { throw UploadRecordError.invalid("没有可导出的已校验文件；目录及缺少校验记录的文件不会导出") }
-            let entries = try verified.map { file -> IntegrityManifestEntry in
-                let components = file.path.split(separator: "/").map(String.init)
-                var remote: [String] = []
-                for index in 0..<(components.count - 1) {
-                    let sourcePath = components.prefix(index + 1).joined(separator: "/")
-                    guard let name = directoryNames[sourcePath] else {
-                        throw UploadRecordError.invalid("无法确认已上传目录名称：\(sourcePath)")
-                    }
-                    remote.append(name)
-                }
-                remote.append(file.remoteName)
-                return try IntegrityManifestEntry(relativePath: remote.joined(separator: "/"), size: file.size,
-                                                   algorithm: .sha256, digest: file.digest)
-            }
-            let manifest = try IntegrityManifest(entries: entries)
-            let document = try IntegrityManifestDocument(manifest: manifest)
-            try Task.checkCancellation()
-            guard export.request == request, job?.account == sourceJob.account else { throw UploadCoordinatorError.missingJob }
-            guard model.integrityRecordsRevision == revision else { throw UploadRecordError.invalid("校验记录已变化，请重新导出") }
-            export.document = document; export.isPresented = true
-        } catch {
-            guard !Task.isCancelled, export.request == request else { return }
-            export.error = error.localizedDescription
-        }
     }
 
     /// 只有明确不存在的文件才表示已清理；损坏 JSON、未知版本与权限错误必须继续显示错误。

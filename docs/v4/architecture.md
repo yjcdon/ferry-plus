@@ -118,7 +118,7 @@ DownloadConfirmationView 接收冻结的 AccountKey、会话、RemoteEntry 数�
 
 按用户最新要求，删除确认页的 IntegritySelection、手动摘要、历史候选查询、JSON 导入及相关异步请求和草稿，不另建隐藏模式，也不自动把历史候选升级为可信当前依据。确认页不再需要入队前递归或等待历史记录。
 
-后台 JobCoordinator 仍将可用文件 MD5 传给现有下载引擎，保存旧任务中已有的显式 integrityExpectation／downloadIntegrityBindings 兼容能力；上传完整回读、记录查看与导出不变。本次简化不改变摘要含义或把无依据文件标成已验证，完整源文件比对继续通过验收样本证明。
+后台 JobCoordinator 仍将可用文件 MD5 传给现有下载引擎，保存旧任务中已有的显式 integrityExpectation／downloadIntegrityBindings 兼容能力；上传完整回读和记录查看保留。按用户最新要求，上传明细不再提供摘要导出，删除其专用导出请求、分页清单拼装和文件导出器；其他实际调用方使用的清单类型保留。本次简化不改变摘要含义或把无依据文件标成已验证，完整源文件比对继续通过验收样本证明。
 
 当前 MainView 监听 lastAddedJobID／lastAddedUploadID 会 reveal 任务，需改为：在文件页发起时仅展示“已加入传输”反馈及查看按钮；用户点击才切到传输并定位任务。在传输页发起分享任务仍保留原定位行为。
 
