@@ -80,12 +80,11 @@ extension StubbedNetworkTests {
             #expect(requests[0].query["num"] == "1000")
         }
 
-        @Test func listingStopsOnRepeatedEntries() async throws {
+        @Test func recursiveListingRejectsRepeatedEntries() async {
             let client = Fixture.client { _ in
                 .json(Fixture.listJSON((1...1000).map { (Int64($0), "f\($0)", "/d/f\($0)", false, 1) }))
             }
-            let files = try await client.listFilesRecursively("/d")
-            #expect(files.count == 1000)
+            await #expect(throws: BaiduError.invalidResponse) { try await client.listFilesRecursively("/d") }
             #expect(Stub.shared.requests.count == 2)
         }
 
@@ -95,8 +94,7 @@ extension StubbedNetworkTests {
                 {"errno":0,"list":[
                   {"fs_id":1,"server_filename":"报告","path":"/资料/报告","isdir":1,"size":0,"server_mtime":1700000000},
                   {"fs_id":2,"server_filename":"a b.zip","path":"/资料/a b.zip","isdir":0,"size":"4096","server_mtime":"1700000100"},
-                  {"fs_id":3,"path":"/资料/no-name.txt","isdir":0,"size":7},
-                  {"fs_id":4,"server_filename":"no-path"}
+                  {"fs_id":3,"path":"/资料/no-name.txt","isdir":0,"size":7}
                 ]}
                 """)
             }
@@ -142,12 +140,56 @@ extension StubbedNetworkTests {
             #expect(requests.allSatisfy { $0.query["dir"] == "/d" })
         }
 
-        @Test func listDirectoryStopsOnRepeatedEntries() async throws {
+        @Test func listDirectoryRejectsRepeatedEntries() async {
             let client = Fixture.client { _ in
                 .json(Fixture.listJSON((1...1000).map { (Int64($0), "f\($0)", "/d/f\($0)", false, 1) }))
             }
+            await #expect(throws: BaiduError.invalidResponse) { try await client.listDirectory("/d") }
+            #expect(Stub.shared.requests.count == 2)
+        }
+
+        @Test(arguments: [
+            #"{"errno":0}"#,
+            #"{"errno":0,"list":null}"#,
+            #"{"errno":0,"list":{}}"#,
+            #"{"errno":0,"list":[{"path":"/d/a","isdir":0,"size":1}]}"#,
+            #"{"errno":0,"list":[{"fs_id":0,"path":"/d/a","isdir":0,"size":1}]}"#,
+            #"{"errno":0,"list":[{"fs_id":1.5,"path":"/d/a","isdir":0,"size":1}]}"#,
+            #"{"errno":0,"list":[{"fs_id":1,"isdir":0,"size":1}]}"#,
+            #"{"errno":0,"list":[{"fs_id":1,"path":"d/a","isdir":0,"size":1}]}"#,
+            #"{"errno":0,"list":[{"fs_id":1,"path":"/d/a","size":1}]}"#,
+            #"{"errno":0,"list":[{"fs_id":1,"path":"/d/a","isdir":2,"size":1}]}"#,
+            #"{"errno":0,"list":[{"fs_id":1,"path":"/d/a","isdir":"invalid","size":1}]}"#,
+            #"{"errno":0,"list":[{"fs_id":1,"path":"/d/a","isdir":0}]}"#,
+            #"{"errno":0,"list":[{"fs_id":1,"path":"/d/a","isdir":0,"size":-1}]}"#,
+            #"{"errno":0,"list":[{"fs_id":1,"path":"/d/a","isdir":0,"size":1.5}]}"#,
+            #"{"errno":0,"list":[{"fs_id":1,"path":"/d/a","isdir":0,"size":"invalid"}]}"#,
+            #"{"errno":0,"list":[{"fs_id":1,"path":"/d/a","isdir":0,"size":1},{"fs_id":1,"path":"/d/a","isdir":0,"size":1}]}"#,
+        ])
+        func listDirectoryRejectsIncompleteOrInvalidEntries(_ response: String) async {
+            let client = Fixture.client { _ in .json(response) }
+            await #expect(throws: BaiduError.invalidResponse) { try await client.listDirectory("/d") }
+        }
+
+        @Test func listDirectoryPreservesZeroByteFileAndDirectoryWithoutSize() async throws {
+            let client = Fixture.client { _ in
+                .json(#"{"errno":0,"list":[{"fs_id":"1","path":"/d/empty.bin","isdir":"0","size":"0"},{"fs_id":2,"path":"/d/sub","isdir":1}]}"#)
+            }
             let entries = try await client.listDirectory("/d")
-            #expect(entries.count == 1000)
+            #expect(entries == [
+                NetdiskEntry(fsID: 1, name: "empty.bin", path: "/d/empty.bin", isDirectory: false, size: 0),
+                NetdiskEntry(fsID: 2, name: "sub", path: "/d/sub", isDirectory: true, size: 0),
+            ])
+        }
+
+        @Test func listDirectoryDoesNotReturnFirstPageWhenLaterPageFails() async {
+            let client = Fixture.client { request in
+                if request.query["page"] == "1" {
+                    return .json(Fixture.listJSON((1...1000).map { (Int64($0), "f\($0)", "/d/f\($0)", false, 1) }))
+                }
+                return .json(#"{"errno":-6}"#)
+            }
+            await #expect(throws: BaiduError.loginExpired) { try await client.listDirectory("/d") }
             #expect(Stub.shared.requests.count == 2)
         }
 

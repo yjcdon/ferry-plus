@@ -51,29 +51,40 @@ extension BaiduClient {
         return files
     }
 
-    /// 翻页列出一个目录，直到本页不足一页或出现 `seen` 中的条目。
+    /// 完整读取一个目录；重复身份或缺失必要字段意味着结果不可信，不能返回部分列表。
     private func listPages(_ directory: String, seen: inout Set<Int64>) async throws -> [NetdiskEntry] {
         var entries: [NetdiskEntry] = []
         var page = 1
         while true {
+            try Task.checkCancellation()
             let url = URLEncoding.url("\(Host.pan)/api/list", [
                 ("dir", directory), ("order", "name"), ("desc", "0"), ("clienttype", "0"),
                 ("num", String(Self.listPageSize)), ("page", String(page)),
             ])
             let json = try await panJSON(BaiduRequest(url: url, endpoint: .fileList, cookies: cookies()))
-            let list = json["list"].array
-            var repeated = false
+            guard let rawList = json["list"].raw as? [Any] else { throw BaiduError.invalidResponse }
+            let list = rawList.map(JSON.init)
             for item in list {
-                guard let fsID = item["fs_id"].int64, let path = item["path"].string else { continue }
-                // 服务端忽略分页参数时会重复返回同一页，出现已见过的条目就停止。
-                guard seen.insert(fsID).inserted else { repeated = true; continue }
-                let isDirectory = item["isdir"].bool ?? false
+                guard let fsID = item["fs_id"].string.flatMap(Int64.init), fsID > 0,
+                      let path = item["path"].raw as? String, path.hasPrefix("/"), path != "/",
+                      !Path.lastComponent(path).isEmpty,
+                      let kind = item["isdir"].string.flatMap(Int.init), kind == 0 || kind == 1,
+                      seen.insert(fsID).inserted else { throw BaiduError.invalidResponse }
+                let isDirectory = kind == 1
+                let size: Int64
+                if isDirectory { size = 0 }
+                else {
+                    guard let bytes = item["size"].string.flatMap(Int64.init), bytes >= 0 else {
+                        throw BaiduError.invalidResponse
+                    }
+                    size = bytes
+                }
                 entries.append(NetdiskEntry(
                     fsID: fsID, name: item["server_filename"].string ?? Path.lastComponent(path), path: path,
-                    isDirectory: isDirectory, size: isDirectory ? 0 : item["size"].int64 ?? 0,
+                    isDirectory: isDirectory, size: size,
                     modifiedAt: item["server_mtime"].int64.map { Date(timeIntervalSince1970: TimeInterval($0)) }))
             }
-            if list.count < Self.listPageSize || repeated { break }
+            if list.count < Self.listPageSize { break }
             page += 1
         }
         return entries
