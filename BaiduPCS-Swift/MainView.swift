@@ -786,16 +786,17 @@ private struct StatusBar: View {
 }
 
 /// 原生搜索框直接回写当前窗口状态，工具栏或提示栏更新后仍保持同一条输入链路。
-private struct TaskSearchField: NSViewRepresentable {
+struct TaskSearchField: NSViewRepresentable {
     @Binding var text: String
     let focusRequest: Int
+    var placeholder = "搜索任务"
 
     func makeCoordinator() -> Coordinator { Coordinator(text: $text) }
 
     func makeNSView(context: Context) -> NSSearchField {
         let field = NSSearchField()
-        field.placeholderString = "搜索任务"
-        field.setAccessibilityLabel("搜索任务")
+        field.placeholderString = placeholder
+        field.setAccessibilityLabel(placeholder)
         field.sendsSearchStringImmediately = true
         field.sendsWholeSearchString = false
         field.delegate = context.coordinator

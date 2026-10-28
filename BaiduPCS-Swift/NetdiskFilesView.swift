@@ -11,7 +11,7 @@ struct NetdiskFilesView: View {
     var onConfirmPending: (DirectoryContext) -> Void = { _ in }
     var onCancelPending: () -> Void = {}
     @Environment(AppModel.self) private var model
-    @FocusState private var searchFocused: Bool
+    @State private var searchFocusRequest = 0
     @State private var showsNewFolder = false
     @State private var newFolderContext: DirectoryContext?
     @State private var folderName = ""
@@ -102,7 +102,7 @@ struct NetdiskFilesView: View {
         .task(id: loadID) { await browser.load(model: model) }
         .task(id: creation?.id) { if let creation { await createFolder(creation) } }
         .task(id: deletion?.id) { if let deletion { await delete(deletion) } }
-        .focusedSceneValue(\.focusTaskSearch, { searchFocused = true })
+        .focusedSceneValue(\.focusTaskSearch, { searchFocusRequest += 1 })
         .onChange(of: showsNewFolder || pendingDeletion != nil || isBusy) { _, presented in
             browser.isOperationPresented = presented
         }
@@ -188,9 +188,8 @@ struct NetdiskFilesView: View {
                 .disabled(isBusy || browser.isLoading).help("刷新当前目录")
         }
         ToolbarItem(placement: .primaryAction) {
-            TextField("搜索当前目录", text: $browser.query)
-                .textFieldStyle(.roundedBorder).frame(width: 150).focused($searchFocused)
-                .accessibilityLabel("搜索当前目录")
+            TaskSearchField(text: $browser.query, focusRequest: searchFocusRequest, placeholder: "搜索当前目录")
+                .frame(width: 150)
         }
     }
 
