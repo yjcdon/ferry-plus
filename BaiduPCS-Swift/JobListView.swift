@@ -379,9 +379,9 @@ struct JobStatusLine: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Image(systemName: job.provider == .baidu ? "b.circle" : "q.circle")
+            ProviderIcon(provider: job.provider, size: 14,
+                         accessibilityDescription: job.provider.title + (job.isNetdisk ? "，账号内文件" : "，分享链接"))
                 .help(job.provider.title + (job.isNetdisk ? " · 账号内文件" : " · 分享链接"))
-                .accessibilityLabel(job.provider.title + (job.isNetdisk ? "，账号内文件" : "，分享链接"))
             Text(isRemoving
                  ? "正在移除…"
                  : job.files.contains(where: { model.coordinator.verifyingLocalFiles.contains($0.id) }) ? "正在校验本地文件…"

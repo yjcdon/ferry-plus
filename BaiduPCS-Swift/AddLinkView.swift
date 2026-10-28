@@ -74,8 +74,11 @@ struct AddLinkView: View {
             .disabled(isOpening)
             if let link = DiskShareLink.parse(linkText) {
                 let account = model.accountKey(for: link.provider)
-                Label("\(link.provider.title) · \(account == nil ? "未登录" : model.coordinator.accountNames[link.provider] ?? "已登录账号")",
-                      systemImage: link.provider == .baidu ? "b.circle" : "q.circle")
+                Label {
+                    Text("\(link.provider.title) · \(account == nil ? "未登录" : model.coordinator.accountNames[link.provider] ?? "已登录账号")")
+                } icon: {
+                    ProviderIcon(provider: link.provider, size: 16)
+                }
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
