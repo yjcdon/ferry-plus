@@ -103,7 +103,6 @@ struct NetdiskFilesView: View {
         .task(id: creation?.id) { if let creation { await createFolder(creation) } }
         .task(id: deletion?.id) { if let deletion { await delete(deletion) } }
         .focusedSceneValue(\.focusTaskSearch, { searchFocused = true })
-        .onCommand(#selector(NSResponder.selectAll(_:))) { browser.selectAll() }
         .onChange(of: showsNewFolder || pendingDeletion != nil || isBusy) { _, presented in
             browser.isOperationPresented = presented
         }

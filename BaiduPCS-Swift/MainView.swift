@@ -128,6 +128,7 @@ struct MainView: View {
         let items = visibleItems(downloads: downloads, uploads: uploads)
         let scope = transferScope(items: items)
         let layout = workspaceLayout(downloads: downloads, uploads: uploads, items: items, scope: scope)
+            .focusedSceneValue(\.selectWorkspaceItems, selectWorkspaceItemsAction)
         let events = workspaceEvents(layout, items: items, scope: scope)
         let dialogs = transferDialogs(events)
         integrityRemovalDialogs(dialogs)
@@ -192,10 +193,6 @@ struct MainView: View {
         .focusedSceneValue(\.transferSelection, workspace.isFiles ? nil : scope)
         .focusedSceneValue(\.transferInspectorPresented, workspace.isFiles ? nil : $isInspectorPresented)
         .focusedSceneValue(\.workspaceIsFiles, workspace.isFiles)
-        .onCommand(#selector(NSResponder.selectAll(_:))) {
-            if workspace.isFiles { workspace.browser.selectAll() }
-            else { selection = Set(visibleItems.map(\.id)) }
-        }
         .onChange(of: items.map(\.id)) { _, ids in selection.formIntersection(ids) }
         .onChange(of: model.lastAddedJobID) { _, id in
             guard let id, let job = model.coordinator.jobs.first(where: { $0.id == id }) else { return }
@@ -283,6 +280,15 @@ struct MainView: View {
             Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting(items) }
             Button("好", role: .cancel) {}
         } message: { items in Text("\(items.count) 项仍在原来的位置，可以在 Finder 中手动删除。") }
+    }
+
+    private var selectWorkspaceItemsAction: (() -> Void)? {
+        guard canPresentConfirmation, uploadCommand == nil else { return nil }
+        if workspace.isFiles {
+            guard workspace.browser.context != nil else { return nil }
+            return { workspace.browser.selectAll() }
+        }
+        return { selection = Set(visibleItems.map(\.id)) }
     }
 
     private var canPresentConfirmation: Bool {
@@ -848,6 +854,17 @@ extension FocusedValues {
 
 private struct WorkspaceIsFilesKey: FocusedValueKey {
     typealias Value = Bool
+}
+
+private struct WorkspaceSelectAllKey: FocusedValueKey {
+    typealias Value = () -> Void
+}
+
+extension FocusedValues {
+    var selectWorkspaceItems: (() -> Void)? {
+        get { self[WorkspaceSelectAllKey.self] }
+        set { self[WorkspaceSelectAllKey.self] = newValue }
+    }
 }
 
 extension FocusedValues {

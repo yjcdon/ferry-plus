@@ -1,3 +1,4 @@
+import AppKit
 import FerryCore
 import SwiftUI
 
@@ -44,9 +45,21 @@ private struct FerryCommands: Commands {
     @FocusedValue(\.transferSelection) private var selection
     @FocusedValue(\.focusTaskSearch) private var focusTaskSearch
     @FocusedValue(\.workspaceIsFiles) private var workspaceIsFiles
+    @FocusedValue(\.selectWorkspaceItems) private var selectWorkspaceItems
     @FocusedBinding(\.transferInspectorPresented) private var inspectorPresented: Bool?
 
     var body: some Commands {
+        CommandGroup(replacing: .pasteboard) {
+            editingButton("剪切", action: #selector(NSText.cut(_:))).keyboardShortcut("x")
+            editingButton("拷贝", action: #selector(NSText.copy(_:))).keyboardShortcut("c")
+            editingButton("粘贴", action: #selector(NSText.paste(_:))).keyboardShortcut("v")
+            editingButton("粘贴并匹配样式", action: #selector(NSTextView.pasteAsPlainText(_:)))
+                .keyboardShortcut("v", modifiers: [.command, .option, .shift])
+            editingButton("删除", action: #selector(NSText.delete(_:)))
+            Button("全选", action: selectAll)
+                .keyboardShortcut("a")
+                .disabled(selectWorkspaceItems == nil && NSApp.keyWindow == nil)
+        }
         CommandGroup(after: .sidebar) {
             Button(inspectorPresented == true ? "隐藏详情" : "显示详情") {
                 inspectorPresented?.toggle()
@@ -95,6 +108,18 @@ private struct FerryCommands: Commands {
             AccountCommandsView()
                 .environment(model)
         }
+    }
+    /// 剪贴板行为交给执行时的原生响应者，不缓存会随文本选区变化的可用性。
+    private func editingButton(_ title: String, action: Selector) -> some View {
+        Button(title) { NSApp.sendAction(action, to: nil, from: nil) }
+    }
+
+    /// 文本编辑优先使用原生全选；列表全选仅使用主窗口当前提供的可见范围。
+    private func selectAll() {
+        if let text = NSApp.keyWindow?.firstResponder as? NSText { text.selectAll(nil) }
+        else if let field = NSApp.keyWindow?.firstResponder as? NSTextField { field.selectText(nil) }
+        else if let selectWorkspaceItems { selectWorkspaceItems() }
+        else { NSApp.sendAction(#selector(NSResponder.selectAll(_:)), to: nil, from: nil) }
     }
 }
 
