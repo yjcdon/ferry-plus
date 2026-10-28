@@ -14,6 +14,7 @@ Ferry Plus 是原生 SwiftUI 双网盘传输应用，仅支持 Apple Silicon Mac
 | [4.0 测试用例](v4/test-cases.md) | 40 个用例组，区分真实 App 操作、受控样例与构建检查 |
 | [4.0 设计审查](v4/review.md) | 功能追踪、源码约束、修订结论和后续验证边界 |
 | [4.0 实施记录](v4/implementation.md) | 当前基线、实施结果和实际验证证据 |
+| [网盘品牌图标](v4/brand-assets.md) | 两家官网资源出处、打包方式及摘要 |
 
 ## 3.1 优化方案（实施、审查及发布完成）
 

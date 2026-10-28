@@ -83,6 +83,10 @@ for entry in "16:16x16" "32:16x16@2x" "32:32x32" "64:32x32@2x" \
     cp "$icon_source/icon_${entry%%:*}.png" "$iconset_dir/icon_${entry#*:}.png"
 done
 iconutil -c icns "$iconset_dir" -o "$app_dir/Contents/Resources/AppIcon.icns"
+# 官网品牌 PNG 与 App 图标一起在签名前打包，供原生侧边栏按原色读取。
+for provider_icon in BaiduNetdisk QuarkNetdisk; do
+    cp "$repo_dir/BaiduPCS-Swift/Resources/$provider_icon.png" "$app_dir/Contents/Resources/$provider_icon.png"
+done
 codesign --force --sign "$signing_identity" --timestamp=none --identifier io.github.yjcdon.FerryPlus \
     --entitlements "$repo_dir/BaiduPCS-Swift/BaiduPCS-Swift.entitlements" "$app_dir"
 codesign --verify --strict "$app_dir"

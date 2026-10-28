@@ -71,7 +71,11 @@ struct SidebarView: View {
         List(selection: $page) {
             Section("网盘") {
                 ForEach(Provider.allCases) { provider in
-                    Label(provider.title, systemImage: provider == .baidu ? "b.circle" : "q.circle")
+                    Label {
+                        Text(provider.title)
+                    } icon: {
+                        ProviderIcon(provider: provider)
+                    }
                         .tag(WorkspacePage.files(provider))
                 }
             }
@@ -98,45 +102,40 @@ struct SidebarView: View {
             }
         }
         .edgeBar(.bottom) {
-            AccountView(provider: nil)
+            AccountView()
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
         }
     }
 }
 
-/// 账号入口随列表来源展示，切换来源不会切换登录会话。
+/// 账号与设置固定展示两家登录状态，不随浏览或传输筛选隐藏账号。
 private struct AccountView: View {
-    let provider: Provider?
     @Environment(AppModel.self) private var model
     @State private var isConfirmingLogOut = false
 
     var body: some View {
         Menu {
-            if provider == nil || provider == .baidu {
-                Text("百度网盘 · \(model.account.map { $0.username.isEmpty ? "百度账号" : $0.username } ?? "未登录")")
-                if model.account != nil {
-                    if model.isLoginExpired {
-                        Text("登录已失效")
-                        Button("重新登录…") { model.presentLogin() }
-                    }
-                    Button("退出登录") { isConfirmingLogOut = model.requestLogOut() }
-                } else {
-                    Button("登录…") { model.presentLogin() }
+            Text("百度网盘 · \(model.account.map { $0.username.isEmpty ? "百度账号" : $0.username } ?? "未登录")")
+            if model.account != nil {
+                if model.isLoginExpired {
+                    Text("登录已失效")
+                    Button("重新登录…") { model.presentLogin() }
                 }
+                Button("退出登录") { isConfirmingLogOut = model.requestLogOut() }
+            } else {
+                Button("登录…") { model.presentLogin() }
             }
-            if provider == nil { Divider() }
-            if provider == nil || provider == .quark {
-                Text("夸克网盘 · \(model.quark.summary?.name ?? "未登录")")
-                QuarkAccountControls()
-            }
+            Divider()
+            Text("夸克网盘 · \(model.quark.summary?.name ?? "未登录")")
+            QuarkAccountControls()
             Divider()
             SettingsLink { Text("设置…") }
         } label: {
             HStack(spacing: 8) {
-                Image(systemName: provider == .baidu ? "b.circle" : provider == .quark ? "q.circle" : "person.crop.circle").font(.title2)
+                Image(systemName: "person.crop.circle").font(.title2)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(accountTitle).lineLimit(1)
+                    Text("账号与设置").lineLimit(1)
                     Text(accountStatus).font(.caption).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
@@ -146,26 +145,13 @@ private struct AccountView: View {
         .menuStyle(.button)
         .buttonStyle(.accessoryBar)
         .menuIndicator(.hidden)
-        .help(provider?.title ?? "百度与夸克账号")
+        .help("百度与夸克账号")
         .logOutConfirmation(isPresented: $isConfirmingLogOut)
     }
 
     private var accountStatus: String {
         let baidu = model.account == nil ? "未登录" : model.isLoginExpired ? "登录已失效" : "已登录"
         let quark = model.quark.state.title
-        if provider == .baidu { return "百度网盘 · " + baidu }
-        if provider == .quark { return "夸克网盘 · " + quark }
         return "百度" + baidu + " · 夸克" + quark
-    }
-
-    private var accountTitle: String {
-        switch provider {
-        case .baidu:
-            model.account.map { $0.username.isEmpty ? "百度账号" : $0.username } ?? "登录百度网盘…"
-        case .quark:
-            model.quark.summary?.name ?? "登录夸克网盘…"
-        case nil:
-            "账号与设置"
-        }
     }
 }
