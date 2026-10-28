@@ -68,7 +68,7 @@ struct UploadRow: View {
                 if let verification = job.verificationProgress {
                     ProgressView(value: Double(verification.verifiedBytes), total: Double(max(1, verification.totalBytes)))
                     HStack {
-                        Text("回读校验 · \(verification.relativePath)").lineLimit(1).truncationMode(.middle)
+                        Text("检查文件 · \(verification.relativePath)").lineLimit(1).truncationMode(.middle)
                         Spacer(minLength: 0)
                         Text("\(verification.verifiedBytes.fileSizeText) / \(verification.totalBytes.fileSizeText)")
                     }.font(.caption).foregroundStyle(.secondary)
@@ -291,14 +291,14 @@ struct UploadFilesView: View {
                             }.controlSize(.small).disabled(relocation.request != nil)
                             if relocation.request?.fileID == file.id {
                                 ProgressView().controlSize(.small)
-                                Text("正在完整核对原始内容…").font(.caption).foregroundStyle(.secondary)
+                                Text("正在检查文件…").font(.caption).foregroundStyle(.secondary)
                             }
                         }
-                        Text("源文件移动或授权失效时，可选择同内容文件；完整校验通过后沿用原上传会话。")
+                        Text("文件已移动或无法访问时，请重新选择相同的文件以继续上传。")
                             .font(.caption).foregroundStyle(.secondary)
                     } else if file.phase == .failed, file.remoteReference == nil, !file.isDirectory,
                               file.expectation == nil {
-                        Text("尚无原始内容基准，请重新添加上传。").font(.caption).foregroundStyle(.secondary)
+                        Text("请重新添加文件后上传。").font(.caption).foregroundStyle(.secondary)
                     }
                     if let error = file.error {
                         HStack(alignment: .top) {
@@ -378,9 +378,9 @@ struct UploadFilesView: View {
     }
 
     private func integrityDescription(_ file: UploadFile) -> String {
-        if file.isDirectory { return "目录项目，不进行文件内容校验" }
-        if file.integrityRecordID != nil { return integrityDescriptions[file.id] ?? "正在核对校验记录…" }
-        return file.phase == .completed ? "已完成，未关联校验记录" : "尚未生成校验记录"
+        if file.isDirectory { return "文件夹" }
+        if file.integrityRecordID != nil { return integrityDescriptions[file.id] ?? "正在检查…" }
+        return file.phase == .completed ? "已完成，无法确认文件内容" : "暂无校验信息"
     }
 
     /// 只有明确不存在的文件才表示已清理；损坏 JSON、未知版本与权限错误必须继续显示错误。
@@ -413,14 +413,14 @@ struct UploadFilesView: View {
                         throw UploadRecordError.invalid("校验记录与上传文件归属不一致：\(file.relativePath)")
                     }
                     descriptions[file.id] = switch record.status {
-                    case .verified: "SHA-256 内容校验通过"
+                    case .verified: "文件内容一致"
                     case .mismatch: "内容校验失败"
                     case .pending: "校验尚未完成"
                     case .unavailable: "未验证源文件内容"
                     }
                 } catch {
                     guard Self.isMissingRecord(error) else { throw error }
-                    descriptions[file.id] = "校验记录已清理"
+                    descriptions[file.id] = "校验信息已清理"
                 }
             }
             try Task.checkCancellation()

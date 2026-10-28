@@ -40,7 +40,7 @@ struct DownloadConfirmationView: View {
                 selectedItems
                 FileSelectionSummary(entries: target.entries)
                 if !isContextCurrent {
-                    errorLabel("网盘账号或登录状态已变化，请取消后在文件页重新选择。")
+                    errorLabel("登录状态已变化，请关闭窗口后重新选择下载文件。")
                 }
                 if let folderError { errorLabel(folderError) }
                 if let submissionError { errorLabel(submissionError) }
@@ -85,7 +85,7 @@ struct DownloadConfirmationView: View {
         guard let directory = target.directory else { return "已选文件" }
         switch directory {
         case .baidu(let path, _): return path
-        case .quark(let fid): return fid == "0" ? "根目录" : "已定位目录（ID：\(fid)）"
+        case .quark(let fid): return fid == "0" ? "根目录" : "当前文件夹"
         }
     }
 

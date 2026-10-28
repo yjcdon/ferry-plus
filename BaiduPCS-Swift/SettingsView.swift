@@ -297,7 +297,7 @@ private struct IntegrityRecordSettingsSection: View {
         } header: {
             Text("内容校验")
         } footer: {
-            Text("校验记录独立保存摘要、来源和当时校验结果。清理后，后续下载需要重新提供校验依据。")
+            Text("清理后，将无法再使用这些记录核对文件。")
                 .foregroundStyle(.secondary)
         }
         .task(id: model.integrityRecordsRevision) { await reloadInventory() }
@@ -305,7 +305,7 @@ private struct IntegrityRecordSettingsSection: View {
             Button("取消", role: .cancel) { pendingInventory = nil }
             Button("移到废纸篓", role: .destructive) { cleanConfirmedRecords() }
         } message: {
-            Text("将本次确认的 \(pendingInventory?.recordIDs.count ?? 0) 条校验记录移到废纸篓。任务、本地文件和网盘文件不受影响。无法识别的记录将保留；之后下载需要重新提供校验依据。")
+            Text("将 \(pendingInventory?.recordIDs.count ?? 0) 条校验记录移到废纸篓？任务和文件会保留。")
         }
     }
 

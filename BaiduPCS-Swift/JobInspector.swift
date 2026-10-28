@@ -280,7 +280,7 @@ private struct FileRow: View {
                 Text(file.integrityDescription)
                     .font(.caption)
                     .foregroundStyle(file.integrityStatus == .mismatch ? .red : .secondary)
-                    .help(file.integrityExpectation.map { "\($0.algorithm == .sha256 ? "SHA-256" : "MD5")：\($0.digest)" } ?? "没有明确原始摘要，不能确认与源文件内容一致。")
+                    .help(file.integrityExpectation.map { "\($0.algorithm == .sha256 ? "SHA-256" : "MD5")：\($0.digest)" } ?? "暂无文件校验信息。")
             }
         }
         .monospacedDigit()
@@ -342,7 +342,7 @@ struct CompletedFileVerificationSheet: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("校验本地文件").font(.headline)
             Text(file.relativePath).lineLimit(2).textSelection(.enabled)
-            Text("读取已下载的本地文件并比对摘要，不会重新下载或修改文件。")
+            Text("检查已下载的文件。")
                 .font(.callout).foregroundStyle(.secondary)
             Picker("算法", selection: $algorithm) {
                 Text("SHA-256").tag(IntegrityAlgorithm.sha256)

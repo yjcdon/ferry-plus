@@ -131,7 +131,7 @@ struct NetdiskFilesView: View {
             Button("取消", role: .cancel) { pendingDeletion = nil }
             Button("移到回收站", role: .destructive) { pendingDeletion = nil; deletion = request }
         } message: { request in
-            Text("\(request.context.provider.title) · \(accountName)\n\n\(request.targets.prefix(10).map { $0.entry.name }.joined(separator: "\n"))\n\n共 \(request.targets.count) 项。文件夹及其全部内容将移入网盘回收站，可能影响进行中的传输。任务记录和本地文件保留。")
+            Text("\(request.context.provider.title) · \(accountName)\n\n\(request.targets.prefix(10).map { $0.entry.name }.joined(separator: "\n"))\n\n共 \(request.targets.count) 项。文件夹及其内容将移入网盘回收站，可能影响正在进行的传输。已下载到 Mac 的文件不会删除。")
         }
     }
 
@@ -329,7 +329,7 @@ struct NetdiskFilesView: View {
             if browser.currentDirectory == request.context.reference { browser.revealCreated(entry) }
             operationMessage = browser.query.isEmpty ? "已创建“\(entry.name)”。" : "已创建“\(entry.name)”，若未显示请清除筛选查看。"
         } catch {
-            if !Task.isCancelled { operationMessage = "新建结果未确认：\(error.localizedDescription)\n请刷新目录核对。" }
+            if !Task.isCancelled { operationMessage = "无法确认文件夹是否已创建，请刷新后查看。\n\(error.localizedDescription)" }
         }
     }
 
@@ -354,7 +354,7 @@ struct NetdiskFilesView: View {
                 if !isCurrent(request.context) { break }
             }
         }
-        operationMessage = "已确认移入回收站 \(confirmed) 项，未确认 \(request.targets.count - confirmed) 项。" +
+        operationMessage = "已移入回收站 \(confirmed) 项，无法确认 \(request.targets.count - confirmed) 项。" +
             (failures.isEmpty ? "" : "\n" + failures.joined(separator: "\n"))
     }
 }

@@ -238,24 +238,24 @@ struct MainView: View {
 
     private func integrityRemovalDialogs<Content: View>(_ content: Content) -> some View {
         content
-        .confirmationDialog("保留校验依据", isPresented: Binding(
+        .confirmationDialog("保留文件校验信息？", isPresented: Binding(
             get: { downloadRemoval.isDecisionPresented }, set: { downloadRemoval.isDecisionPresented = $0 }
         ), presenting: downloadRemoval.pending) { pending in
             if let manifest = pending.manifest {
-                Button("导出清单并移除…") {
+                Button("保存校验信息并移除…") {
                     do {
                         let document = try IntegrityManifestDocument(manifest: manifest)
                         downloadRemoval.phase = .exporting(pending, document, presented: true)
                     } catch { operationError = error.localizedDescription }
                 }
             }
-            Button("放弃依据并移除", role: .destructive) {
+            Button("直接移除", role: .destructive) {
                 downloadRemoval.phase = .idle
                 Task { await removeDownload(pending.request, disposition: .discardUnarchivable); await drainDownloadRemovals() }
             }
             Button("取消", role: .cancel) { cancelDownloadRemoval() }
         } message: { pending in
-            Text(pending.preparationError ?? "“\(pending.request.job.title)”中部分摘要尚未通过校验，或缺少准确账号及云端对象关联。导出清单后可用于以后的下载；已验证且关联明确的记录会自动保留。")
+            Text(pending.preparationError ?? "“\(pending.request.job.title)”的部分校验信息无法自动保留。保存后可用于以后核对文件。")
         }
         .onChange(of: downloadRemoval.isDecisionPresented) { _, presented in
             if !presented, case .awaitingDecision(_, presented: false) = downloadRemoval.phase { cancelDownloadRemoval() }
@@ -521,7 +521,7 @@ struct MainView: View {
                 }
             } catch {
                 downloadRemoval.phase = .awaitingDecision(.init(request: request, manifest: nil,
-                    preparationError: "无法导出此任务的校验清单：" + error.localizedDescription + " 任务将保留；也可明确放弃不能归档的依据后移除。"), presented: true)
+                    preparationError: "保存校验信息失败：" + error.localizedDescription + " 可以重试，或直接移除任务。"), presented: true)
                 return
             }
             await removeDownload(request, disposition: .preserve)
@@ -663,7 +663,7 @@ private struct PendingTransferRemoval {
                 lines.append("\(provider.title)：清理 \(count) 个任务转存目录。")
             }
         }
-        if !uploads.isEmpty { lines.append("上传：仅移除本地任务记录，保留本地源文件、已上传云端文件和独立校验记录。未核对的远端操作会阻止移除。") }
+        if !uploads.isEmpty { lines.append("上传：移除任务后，Mac 和网盘中的文件会保留。") }
         return lines.joined(separator: "\n")
     }
 }

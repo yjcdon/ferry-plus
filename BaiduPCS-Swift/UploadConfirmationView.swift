@@ -130,7 +130,7 @@ struct UploadConfirmationView: View {
             Text("目标：\(destinationTitle)")
                 .lineLimit(3).textSelection(.enabled)
             if !isContextCurrent {
-                errorLabel("账号或登录会话已变化，请关闭后重新确认上传目标。")
+                errorLabel("登录状态已变化，请关闭窗口后重新选择上传位置。")
             }
         }.font(.caption).foregroundStyle(.secondary)
     }
@@ -165,7 +165,7 @@ struct UploadConfirmationView: View {
             Button(action: chooseFiles) {
                 VStack(spacing: 4) {
                     Text(files.isEmpty ? "点击选择文件或文件夹，也可拖到这里" : "点击继续添加文件或文件夹")
-                    Text("应用程序等包文件按文件夹上传").font(.caption)
+                    Text("应用程序等包文件将作为文件夹上传").font(.caption)
                 }
                 .foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, minHeight: files.isEmpty ? 70 : 40)
@@ -211,7 +211,7 @@ struct UploadConfirmationView: View {
                 Text("\(result.summary.fileCount) 个文件 · \(result.summary.directoryCount) 个文件夹 · \(ByteCountFormatter.string(fromByteCount: result.summary.totalBytes, countStyle: .file))")
                     .font(.caption).foregroundStyle(.secondary)
                 if result.spaceEstimateOverflow {
-                    errorLabel("所选文件和备份所需容量超出可计算范围，请减少本次上传内容。")
+                    errorLabel("所选文件所需空间过大，请减少上传内容后重试。")
                 } else if result.insufficientSpace {
                     errorLabel("目标剩余容量不足，请清理空间或减少本次上传内容。")
                 }
@@ -252,7 +252,7 @@ struct UploadConfirmationView: View {
         }
         switch target.directory {
         case .baidu(let path, _): return path
-        case .quark(let fid): return "根目录 / … / 已定位目录（\(fid)）"
+        case .quark: return "根目录 / … / 当前文件夹"
         }
     }
 
