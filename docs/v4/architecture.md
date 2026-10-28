@@ -33,7 +33,7 @@
 | F-01 | 主窗口与导航（§4） | MainView、SidebarView、WorkspaceState；页面路由和浏览位置 | 首次百度、恢复页面、两家位置独立、传输筛选不变；TC-01～04 |
 | F-02 | 列表浏览与目录导航（§5.1） | NetdiskFilesView、DirectoryBrowserState；UploadEnvironment.listDirectory、RemoteEntry | 分页完整、逐层展开、勾选与搜索排序范围、迟到响应与路径失效；TC-05～12 |
 | F-03 | 上传与拖放（§5.2） | UploadConfirmationView、待上传草稿；AppModel.addUpload、UploadPreflight | 当前目录／行目标、确认冻结、取消、同名与重复任务；TC-13～18 |
-| F-04 | 下载（§5.3） | DownloadConfirmationView；addNetdiskJob、IntegritySelection | 保存授权、摘要／历史／清单、选择冻结、目录枚举；TC-19～23 |
+| F-04 | 下载（§5.3） | DownloadConfirmationView；addNetdiskJob、现有下载引擎 | 保存授权、选择冻结、一次入队、后台检查与旧数据兼容；TC-19～23 |
 | F-05 | 新建文件夹（§5.4） | 文件页操作、现有 createUploadDirectory | 准确回执、取消、隐藏结果提示、不自动进入新目录；TC-24～25 |
 | F-06 | 删除（§5.5） | 文件页操作；Netdisk.moveToTrash | 当前可见选择、右键范围、部分失败、未知回执不重发；TC-26～29 |
 | F-07 | 旧入口承接（§6） | ContentView、应用菜单、UploadListView、AppModel 导航请求 | 快捷键焦点、详情 sheet 关闭顺序、分享树保留；TC-30～34 |
@@ -114,9 +114,11 @@ UploadConfirmationView 复用原本地文件区域、同名策略、UploadPrefli
 
 ### 5.2 下载确认与内容校验
 
-DownloadConfirmationView 接收冻结的 AccountKey、会话、RemoteEntry 数组及来源目录，承接现有下载保存目录授权与 IntegritySelection。模式含不指定、手动摘要、历史记录、JSON 清单，继续保留各自草稿和格式／归属检查。
+DownloadConfirmationView 接收冻结的 AccountKey、会话、RemoteEntry 数组及来源目录，仅展示来源、文件和本次保存位置。取消不创建任务；点击下载时核对固定会话并同步调用一次 AppModel.addNetdiskJob，然后关闭确认。目录递归继续由已经持久化的任务执行，入队后沿用已有暂停、取消和失败规则。
 
-手动和历史方式仅针对单个文件；JSON 清单保持现有准确引用、大小及账号匹配，沿用现有最多 10000 文件限制。JSON 清单在确认流程中提前枚举所选目录，完成匹配后才调用 AppModel.addNetdiskJob；此期间取消或换会话不得创建任务。普通目录下载沿用先提交持久化任务、再由 JobCoordinator 枚举的流程，提交前取消不创建任务，入队后按已有任务暂停、取消和失败规则处理，不能宣称仍然没有任务。提交成功只关闭确认面板，不改编排顺序。
+按用户最新要求，删除确认页的 IntegritySelection、手动摘要、历史候选查询、JSON 导入及相关异步请求和草稿，不另建隐藏模式，也不自动把历史候选升级为可信当前依据。确认页不再需要入队前递归或等待历史记录。
+
+后台 JobCoordinator 仍将可用文件 MD5 传给现有下载引擎，保存旧任务中已有的显式 integrityExpectation／downloadIntegrityBindings 兼容能力；上传完整回读、记录查看与导出不变。本次简化不改变摘要含义或把无依据文件标成已验证，完整源文件比对继续通过验收样本证明。
 
 当前 MainView 监听 lastAddedJobID／lastAddedUploadID 会 reveal 任务，需改为：在文件页发起时仅展示“已加入传输”反馈及查看按钮；用户点击才切到传输并定位任务。在传输页发起分享任务仍保留原定位行为。
 
@@ -167,14 +169,15 @@ UploadListView 的结果／备份定位先取得现有准确目录结果，再�
 | S-04 | 旧 UploadView 中的 provider Picker、trail、directoryContext、目录 load／resetDirectory、directoryHeader／directoryContent | 删除上传确认内的第二套目录浏览、网盘切换和加载状态 | 浏览归 WorkspaceState／DirectoryBrowserState；确认仍持有不可变的账号、会话与目标，不把它们误当作重复状态删除 |
 | S-05 | 旧 UploadView 的新建目录 alert、Creation 请求和提交任务 | 从上传确认移除，统一到文件页操作 | 复用 AppModel.createUploadDirectory 的一次创建及准确回执核对；不能删除这个仍被文件页调用的能力 |
 | S-06 | 旧下载页与上传页各自的目录请求代次、页面级账号重置、刷新及错误状态 | 合并为工作区根和树节点的读取状态 | 操作确认自身的错误／提交状态仍独立；节点读取代次与已冻结操作会话职责不同，不能强行合成一个全局 loading |
-| S-07 | `NetdiskDownloadView` 私有 NetdiskBrowser、旧窗口标题、网盘分段选择及 footer 组合 | 提取复用列表后清理旧完整页面壳 | 保留 List／FileTree／FileTreeRow、三列布局、标签及勾选语义；下载 footer 中保存位置和内容校验移入 DownloadConfirmationView |
+| S-07 | `NetdiskDownloadView` 私有 NetdiskBrowser、旧窗口标题、网盘分段选择及 footer 组合 | 提取复用列表后清理旧完整页面壳 | 保留 List／FileTree／FileTreeRow、三列布局、标签及勾选语义；保存位置移入 DownloadConfirmationView，普通下载不保留高级校验表单 |
 | S-08 | `UploadListView.location.result` 打开的嵌套浏览 sheet，以及仅为其展示定义的 CloudLocation 载荷 | 删除详情内的第二个浏览展示层 | 结果目录查询、备份定位、请求取消、归属检查与错误提示保留；返回值交给工作区导航，不能连 LocationFlow 的查询职责一起删掉 |
 | S-09 | `AppModel.UploadDraft`／uploadDraft、旧 UploadView 的初始参数拼装和下载页 UploadTarget 的本地文件载荷 | 收敛为主窗口一份待上传草稿及冻结后的确认请求，移除无人使用的旧载荷 | 无目标时的本地文件草稿与已确认目标的操作请求是两个阶段，不保留多份可变文件数组；提交 bookmark 和授权管理继续保留 |
 | S-10 | `UploadView.recentAttempted`／restoresRecent、AppModel 的 recentUploadDirectory／rememberUploadDirectory／forgetUploadDirectory 和相关 trail 参数 | 删除上传窗口专用最近目录恢复、逐级重读及提交后记忆链 | 新导航偏好是唯一浏览位置来源，上传不能被历史目录重定向；全部调用方迁移后停止读写 `upload.recentDirectories.v1`，历史键可保留供旧版本使用，不删除用户历史数据 |
 | S-11 | MainView 两个旧工具栏按钮、应用菜单旧弹窗命令、旧 DemoData 页面分支 | 删除重复按钮及废弃弹窗分支，命令改为工作区导航／精简确认 | 菜单和 Command-U 功能保留；分享入口、搜索焦点和传输命令作用域按现有迁移矩阵验证 |
 | S-12 | 旧页面各自“任务已添加后关闭／自动 reveal”收尾代码 | 收敛为提交结果反馈与明确的“查看传输”动作 | 页面来源明确：文件页不抢转传输，分享流程原有任务定位保留；lastAddedJobID／lastAddedUploadID 仍有调用时不直接删除 |
+| S-13 | 初始精简下载确认仍保留的 IntegritySelection、CandidateRequest、ImportRequest、Submission 和多模式表单 | 按最新用户要求删除模式、候选、导入和异步提交中转，普通确认同步入队 | 保留固定账号会话、一次提交、取消、保存目录和错误提示；后台算法与旧任务存储格式不改，不自动选择历史摘要 |
 
-清理归入 T11，替代能力在 T02、T04～T10 中落地。完成标准：全部入口调用新流程，旧窗口专用符号无业务调用方，公共组件和原有功能可达，并通过 TC-30～34、37～39；搜索无引用只是必要条件，不能代替编译和功能验证。
+清理归入 T11，替代能力在 T02、T04～T10 中落地；S-13 同步更新 T07。完成标准：全部入口调用新流程，旧窗口专用符号无业务调用方，后台与保留能力可达，并通过 TC-19～23、30～34、37～39；搜索无引用只是必要条件，不能代替编译和功能验证。
 
 **保留的核心职责：** 两家 Netdisk／UploadEnvironment 策略、上传下载编排与持久化、共享资源预算、目录准确身份核对、Keychain、UploadPreflight、本地文件授权、同名策略、完整内容校验、源文件重定位、校验清单和传输批量范围。前端常驻浏览不意味着这些后台能力可以删除。此版不合并两家不同上传协议，也不把上传与下载强行改成一套引擎。
 
@@ -184,7 +187,7 @@ UploadListView 的结果／备份定位先取得现有准确目录结果，再�
 
 | 风险 | 处理与证据 |
 | --- | --- |
-| 删旧窗口时丢失高级能力 | 入口矩阵逐项迁移，保留校验、源重定位、分享树；TC-19～23、30～34、39 |
+| 简化界面时误删后台或旧任务能力 | 普通确认按新约定删除高级表单，保留后台校验、旧任务读取、源重定位和分享树；TC-19～23、30～34、39 |
 | 共享百度目录读取改变正常流程 | 局部修正完整性，复核所有 listDirectory／listPages 调用方，已有 DiskTests 与正常多页、重复页样例；TC-10、11、34 |
 | 导航切换导致传输状态销毁或抢页 | 稳定所有者、文件页不发布任务焦点、限制自动 reveal；TC-03、18、35、38 |
 | 多层拖放重复接收／错误目标 | 单次消费、准确行目标、固定确认上下文；TC-13～16 |
