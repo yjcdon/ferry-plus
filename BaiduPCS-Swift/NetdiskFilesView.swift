@@ -318,14 +318,29 @@ struct NetdiskFilesView: View {
 
     /// 只使用任务已有的远端位置和当前已知目录关系，不查询整个网盘。
     private func relatedTransfers(for targets: [RemoteEntry], account: AccountKey) -> [String] {
+        let targetDirectories = Set(targets.filter(\.isDirectory).map(\.reference))
+        let targetReferences = Set(targets.map(\.reference))
+        var descendants: Set<RemoteReference> = []
+        var targetAncestors = Set(browser.trail.map(\.reference))
+        func index(_ node: FileNode<RemoteEntry>, ancestors: [RemoteReference], insideTarget: Bool) {
+            let reference = node.entry?.reference
+            if let reference {
+                if insideTarget { descendants.insert(reference) }
+                if targetReferences.contains(reference) { targetAncestors.formUnion(ancestors) }
+            }
+            let nextAncestors = reference.map { ancestors + [$0] } ?? ancestors
+            let nextInside = insideTarget || reference.map { targetDirectories.contains($0) } == true
+            for child in node.children ?? [] { index(child, ancestors: nextAncestors, insideTarget: nextInside) }
+        }
+        if let root = browser.tree?.root { index(root, ancestors: [], insideTarget: false) }
         func contains(_ reference: RemoteReference) -> Bool {
-            targets.contains { target in
-                if target.reference == reference { return true }
+            if targetReferences.contains(reference) || descendants.contains(reference) { return true }
+            return targets.contains { target in
                 guard target.isDirectory else { return false }
                 if case let .baidu(path, _) = target.reference, case let .baidu(other, _) = reference {
                     return other.hasPrefix(path.hasSuffix("/") ? path : path + "/")
                 }
-                return browser.path(to: reference)?.dropLast().contains(where: { $0.reference == target.reference }) == true
+                return false
             }
         }
         let downloads = model.coordinator.jobs.filter { job in
@@ -339,8 +354,7 @@ struct NetdiskFilesView: View {
                         if case let .baidu(path, _) = entry.reference, case let .baidu(other, _) = target.reference {
                             return other.hasPrefix(path.hasSuffix("/") ? path : path + "/")
                         }
-                        return browser.trail.contains(where: { $0.reference == entry.reference }) ||
-                            browser.path(to: target.reference)?.dropLast().contains(where: { $0.reference == entry.reference }) == true
+                        return targetAncestors.contains(entry.reference)
                     }
                 }) { return true }
             }
