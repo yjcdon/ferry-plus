@@ -618,6 +618,12 @@ final class AppModel {
     /// 主窗口未显示时保留导航意图，已有请求或分享确认不被新的菜单操作覆盖。
     func requestWorkspace(_ action: WorkspaceRequest.Action) {
         guard sheet == nil, workspaceRequest == nil else { return }
+        switch action {
+        case .browse, .upload:
+            guard canPresentShare else { return }
+        case .locate:
+            break // 详情先请求准确位置，再关闭自身，由主窗口消费。
+        }
         workspaceRequest = .init(action: action)
     }
 
