@@ -21,10 +21,8 @@ struct NetdiskFilesView: View {
     @State private var operationMessage: String?
     @State private var dropEntry: RemoteEntry?
     @State private var isDropTarget = false
-    @State private var dateWidth: CGFloat = 110
-    @State private var sizeWidth: CGFloat = 72
-    @State private var dateDragStart: CGFloat?
-    @State private var sizeDragStart: CGFloat?
+    @State private var dateWidth: CGFloat = 150
+    @State private var sizeWidth: CGFloat = 90
 
     private struct LoadID: Hashable {
         let account: AccountKey?
@@ -263,27 +261,10 @@ struct NetdiskFilesView: View {
         HStack(spacing: 8) {
             sortHeader(.name).frame(maxWidth: .infinity, alignment: .leading)
             sortHeader(.modified).frame(width: dateWidth, alignment: .leading)
-                .overlay(alignment: .leading) { resizeHandle(width: $dateWidth, start: $dateDragStart, minimum: 80, maximum: 300) }
+                .overlay(alignment: .leading) { ColumnResizeHandle(width: $dateWidth, minimum: 48, maximum: 600).frame(width: 16, height: 24).offset(x: -8) }
             sortHeader(.size, alignment: .trailing).frame(width: sizeWidth, alignment: .trailing)
-                .overlay(alignment: .leading) { resizeHandle(width: $sizeWidth, start: $sizeDragStart, minimum: 60, maximum: 200) }
+                .overlay(alignment: .leading) { ColumnResizeHandle(width: $sizeWidth, minimum: 48, maximum: 400).frame(width: 16, height: 24).offset(x: -8) }
         }
-    }
-
-    /// 拖动列左边界调整宽度，标题和文件行共用同一宽度。
-    private func resizeHandle(width: Binding<CGFloat>, start: Binding<CGFloat?>, minimum: CGFloat, maximum: CGFloat) -> some View {
-        Rectangle().fill(Color.secondary.opacity(0.35)).frame(width: 1, height: 14)
-            .frame(width: 16, height: 24).contentShape(Rectangle())
-            .offset(x: -8)
-            .onHover { hovering in
-                if hovering { NSCursor.resizeLeftRight.set() } else { NSCursor.arrow.set() }
-            }
-            .gesture(DragGesture(minimumDistance: 2)
-                .onChanged { value in
-                    if start.wrappedValue == nil { start.wrappedValue = width.wrappedValue }
-                    width.wrappedValue = min(maximum, max(minimum, (start.wrappedValue ?? width.wrappedValue) - value.translation.width))
-                }
-                .onEnded { _ in start.wrappedValue = nil })
-            .help("拖动调整列宽")
     }
 
     /// 列标题直接切换同级条目的排序，再次点击当前列反转方向，不发起目录请求。
@@ -402,5 +383,52 @@ struct NetdiskFilesView: View {
         operationMessage = "已移入回收站 \(confirmed) 项。" +
             (unconfirmed > 0 ? "\n无法确认 \(unconfirmed) 项。" : "") +
             (failures.isEmpty ? "" : "\n" + failures.joined(separator: "\n"))
+    }
+}
+
+/// 原生鼠标事件以窗口坐标计算位移，列边界移动时拖动起点保持不变。
+private struct ColumnResizeHandle: NSViewRepresentable {
+    @Binding var width: CGFloat
+    let minimum: CGFloat
+    let maximum: CGFloat
+
+    func makeNSView(context: Context) -> ResizeView {
+        ResizeView(width: $width, minimum: minimum, maximum: maximum)
+    }
+
+    func updateNSView(_ view: ResizeView, context: Context) {
+        view.width = $width
+        view.minimum = minimum
+        view.maximum = maximum
+    }
+
+    final class ResizeView: NSView {
+        var width: Binding<CGFloat>
+        var minimum: CGFloat
+        var maximum: CGFloat
+        private var initialX: CGFloat = 0
+        private var initialWidth: CGFloat = 0
+
+        init(width: Binding<CGFloat>, minimum: CGFloat, maximum: CGFloat) {
+            self.width = width
+            self.minimum = minimum
+            self.maximum = maximum
+            super.init(frame: .zero)
+        }
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+        override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
+        override func draw(_ dirtyRect: NSRect) {
+            NSColor.secondaryLabelColor.withAlphaComponent(0.35).setFill()
+            NSRect(x: (bounds.width - 1) / 2, y: (bounds.height - 14) / 2, width: 1, height: 14).fill()
+        }
+        override func mouseDown(with event: NSEvent) {
+            initialX = event.locationInWindow.x
+            initialWidth = width.wrappedValue
+        }
+        override func mouseDragged(with event: NSEvent) {
+            let delta = event.locationInWindow.x - initialX
+            width.wrappedValue = min(maximum, max(minimum, initialWidth - delta))
+        }
     }
 }
