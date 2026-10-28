@@ -353,7 +353,9 @@ struct NetdiskFilesView: View {
                 if !isCurrent(request.context) { break }
             }
         }
-        operationMessage = "已移入回收站 \(confirmed) 项，无法确认 \(request.targets.count - confirmed) 项。" +
+        let unconfirmed = request.targets.count - confirmed
+        operationMessage = "已移入回收站 \(confirmed) 项。" +
+            (unconfirmed > 0 ? "\n无法确认 \(unconfirmed) 项。" : "") +
             (failures.isEmpty ? "" : "\n" + failures.joined(separator: "\n"))
     }
 }
