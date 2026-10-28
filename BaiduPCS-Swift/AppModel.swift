@@ -957,13 +957,11 @@ final class AppModel {
         }
     }
 
-    /// 完成通知沿用状态行的整批校验判据；没有全部可信结果时明确标记未验证。
     /// 授权拒绝或通知提交失败只影响通知，不改变下载结果；异步任务不持有 AppModel。
     private func notifyCompletion(of job: Job) {
         let content = UNMutableNotificationContent()
-        let verified = job.hasVerifiedContent
-        content.title = verified ? "下载完成" : "下载完成 · 未验证"
-        content.body = job.provider.title + " · " + job.title + (verified ? "" : " · 未验证源文件内容")
+        content.title = "下载完成"
+        content.body = job.provider.title + " · " + job.title
         let request = UNNotificationRequest(identifier: job.id.uuidString, content: content, trigger: nil)
         sendCompletionNotification(request, checkingCancellationAfterSettings: true)
     }

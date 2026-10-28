@@ -416,7 +416,7 @@ struct JobNotes: View {
                 .font(.caption)
         }
         if let warning = job.warning {
-            Text(warning)
+            Text(warning == "没有删除网盘中的转存文件：没有全部文件的可信内容校验结果，已保留转存文件" ? "转存文件已保留" : warning)
                 .font(.caption)
                 .foregroundStyle(.orange)
         }

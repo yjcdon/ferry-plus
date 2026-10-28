@@ -14,7 +14,6 @@ enum NotificationVerification {
         var matchingCount: Int?
         var titleMatches: Bool?
         var providerMatches: Bool?
-        var unverifiedNotice: Bool?
     }
 
     private struct Filter {
@@ -53,11 +52,7 @@ enum NotificationVerification {
         }
         report.matchingCount = matches.count
         report.titleMatches = !matches.isEmpty && matches.allSatisfy {
-            ["下载完成", "下载完成 · 未验证"].contains($0.request.content.title)
-        }
-        report.unverifiedNotice = !matches.isEmpty && matches.allSatisfy {
-            $0.request.content.title == "下载完成 · 未验证" &&
-            $0.request.content.body.hasSuffix(" · 未验证源文件内容")
+            $0.request.content.title == "下载完成"
         }
         let prefix = filter.provider.title + " · "
         report.providerMatches = !matches.isEmpty && matches.allSatisfy { $0.request.content.body.hasPrefix(prefix) }

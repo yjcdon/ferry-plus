@@ -75,7 +75,7 @@ extension Job {
             }
             return isRunning ? "正在下载" : "等待下载"
         case .completed:
-            return hasVerifiedContent ? "已完成" : "已完成 · 未验证源文件内容"
+            return "已完成"
         case .failed(.transfer):
             return isNetdisk ? "准备失败" : "转存失败"
         case .failed(.download):
