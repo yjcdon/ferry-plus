@@ -43,6 +43,7 @@ private struct FerryCommands: Commands {
     @Environment(\.openWindow) private var openWindow
     @FocusedValue(\.transferSelection) private var selection
     @FocusedValue(\.focusTaskSearch) private var focusTaskSearch
+    @FocusedValue(\.workspaceIsFiles) private var workspaceIsFiles
     @FocusedBinding(\.transferInspectorPresented) private var inspectorPresented: Bool?
 
     var body: some Commands {
@@ -54,7 +55,7 @@ private struct FerryCommands: Commands {
             .disabled(inspectorPresented == nil)
         }
         CommandGroup(after: .textEditing) {
-            Button("搜索任务") { focusTaskSearch?() }
+            Button(workspaceIsFiles == true ? "搜索当前目录" : "搜索任务") { focusTaskSearch?() }
                 .keyboardShortcut("f")
                 .disabled(focusTaskSearch == nil)
         }
@@ -64,14 +65,13 @@ private struct FerryCommands: Commands {
                 model.presentAddLink()
             }
             .keyboardShortcut("n")
-            Button("从我的网盘下载…") {
+            Button("浏览网盘") {
                 openWindow(id: ContentView.windowID)
-                model.requestNetdiskDownload()
+                model.requestWorkspace(.browse(nil))
             }
             Button("上传文件…") {
-                let provider = selection?.providerFilter
                 openWindow(id: ContentView.windowID)
-                model.presentUpload(provider: provider)
+                model.requestWorkspace(.upload([]))
             }
             .keyboardShortcut("u")
         }

@@ -5,6 +5,11 @@ import SwiftUI
 /// 方向、网盘、分类和搜索共同决定可见范围；所有交互共享带方向的选择及父页命令入口。
 struct MainView: View {
     @Environment(AppModel.self) private var model
+    @State private var workspace = WorkspaceState()
+    @State private var uploadConfirmation: UploadConfirmationTarget?
+    @State private var downloadConfirmation: DownloadConfirmationTarget?
+    @State private var uploadPhases: [UUID: UploadPhase] = [:]
+    @State private var hasUploadBaseline = false
     @State private var category: JobCategory? = .all
     @State private var providerFilter: Provider?
     @State private var direction: TransferDirectionFilter = .all
@@ -122,55 +127,99 @@ struct MainView: View {
         let uploads = filteredUploads
         let items = visibleItems(downloads: downloads, uploads: uploads)
         let scope = transferScope(items: items)
+        let layout = workspaceLayout(downloads: downloads, uploads: uploads, items: items, scope: scope)
+        let events = workspaceEvents(layout, items: items, scope: scope)
+        let dialogs = transferDialogs(events)
+        integrityRemovalDialogs(dialogs)
+    }
+
+    private func workspaceLayout(downloads: [Job], uploads: [UploadJob], items: [TransferListItem],
+                                 scope: TransferSelection) -> some View {
         NavigationSplitView {
-            SidebarView(selection: $category, providerFilter: $providerFilter,
+            SidebarView(page: $workspace.page, providerFilter: $providerFilter,
                         jobs: downloads, uploadJobs: uploads)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
         } detail: {
-            // 固定详情宽度，隔离 SwiftUI inspector 与原生分栏的尺寸反馈循环。
-            HStack(spacing: 0) {
-                transferContent(items: items, scope: scope)
-                if isInspectorPresented {
-                    Divider()
-                    TransferInspector(scope: scope, onDownloadRemove: requestDownloadRemoval,
-                        onVerify: { jobID, file in localVerification = .init(jobID: jobID, file: file) })
-                        .frame(width: 320)
-                        .frame(maxHeight: .infinity)
+            if workspace.isFiles {
+                filesContent
+            } else {
+                // 固定详情宽度，隔离 SwiftUI inspector 与原生分栏的尺寸反馈循环。
+                HStack(spacing: 0) {
+                    transferContent(items: items, scope: scope)
+                    if isInspectorPresented {
+                        Divider()
+                        TransferInspector(scope: scope, onDownloadRemove: requestDownloadRemoval,
+                            onVerify: { jobID, file in localVerification = .init(jobID: jobID, file: file) })
+                            .frame(width: 320)
+                            .frame(maxHeight: .infinity)
+                    }
                 }
             }
         }
         // 保留最大侧栏下的工具栏空间；详情开启时同时容纳任务列表和固定详情栏。
-        .frame(minWidth: isInspectorPresented ? 960 : 820, minHeight: 400)
+        .frame(minWidth: !workspace.isFiles && isInspectorPresented ? 960 : 820, minHeight: 400)
+    }
+
+    private func workspaceEvents<Content: View>(_ content: Content, items: [TransferListItem],
+                                               scope: TransferSelection) -> some View {
+        content
         .dropDestination(for: URL.self) { urls, _ in
             let files = urls.filter(\.isFileURL)
-            guard !files.isEmpty, model.sheet == nil else { return false }
-            model.presentUpload(provider: providerFilter, files: files)
+            guard !workspace.isFiles, !files.isEmpty, canPresentConfirmation else { return false }
+            workspace.prepareUpload(files)
             return true
         }
         #if DEBUG
         .task { await showDemoSelection() }
         #endif
-        .onChange(of: model.hasPendingNetdiskDownloadRequest, initial: true) { _, requested in
-            if requested { model.presentRequestedNetdiskDownload() }
+        .onChange(of: model.workspaceRequest?.id, initial: true) { _, _ in
+            consumeWorkspaceRequest()
+        }
+        .onChange(of: workspace.browser.context != nil) { _, ready in
+            if ready { presentRequestedUpload() }
+        }
+        .onChange(of: workspace.browser.isOperationPresented) { _, presented in
+            if !presented { consumeWorkspaceRequest() }
         }
         .onChange(of: model.sheet) { _, sheet in
-            if sheet == nil { model.presentRequestedNetdiskDownload() }
+            if sheet == nil { consumeWorkspaceRequest() }
         }
-        .focusedSceneValue(\.transferSelection, scope)
-        .focusedSceneValue(\.transferInspectorPresented, $isInspectorPresented)
-        .focusedSceneValue(\.focusTaskSearch, { searchFocusRequest += 1 })
-        .onCommand(#selector(NSResponder.selectAll(_:))) { selection = Set(visibleItems.map(\.id)) }
+        .onChange(of: workspace.page, initial: true) { old, page in
+            if old != page, let provider = old?.provider { workspace.browser(for: provider).clearSelection() }
+            if case .transfers(let selected) = page { category = selected }
+        }
+        .focusedSceneValue(\.transferSelection, workspace.isFiles ? nil : scope)
+        .focusedSceneValue(\.transferInspectorPresented, workspace.isFiles ? nil : $isInspectorPresented)
+        .focusedSceneValue(\.workspaceIsFiles, workspace.isFiles)
+        .onCommand(#selector(NSResponder.selectAll(_:))) {
+            if workspace.isFiles { workspace.browser.selectAll() }
+            else { selection = Set(visibleItems.map(\.id)) }
+        }
         .onChange(of: items.map(\.id)) { _, ids in selection.formIntersection(ids) }
         .onChange(of: model.lastAddedJobID) { _, id in
             guard let id, let job = model.coordinator.jobs.first(where: { $0.id == id }) else { return }
-            reveal(.download(job))
+            if workspace.isFiles { workspace.lastAddedTransfer = .init(direction: .download, id: id) }
+            else { reveal(.download(job)) }
         }
         .onChange(of: model.lastAddedUploadID) { revealNewUpload() }
         .onChange(of: model.uploadJobs.map(\.id)) { revealNewUpload() }
+        .onChange(of: model.uploadJobs.map { UploadPhaseSnapshot(id: $0.id, account: $0.account, phase: $0.phase) }, initial: true) { _, snapshots in
+            updateDirectoryInvalidation(snapshots)
+        }
+        .sheet(item: $uploadConfirmation, onDismiss: consumeWorkspaceRequest) { target in
+            UploadConfirmationView(target: target) { workspace.pendingFiles = [] }
+        }
+        .sheet(item: $downloadConfirmation, onDismiss: consumeWorkspaceRequest) { target in
+            DownloadConfirmationView(target: target) {}
+        }
         .task(id: uploadCommand?.id) {
             guard let uploadCommand else { return }
             await performUpload(uploadCommand)
         }
+    }
+
+    private func transferDialogs<Content: View>(_ content: Content) -> some View {
+        content
         .confirmationDialog(pendingRemoval?.title ?? "", isPresented: Binding(
             get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }
         ), presenting: pendingRemoval) { pending in
@@ -186,7 +235,11 @@ struct MainView: View {
         .sheet(item: $localVerification) { request in
             CompletedFileVerificationSheet(jobID: request.jobID, file: request.file)
         }
-        .sheet(item: $uploadDetail) { detail in UploadFilesView(jobID: detail.id, title: detail.title) }
+        .sheet(item: $uploadDetail, onDismiss: consumeWorkspaceRequest) { detail in UploadFilesView(jobID: detail.id, title: detail.title) }
+    }
+
+    private func integrityRemovalDialogs<Content: View>(_ content: Content) -> some View {
+        content
         .confirmationDialog("保留校验依据", isPresented: Binding(
             get: { downloadRemoval.isDecisionPresented }, set: { downloadRemoval.isDecisionPresented = $0 }
         ), presenting: downloadRemoval.pending) { pending in
@@ -231,6 +284,102 @@ struct MainView: View {
         } message: { items in Text("\(items.count) 项仍在原来的位置，可以在 Finder 中手动删除。") }
     }
 
+    private var canPresentConfirmation: Bool {
+        model.sheet == nil && uploadConfirmation == nil && downloadConfirmation == nil && uploadDetail == nil && localVerification == nil && !workspace.browser.isOperationPresented
+    }
+
+    private var filesContent: some View {
+        VStack(spacing: 0) {
+            if let added = workspace.lastAddedTransfer {
+                HStack {
+                    Text("已加入传输")
+                    Spacer()
+                    Button("查看传输") {
+                        switch added.direction {
+                        case .download:
+                            if let job = model.coordinator.jobs.first(where: { $0.id == added.id }) { reveal(.download(job)) }
+                        case .upload:
+                            if let job = model.uploadJobs.first(where: { $0.id == added.id }) { reveal(.upload(job)) }
+                        }
+                        workspace.lastAddedTransfer = nil
+                    }
+                    Button { workspace.lastAddedTransfer = nil } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.plain).help("关闭提示")
+                }.font(.callout).padding(10).background(.quaternary)
+            }
+            NetdiskFilesView(browser: workspace.browser, onUpload: presentUpload, onDownload: presentDownload,
+                             pendingFiles: workspace.pendingFiles,
+                             onConfirmPending: { presentUpload($0, workspace.pendingFiles) },
+                             onCancelPending: { workspace.pendingFiles = [] })
+        }
+    }
+
+    /// 来自列表的目标一次冻结；展开和刷新不能改写已经显示的确认。
+    private func presentUpload(_ context: DirectoryContext, _ files: [URL]) {
+        guard canPresentConfirmation else { return }
+        uploadConfirmation = .init(account: context.account, session: context.session, directory: context.reference,
+                                   trail: context.hasUnknownAncestors ? nil : context.trail, files: files)
+    }
+
+    private func presentDownload(_ context: DirectoryContext, _ entries: [RemoteEntry]) {
+        guard canPresentConfirmation, !entries.isEmpty else { return }
+        downloadConfirmation = .init(account: context.account, session: context.session, entries: entries,
+                                     directory: context.reference, pathDescription: context.pathDescription)
+    }
+
+    /// 详情关闭后再导航，避免 sheet 销毁使云端定位请求一起消失。
+    private func consumeWorkspaceRequest() {
+        guard canPresentConfirmation, let request = model.workspaceRequest else { return }
+        model.workspaceRequest = nil
+        switch request.action {
+        case .browse(let provider): workspace.page = .files(provider ?? workspace.recentProvider)
+        case .upload(let files):
+            workspace.prepareUpload(files)
+            if files.isEmpty {
+                workspace.isUploadRequested = true
+                presentRequestedUpload()
+            }
+        case .locate(let account, let directory):
+            guard model.accountKey(for: account.provider) == account else {
+                operationError = "请先登录原任务所属的\(account.provider.title)账号后再定位。"
+                return
+            }
+            workspace.browser(for: account.provider).open(account: account, directory: directory)
+            workspace.page = .files(account.provider)
+        }
+    }
+
+    /// 菜单上传可以先于目录读取完成；目标可用后才打开确认，不丢失已有拖入草稿。
+    private func presentRequestedUpload() {
+        guard workspace.isUploadRequested, workspace.isFiles, canPresentConfirmation,
+              let context = workspace.browser.context else { return }
+        workspace.isUploadRequested = false
+        presentUpload(context, workspace.pendingFiles)
+    }
+
+    private struct UploadPhaseSnapshot: Equatable {
+        let id: UUID
+        let account: AccountKey
+        let phase: UploadPhase
+    }
+
+    /// 只在本轮任务终结时使目录失效，进度快照不会触发网络刷新。
+    private func updateDirectoryInvalidation(_ snapshots: [UploadPhaseSnapshot]) {
+        defer {
+            uploadPhases = Dictionary(uniqueKeysWithValues: snapshots.map { ($0.id, $0.phase) })
+            hasUploadBaseline = true
+        }
+        guard hasUploadBaseline else { return }
+        let providers = Set(snapshots.compactMap { snapshot -> Provider? in
+            let wasAddedHere = model.lastAddedUploadID == snapshot.id
+            guard snapshot.phase.isTerminal,
+                  (uploadPhases[snapshot.id].map { !$0.isTerminal } ?? wasAddedHere),
+                  model.accountKey(for: snapshot.account.provider) == snapshot.account else { return nil }
+            return snapshot.account.provider
+        })
+        for provider in providers { workspace.browser(for: provider).refresh() }
+    }
+
     private func transferContent(items: [TransferListItem], scope: TransferSelection) -> some View {
         TransferListView(items: items, category: currentCategory, searchText: query, selection: $selection, scope: scope,
                          onLocateUpload: locateUpload)
@@ -246,14 +395,11 @@ struct MainView: View {
             .edgeBar(.bottom) { StatusBar() }
             .navigationTitle(providerFilter.map { "\($0.title) · \(currentCategory.title)" } ?? currentCategory.title)
             .navigationSubtitle("\(items.count) 个任务")
+            .focusedSceneValue(\.focusTaskSearch, { searchFocusRequest += 1 })
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button { model.presentAddLink() } label: { Label("添加分享链接", systemImage: "link") }
                         .help("添加分享链接")
-                    Button { model.presentNetdiskDownload() } label: { Label("从我的网盘下载", systemImage: "arrow.down.to.line") }
-                        .help("从我的网盘下载")
-                    Button { model.presentUpload(provider: providerFilter) } label: { Label("上传文件", systemImage: "arrow.up.doc") }
-                        .help("上传文件")
                 }
                 if #available(macOS 26.0, *) {
                     ToolbarSpacer(.fixed, placement: .primaryAction)
@@ -430,6 +576,7 @@ struct MainView: View {
 
     /// 新增任务定位原来源，清理会遮住它的筛选；全部传输视图保持全部，不强迫切换方向。
     private func reveal(_ item: TransferListItem) {
+        workspace.page = .transfers(.all)
         switch item {
         case .download(let job):
             if direction == .upload { direction = .download }
@@ -452,7 +599,9 @@ struct MainView: View {
     private func revealNewUpload() {
         guard let id = model.lastAddedUploadID, id != revealedUploadID,
               let job = model.uploadJobs.first(where: { $0.id == id }) else { return }
-        revealedUploadID = id; reveal(.upload(job))
+        revealedUploadID = id
+        if workspace.isFiles { workspace.lastAddedTransfer = .init(direction: .upload, id: id) }
+        else { reveal(.upload(job)) }
     }
 
     #if DEBUG
@@ -669,6 +818,17 @@ private struct TaskSearchField: NSViewRepresentable {
 
 private struct TaskSearchFocusKey: FocusedValueKey {
     typealias Value = () -> Void
+}
+
+extension FocusedValues {
+    var workspaceIsFiles: Bool? {
+        get { self[WorkspaceIsFilesKey.self] }
+        set { self[WorkspaceIsFilesKey.self] = newValue }
+    }
+}
+
+private struct WorkspaceIsFilesKey: FocusedValueKey {
+    typealias Value = Bool
 }
 
 extension FocusedValues {

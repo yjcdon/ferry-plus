@@ -21,13 +21,6 @@ struct ContentView: View {
             .sheet(item: $model.sheet) { sheet in
                 switch sheet {
                 case .addLink: AddLinkView()
-                case .netdiskDownload: NetdiskDownloadView()
-                case .upload:
-                    let draft = model.uploadDraft
-                    UploadView(initialProvider: draft.provider,
-                               initialDirectory: draft.directory, files: draft.files) { files, account, destination, policy in
-                        try await model.addUpload(files: files, account: account, destination: destination, conflictPolicy: policy)
-                    }
                 }
             }
             .onAppear {

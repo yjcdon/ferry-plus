@@ -40,25 +40,14 @@ final class AppModel {
     /// 主窗口的 sheet。同一时间只显示一个。
     enum Sheet: String, Identifiable {
         case addLink
-        case netdiskDownload
-        case upload
 
         var id: String { rawValue }
     }
 
-    /// 一次上传入口的完整选择；已有 sheet 时不覆盖，重新打开时整体替换。
-    struct UploadDraft {
-        let provider: Provider?
-        let directory: RemoteReference?
-        let files: [URL]
-    }
-
     var sheet: Sheet?
-    private(set) var uploadDraft = UploadDraft(provider: nil, directory: nil, files: [])
+    var workspaceRequest: WorkspaceRequest?
     /// 菜单栏发起的百度退出确认由主窗口承载，避免菜单关闭后丢失对话框。
     var isConfirmingMenuLogOut = false
-    /// 菜单只请求打开；窗口未创建时保留请求，由主窗口承载下载页。
-    private(set) var hasPendingNetdiskDownloadRequest = false
     var lastAddedJobID: UUID?
     private(set) var lastAddedUploadID: UUID?
     @ObservationIgnored var openQuarkLoginWindow: (() -> Void)?
@@ -624,30 +613,15 @@ final class AppModel {
     /// 来源由链接或文件窗口选择，入口不绑定百度登录。
     func presentAddLink() { present(.addLink) }
 
-    /// 从菜单打开主窗口后发起请求；已有添加窗口时沿用不替换当前内容的规则。
-    func requestNetdiskDownload() {
-        guard sheet == nil else { return }
-        hasPendingNetdiskDownloadRequest = true
+    /// 主窗口未显示时保留导航意图，已有请求或分享确认不被新的菜单操作覆盖。
+    func requestWorkspace(_ action: WorkspaceRequest.Action) {
+        guard sheet == nil, workspaceRequest == nil else { return }
+        workspaceRequest = .init(action: action)
     }
 
-    /// 由主窗口挂载或请求变化时消费；已有 sheet 暂留请求，关闭后再打开下载页。
-    func presentRequestedNetdiskDownload() {
-        guard hasPendingNetdiskDownloadRequest, sheet == nil else { return }
-        hasPendingNetdiskDownloadRequest = false
-        presentNetdiskDownload()
-    }
-
-    /// 下载页始终从百度 Tab 打开，来源由页面内的 Tab 选择。
-    func presentNetdiskDownload() {
-        guard sheet == nil else { return }
-        present(.netdiskDownload)
-    }
-
-    /// 沿用主窗口选定网盘及目录上下文，先展示确认窗口，再由用户创建上传任务。
-    func presentUpload(provider: Provider? = nil, directory: RemoteReference? = nil, files: [URL] = []) {
-        guard sheet == nil else { return }
-        uploadDraft = UploadDraft(provider: provider, directory: directory, files: files)
-        present(.upload)
+    /// 上传结果携带原账号和准确目录，不能使用当前另一账号的同名位置。
+    func requestCloudLocation(account: AccountKey, directory: RemoteReference) {
+        requestWorkspace(.locate(account, directory))
     }
 
     func accountKey(for provider: Provider) -> AccountKey? { coordinator.netdisks[provider]?.account }

@@ -61,34 +61,44 @@ enum JobCategory: String, CaseIterable, Identifiable {
     }
 }
 
-/// 侧边栏：任务分类和每个分类的任务数。底部是账号。
+/// 两家文件入口和传输分类分组，文件导航不改变传输网盘筛选。
 struct SidebarView: View {
-    @Binding var selection: JobCategory?
+    @Binding var page: WorkspacePage?
     @Binding var providerFilter: Provider?
     let jobs: [Job]
     var uploadJobs: [UploadJob] = []
     var body: some View {
-        List(selection: $selection) {
-            ForEach(JobCategory.allCases) { category in
-                Label(category.title, systemImage: category.systemImage)
-                    .badge(jobs.count(where: category.contains) + uploadJobs.count(where: category.contains))
-                    .tag(category)
+        List(selection: $page) {
+            Section("网盘") {
+                ForEach(Provider.allCases) { provider in
+                    Label(provider.title, systemImage: provider == .baidu ? "b.circle" : "q.circle")
+                        .tag(WorkspacePage.files(provider))
+                }
+            }
+            Section("传输") {
+                ForEach(JobCategory.allCases) { category in
+                    Label(category.title, systemImage: category.systemImage)
+                        .badge(jobs.count(where: category.contains) + uploadJobs.count(where: category.contains))
+                        .tag(WorkspacePage.transfers(category))
+                }
             }
         }
         .edgeBar(.top) {
-            Picker("网盘", selection: $providerFilter) {
-                Text("全部网盘").tag(Optional<Provider>.none)
-                ForEach(Provider.allCases) { provider in
-                    Text(provider.title).tag(Optional(provider))
+            if page?.provider == nil {
+                Picker("网盘", selection: $providerFilter) {
+                    Text("全部网盘").tag(Optional<Provider>.none)
+                    ForEach(Provider.allCases) { provider in
+                        Text(provider.title).tag(Optional(provider))
+                    }
                 }
+                .labelsHidden()
+                .pickerStyle(.menu)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
         }
         .edgeBar(.bottom) {
-            AccountView(provider: providerFilter)
+            AccountView(provider: nil)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
         }

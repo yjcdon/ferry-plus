@@ -139,12 +139,6 @@ struct UploadFilesView: View {
     @State private var location = LocationFlow()
     private let pageSize = 100
 
-    private struct CloudLocation: Identifiable {
-        let id = UUID()
-        let account: AccountKey
-        let directory: RemoteReference
-    }
-
     private struct CloudRequest: Equatable {
         let id = UUID()
         let fileID: UUID
@@ -177,7 +171,6 @@ struct UploadFilesView: View {
     }
     private struct LocationFlow {
         var request: CloudRequest?
-        var result: CloudLocation?
         var error: String?
     }
 
@@ -241,10 +234,6 @@ struct UploadFilesView: View {
         .task(id: location.request?.id) {
             guard let request = location.request else { return }
             await openCloudDirectory(request)
-        }
-        .sheet(item: $location.result) { location in
-            NetdiskDownloadView(initialAccount: location.account, initialDirectory: location.directory)
-                .environment(model)
         }
         .alert("无法定位文件", isPresented: Binding(
             get: { location.error != nil }, set: { if !$0 { location.error = nil } }
@@ -353,7 +342,7 @@ struct UploadFilesView: View {
         }
     }
 
-    /// 复用任务绑定账号的既有目录浏览入口，不把旧任务转到当前另一账号。
+    /// 先关闭传输明细，再交给主文件页定位；查询及导航始终绑定原任务账号。
     private func openCloudDirectory(_ request: CloudRequest) async {
         defer { if location.request?.id == request.id { location.request = nil } }
         do {
@@ -368,7 +357,8 @@ struct UploadFilesView: View {
                   model.accountKey(for: sourceJob.account.provider) == sourceJob.account else {
                 throw UploadRecordError.invalid("账号或上传任务已变化，请重新定位。")
             }
-            location.result = .init(account: sourceJob.account, directory: directory)
+            dismiss()
+            model.requestCloudLocation(account: sourceJob.account, directory: directory)
         } catch is CancellationError { }
         catch {
             guard location.request?.id == request.id, !Task.isCancelled else { return }
