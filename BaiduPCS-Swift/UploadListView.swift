@@ -70,14 +70,14 @@ struct UploadRow: View {
                     HStack {
                         Text("检查文件 · \(verification.relativePath)").lineLimit(1).truncationMode(.middle)
                         Spacer(minLength: 0)
-                        Text("\(verification.verifiedBytes.fileSizeText) / \(verification.totalBytes.fileSizeText)")
+                        Text("\(verification.verifiedBytes.byteCount) / \(verification.totalBytes.byteCount)")
                     }.font(.caption).foregroundStyle(.secondary)
                 } else {
                     ProgressView(value: Double(job.completedBytes), total: Double(max(1, job.totalBytes)))
                 }
                 HStack(spacing: 12) {
                     Text("\(job.account.provider.title) · \(job.accountName)")
-                    Text("\(job.completedBytes.fileSizeText) / \(job.totalBytes.fileSizeText)")
+                    Text("\(job.completedBytes.byteCount) / \(job.totalBytes.byteCount)")
                     Spacer(minLength: 0)
                 }
                 .font(.caption).foregroundStyle(.secondary)
@@ -114,7 +114,7 @@ struct UploadRow: View {
     /// 显示当前文件本轮的有效均速及估算，不把重试流量当成上传完成速度。
     private func stageDescription(_ metrics: UploadStageMetrics) -> String {
         let phase = metrics.phase == .verifying ? "回读均速" : "上传均速"
-        let rate = Int64(metrics.averageBytesPerSecond.rounded()).fileSizeText
+        let rate = Int64(metrics.averageBytesPerSecond.rounded()).byteCount
         let remaining = Duration.seconds(metrics.estimatedRemainingSeconds).formatted(
             .units(allowed: [.hours, .minutes, .seconds], width: .abbreviated, maximumUnitCount: 2))
         return "\(phase) \(rate)/s · 预计 \(remaining)"

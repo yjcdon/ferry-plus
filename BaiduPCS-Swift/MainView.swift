@@ -727,7 +727,7 @@ private struct StatusBar: View {
         let uploads = model.uploadJobs
         let uploadedBytes = uploads.reduce(Int64(0)) { $0 + $1.completedBytes }
         let uploadTotalBytes = uploads.reduce(Int64(0)) { $0 + $1.totalBytes }
-        let uploadSummary = "上传 \(uploadedBytes.fileSizeText) / \(uploadTotalBytes.fileSizeText)"
+        let uploadSummary = "上传 \(uploadedBytes.byteCount) / \(uploadTotalBytes.byteCount)"
         let activities = jobs.map { model.coordinator.activity(of: $0.id) }
         let progress = JobProgress(
             receivedBytes: activities.reduce(0) { $0 + $1.progress.receivedBytes },
