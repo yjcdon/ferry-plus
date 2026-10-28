@@ -129,6 +129,21 @@ final class FileTree<Entry: FileTreeEntry> {
         selection = selected ? Set(root.children?.compactMap(\.id) ?? []) : []
     }
 
+    /// 文件工作区仅保留仍可见的显式勾选；分享页不调用此入口，保持目录整体选择行为。
+    func retainSelection(in ids: Set<Entry.ID>) {
+        selection.formIntersection(ids)
+    }
+
+    /// 当前筛选下全选顶层项目，不重复记录父目录已经包含的子项。
+    func selectTopLevel(_ nodes: [FileNode<Entry>]) {
+        selection = Set(nodes.compactMap(\.id))
+    }
+
+    /// 收起后清除不可见的独立子项，父目录本身的勾选继续代表整个目录。
+    func discardDescendantSelection(of node: FileNode<Entry>) {
+        selection.subtract(node.descendants.compactMap(\.id))
+    }
+
     /// 勾选的最上层条目。已勾选目录中的条目不重复列出。
     var selectedEntries: [Entry] {
         var result: [Entry] = []

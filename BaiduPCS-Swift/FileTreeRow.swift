@@ -30,7 +30,15 @@ struct FileTreeRow<Entry: FileTreeEntry, Badge: View, Columns: View>: View {
     var onUpload: ((Entry, [URL]) -> Void)? = nil
     /// 仅个人账号网盘提供删除；分享树不提供此操作。
     var onDelete: ((Entry) -> Void)? = nil
+    /// 工作区按同级排序显示；未提供时保持分享页原始顺序。
+    var orderedChildren: ((FileNode<Entry>) -> [FileNode<Entry>])? = nil
+    var allowsExpansion = true
+    var onOpen: ((Entry) -> Void)? = nil
+    var onDownload: ((Entry) -> Void)? = nil
+    var onCollapse: ((FileNode<Entry>) -> Void)? = nil
+    var onDropTarget: ((Entry, Bool) -> Void)? = nil
     @State private var loadAttempt = 0
+    @State private var isDropTarget = false
 
     var body: some View {
         if node.isDirectory {
@@ -39,9 +47,12 @@ struct FileTreeRow<Entry: FileTreeEntry, Badge: View, Columns: View>: View {
                     if children.isEmpty {
                         Text("空目录").foregroundStyle(.secondary)
                     }
-                    ForEach(children) { child in
+                    ForEach(orderedChildren?(node) ?? children) { child in
                         FileTreeRow(node: child, tree: tree, isIncluded: isIncluded || tree.isSelected(node),
-                                    badge: badge, columns: columns, onUpload: onUpload, onDelete: onDelete)
+                                    badge: badge, columns: columns, onUpload: onUpload, onDelete: onDelete,
+                                    orderedChildren: orderedChildren, allowsExpansion: allowsExpansion,
+                                    onOpen: onOpen, onDownload: onDownload, onCollapse: onCollapse,
+                                    onDropTarget: onDropTarget)
                     }
                 } else if let error = node.loadError {
                     HStack {
@@ -60,7 +71,7 @@ struct FileTreeRow<Entry: FileTreeEntry, Badge: View, Columns: View>: View {
             }
             // 收起、换树或关闭窗口时由 SwiftUI 取消正在执行的分页请求。
             .task(id: node.isExpanded ? loadAttempt : nil) {
-                guard node.isExpanded else { return }
+                guard allowsExpansion, node.isExpanded else { return }
                 await tree.load(node)
             }
         } else {
@@ -70,16 +81,29 @@ struct FileTreeRow<Entry: FileTreeEntry, Badge: View, Columns: View>: View {
 
     private var expansion: Binding<Bool> {
         Binding {
-            node.isExpanded
+            allowsExpansion && node.isExpanded
         } set: { expanded in
+            guard allowsExpansion else { return }
             node.isExpanded = expanded
+            if !expanded { onCollapse?(node) }
         }
     }
 
     @ViewBuilder private var label: some View {
         if let entry = node.entry {
             rowLabel
+                .background {
+                    if isDropTarget, entry.isDirectory, onUpload != nil {
+                        RoundedRectangle(cornerRadius: 5).fill(.tint.opacity(0.16))
+                    }
+                }
                 .contextMenu {
+                    if entry.isDirectory, let onOpen {
+                        Button("打开此文件夹") { onOpen(entry) }
+                    }
+                    if let onDownload {
+                        Button("下载") { onDownload(entry) }
+                    }
                     if entry.isDirectory, let onUpload {
                         Button("上传到此文件夹") { onUpload(entry, []) }
                     }
@@ -93,6 +117,12 @@ struct FileTreeRow<Entry: FileTreeEntry, Badge: View, Columns: View>: View {
                     guard !files.isEmpty else { return false }
                     onUpload(entry, files)
                     return true
+                } isTargeted: {
+                    isDropTarget = $0
+                    onDropTarget?(entry, $0)
+                }
+                .onTapGesture(count: 2) {
+                    if entry.isDirectory { onOpen?(entry) }
                 }
         } else { rowLabel }
     }
