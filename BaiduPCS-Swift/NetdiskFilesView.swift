@@ -260,15 +260,15 @@ struct NetdiskFilesView: View {
     private var columnHeaders: some View {
         HStack(spacing: 8) {
             sortHeader(.name).frame(maxWidth: .infinity, alignment: .leading)
-            sortHeader(.modified).frame(width: dateWidth, alignment: .leading)
-                .overlay(alignment: .leading) { ColumnResizeHandle(width: $dateWidth, minimum: 48, maximum: 600).frame(width: 16, height: 24).offset(x: -8) }
+            sortHeader(.modified, leadingInset: 12).frame(width: dateWidth, alignment: .leading)
+                .overlay(alignment: .leading) { ColumnResizeHandle(width: $dateWidth, minimum: 48, maximum: 600).frame(width: 16, height: 24) }
             sortHeader(.size, alignment: .trailing).frame(width: sizeWidth, alignment: .trailing)
-                .overlay(alignment: .leading) { ColumnResizeHandle(width: $sizeWidth, adjacentWidth: $dateWidth, minimum: 48, maximum: 400).frame(width: 16, height: 24).offset(x: -8) }
+                .overlay(alignment: .leading) { ColumnResizeHandle(width: $sizeWidth, adjacentWidth: $dateWidth, minimum: 48, maximum: 400).frame(width: 16, height: 24) }
         }
     }
 
     /// 列标题直接切换同级条目的排序，再次点击当前列反转方向，不发起目录请求。
-    private func sortHeader(_ sort: DirectoryBrowserState.Sort, alignment: Alignment = .leading) -> some View {
+    private func sortHeader(_ sort: DirectoryBrowserState.Sort, alignment: Alignment = .leading, leadingInset: CGFloat = 0) -> some View {
         Button {
             if browser.sort == sort { browser.descending.toggle() }
             else { browser.sort = sort; browser.descending = false }
@@ -280,6 +280,7 @@ struct NetdiskFilesView: View {
                         .font(.caption2)
                 }
             }
+            .padding(.leading, leadingInset)
             .frame(maxWidth: .infinity, minHeight: 24, alignment: alignment)
             .contentShape(Rectangle())
         }
@@ -301,6 +302,7 @@ struct NetdiskFilesView: View {
     private func columns(_ entry: RemoteEntry) -> some View {
         HStack(spacing: 8) {
             Text(entry.modifiedAt?.formatted(date: .abbreviated, time: .omitted) ?? "—")
+                .padding(.leading, 12)
                 .frame(width: dateWidth, alignment: .leading)
             Text(entry.isDirectory ? "—" : entry.size.byteCount)
                 .frame(width: sizeWidth, alignment: .trailing)
@@ -422,10 +424,11 @@ private struct ColumnResizeHandle: NSViewRepresentable {
         }
         required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
         override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
         override func draw(_ dirtyRect: NSRect) {
             NSColor.secondaryLabelColor.withAlphaComponent(0.35).setFill()
-            NSRect(x: (bounds.width - 1) / 2, y: (bounds.height - 14) / 2, width: 1, height: 14).fill()
+            NSRect(x: 1, y: (bounds.height - 14) / 2, width: 1, height: 14).fill()
         }
         override func mouseDown(with event: NSEvent) {
             initialX = event.locationInWindow.x
