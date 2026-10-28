@@ -620,8 +620,8 @@ final class AppModel {
     }
 
     /// 上传结果携带原账号和准确目录，不能使用当前另一账号的同名位置。
-    func requestCloudLocation(account: AccountKey, directory: RemoteReference) {
-        requestWorkspace(.locate(account, directory))
+    func requestCloudLocation(account: AccountKey, directory: RemoteReference, focus: RemoteReference? = nil) {
+        requestWorkspace(.locate(account, directory, focus))
     }
 
     func accountKey(for provider: Provider) -> AccountKey? { coordinator.netdisks[provider]?.account }

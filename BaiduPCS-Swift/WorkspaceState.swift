@@ -17,7 +17,7 @@ struct WorkspaceRequest: Identifiable {
     enum Action {
         case browse(Provider?)
         case upload([URL])
-        case locate(AccountKey, RemoteReference)
+        case locate(AccountKey, RemoteReference, RemoteReference?)
     }
     let id = UUID()
     let action: Action

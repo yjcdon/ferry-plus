@@ -147,6 +147,7 @@ struct FileTreeRow<Entry: FileTreeEntry, Badge: View, Columns: View>: View {
                 }
             }
             .toggleStyle(.checkbox)
+            .accessibilityLabel(entry?.name ?? "")
             .disabled(isIncluded)
             Spacer()
             if let entry {

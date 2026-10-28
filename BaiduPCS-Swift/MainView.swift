@@ -178,8 +178,11 @@ struct MainView: View {
         .onChange(of: workspace.browser.context != nil) { _, ready in
             if ready { presentRequestedUpload() }
         }
-        .onChange(of: workspace.browser.isOperationPresented) { _, presented in
-            if !presented { consumeWorkspaceRequest() }
+        .onChange(of: canPresentConfirmation) { _, available in
+            if available {
+                consumeWorkspaceRequest()
+                presentRequestedUpload()
+            }
         }
         .onChange(of: model.sheet) { _, sheet in
             if sheet == nil { consumeWorkspaceRequest() }
@@ -285,7 +288,9 @@ struct MainView: View {
     }
 
     private var canPresentConfirmation: Bool {
-        model.sheet == nil && uploadConfirmation == nil && downloadConfirmation == nil && uploadDetail == nil && localVerification == nil && !workspace.browser.isOperationPresented
+        model.sheet == nil && uploadConfirmation == nil && downloadConfirmation == nil && uploadDetail == nil &&
+        localVerification == nil && !workspace.browser.isOperationPresented && pendingRemoval == nil &&
+        downloadRemoval.isIdle && operationError == nil
     }
 
     private var filesContent: some View {
@@ -310,7 +315,11 @@ struct MainView: View {
             NetdiskFilesView(browser: workspace.browser, onUpload: presentUpload, onDownload: presentDownload,
                              pendingFiles: workspace.pendingFiles,
                              onConfirmPending: { presentUpload($0, workspace.pendingFiles) },
-                             onCancelPending: { workspace.pendingFiles = [] })
+                             onCancelPending: {
+                                 workspace.pendingFiles = []
+                                 workspace.isUploadRequested = false
+                             })
+                .id(workspace.browser.provider)
         }
     }
 
@@ -339,12 +348,12 @@ struct MainView: View {
                 workspace.isUploadRequested = true
                 presentRequestedUpload()
             }
-        case .locate(let account, let directory):
+        case .locate(let account, let directory, let focus):
             guard model.accountKey(for: account.provider) == account else {
                 operationError = "请先登录原任务所属的\(account.provider.title)账号后再定位。"
                 return
             }
-            workspace.browser(for: account.provider).open(account: account, directory: directory)
+            workspace.browser(for: account.provider).open(account: account, directory: directory, focus: focus)
             workspace.page = .files(account.provider)
         }
     }

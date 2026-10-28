@@ -25,3 +25,16 @@
 | T12～T14 | 未完成；代码 Review 与实际验收继续推进 | 不将设计或源码推断记为通过 |
 
 包回归：SDK 27.0，`scripts/test-packages.sh --scratch-path .build/v4-tests`，310 tests / 25 suites 通过，日志 `/tmp/ferry-v4-package-tests.log`。最新整 App 使用 SDK 26.5 和固定证书构建，日志 `/tmp/ferry-v4-build.log`，已由 Computer Use 启动 `.build/Ferry Plus.app`，百度登录复用并列出根目录。早期 MainView 类型检查超时已通过按职责拆分 View 构造表达式解决，最终构建通过；真实交互验收继续进行。
+
+## 代码审查与受控验证
+
+- 主代理和只读子代理交叉审查后，修复新建上下文冻结、刷新旧树交互／迟到响应、首屏上传意图、已有草稿保留、取消意图、文件页局部状态隔离、云端准确文件定位和确认互斥，见 [审查记录](review.md)。
+- `.build/v4-evidence/harness/result.json`：12 项受控检查通过，直接编译当前 FileTree 和 DirectoryBrowserState；另用实际 UploadEnvironment.baidu 验证同路径旧 fsID 被拒绝。账号容器、读取闭包和 UserDefaults 使用隔离替身，不访问真实凭据或用户偏好。源码摘要前后一致，临时可执行已移到废纸篓。
+
+## 真实 App 验收进行中
+
+- 两家现有登录均直接复用；通过实际 UI 各创建 `FerryPlus-V4-20261028-Acceptance` 专用目录，进入后上传同一 `V4-samples` 文件夹。
+- 样本为 12 MiB + 17 字节 boundary.bin、零字节文件、4572 字节中文文件及空目录。两家上传均已完成，任务显示 5 项完成、0 失败；仍需整理完整回读记录证据，不能仅凭字节进度判成功。
+- 夸克已通过文件页下载回本地，三份文件完整 SHA-256 全部与源一致，证据 `.build/v4-evidence/quark-download-audit.json`。百度下载正在进行，最终摘要待核对。
+- 实际操作已覆盖：网盘切换、路径导航／右键打开／实际坐标双击进入、展开列表、勾选目录包含子项、根级搜索不递归及清空、上传选择器取消后重开、提交后留在文件页、下载单次保存位置、手动摘要格式错误拒绝及历史依据未选择拒绝。
+- 用户追加的真实品牌图标已取得官网资源，待最新构建核对；不将尚未执行的界面用例记为通过。

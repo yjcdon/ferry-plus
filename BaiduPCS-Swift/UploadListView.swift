@@ -142,6 +142,7 @@ struct UploadFilesView: View {
     private struct CloudRequest: Equatable {
         let id = UUID()
         let fileID: UUID
+        let focus: RemoteReference?
     }
 
     private struct SourcePickerRequest: Equatable {
@@ -294,7 +295,9 @@ struct UploadFilesView: View {
                         Spacer()
                         Text(file.phase.displayName).foregroundStyle(.secondary)
                         Menu {
-                            Button("打开云端所在目录", systemImage: "cloud") { location.request = .init(fileID: file.id) }
+                            Button("打开云端所在目录", systemImage: "cloud") {
+                                location.request = .init(fileID: file.id, focus: file.isDirectory ? nil : file.remoteReference)
+                            }
                                 .disabled(file.remoteReference == nil || location.request != nil)
                             Button("在 Finder 中显示源文件", systemImage: "folder") { revealSource(file) }
                             if let replacement = file.replacement, replacement.snapshotObject != nil {
@@ -358,7 +361,7 @@ struct UploadFilesView: View {
                 throw UploadRecordError.invalid("账号或上传任务已变化，请重新定位。")
             }
             dismiss()
-            model.requestCloudLocation(account: sourceJob.account, directory: directory)
+            model.requestCloudLocation(account: sourceJob.account, directory: directory, focus: request.focus)
         } catch is CancellationError { }
         catch {
             guard location.request?.id == request.id, !Task.isCancelled else { return }
