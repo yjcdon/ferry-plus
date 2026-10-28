@@ -21,8 +21,10 @@ struct NetdiskFilesView: View {
     @State private var operationMessage: String?
     @State private var dropEntry: RemoteEntry?
     @State private var isDropTarget = false
-    @ScaledMetric private var dateWidth = 110
-    @ScaledMetric private var sizeWidth = 72
+    @State private var dateWidth: CGFloat = 110
+    @State private var sizeWidth: CGFloat = 72
+    @State private var dateDragStart: CGFloat?
+    @State private var sizeDragStart: CGFloat?
 
     private struct LoadID: Hashable {
         let account: AccountKey?
@@ -38,7 +40,6 @@ struct NetdiskFilesView: View {
         let id = UUID()
         let context: DirectoryContext
         let targets: [(entry: RemoteEntry, parent: RemoteReference)]
-        let relatedTransfers: [String]
     }
     private var isBusy: Bool { creation != nil || deletion != nil }
     private var sessionIdentity: ObjectIdentifier? {
@@ -128,13 +129,31 @@ struct NetdiskFilesView: View {
                 creation = .init(context: context, name: folderName)
             }.disabled(!validFolderName(folderName))
         } message: { Text("在\(newFolderContext?.provider.title ?? browser.provider.title)的“\(newFolderContext?.pathDescription ?? "当前目录")”中新建文件夹。") }
-        .alert("移到网盘回收站？", isPresented: Binding(
-            get: { pendingDeletion != nil }, set: { if !$0 { pendingDeletion = nil } }
-        ), presenting: pendingDeletion) { request in
-            Button("取消", role: .cancel) { pendingDeletion = nil }
-            Button("移到回收站", role: .destructive) { pendingDeletion = nil; deletion = request }
-        } message: { request in
-            Text("\(request.context.provider.title) · \(accountName)\n\n\(request.targets.prefix(10).map { $0.entry.name }.joined(separator: "\n"))\n\n共 \(request.targets.count) 项。文件夹及其内容将移入网盘回收站，可能影响正在进行的传输。" + (request.relatedTransfers.isEmpty ? "" : "\n相关传输：\(request.relatedTransfers.joined(separator: "、"))"))
+        .sheet(item: $pendingDeletion) { request in
+            VStack(spacing: 0) {
+                HStack { Text("移到网盘回收站？").font(.headline); Spacer() }.padding()
+                Divider()
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(request.targets.enumerated()), id: \.offset) { _, target in
+                            HStack(spacing: 8) {
+                                Image(systemName: target.entry.isDirectory ? "folder" : "doc")
+                                    .foregroundStyle(target.entry.isDirectory ? Color.accentColor : Color.secondary)
+                                Text(target.entry.name).lineLimit(1).truncationMode(.middle)
+                            }.frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }.padding()
+                }.frame(minHeight: 60, idealHeight: min(CGFloat(request.targets.count) * 28 + 32, 180), maxHeight: 180)
+                Divider()
+                HStack {
+                    Spacer()
+                    Button("取消", role: .cancel) { pendingDeletion = nil }.keyboardShortcut(.cancelAction)
+                    Button("移到回收站", role: .destructive) {
+                        pendingDeletion = nil
+                        deletion = request
+                    }.keyboardShortcut(.defaultAction)
+                }.padding()
+            }.frame(minWidth: 600, idealWidth: 660)
         }
     }
 
@@ -245,8 +264,27 @@ struct NetdiskFilesView: View {
             sortHeader(.name)
             Spacer()
             sortHeader(.modified).frame(width: dateWidth, alignment: .leading)
+                .overlay(alignment: .leading) { resizeHandle(width: $dateWidth, start: $dateDragStart, minimum: 80, maximum: 300) }
             sortHeader(.size).frame(width: sizeWidth, alignment: .trailing)
+                .overlay(alignment: .leading) { resizeHandle(width: $sizeWidth, start: $sizeDragStart, minimum: 60, maximum: 200) }
         }
+    }
+
+    /// 拖动列左边界调整宽度，标题和文件行共用同一宽度。
+    private func resizeHandle(width: Binding<CGFloat>, start: Binding<CGFloat?>, minimum: CGFloat, maximum: CGFloat) -> some View {
+        Rectangle().fill(Color.secondary.opacity(0.35)).frame(width: 1, height: 14)
+            .frame(width: 8, height: 20).contentShape(Rectangle())
+            .offset(x: -4)
+            .onHover { hovering in
+                if hovering { NSCursor.resizeLeftRight.set() } else { NSCursor.arrow.set() }
+            }
+            .gesture(DragGesture(minimumDistance: 2)
+                .onChanged { value in
+                    if start.wrappedValue == nil { start.wrappedValue = width.wrappedValue }
+                    width.wrappedValue = min(maximum, max(minimum, (start.wrappedValue ?? width.wrappedValue) - value.translation.width))
+                }
+                .onEnded { _ in start.wrappedValue = nil })
+            .help("拖动调整列宽")
     }
 
     /// 列标题直接切换同级条目的排序，再次点击当前列反转方向，不发起目录请求。
@@ -312,59 +350,7 @@ struct NetdiskFilesView: View {
             if path.dropLast().contains(where: { references.contains($0.reference) }) { continue }
             targets.append((entry, path.dropLast().last?.reference ?? context.reference))
         }
-        pendingDeletion = .init(context: context, targets: targets,
-                                relatedTransfers: relatedTransfers(for: targets.map(\.entry), account: context.account))
-    }
-
-    /// 只使用任务已有的远端位置和当前已知目录关系，不查询整个网盘。
-    private func relatedTransfers(for targets: [RemoteEntry], account: AccountKey) -> [String] {
-        let targetDirectories = Set(targets.filter(\.isDirectory).map(\.reference))
-        let targetReferences = Set(targets.map(\.reference))
-        var descendants: Set<RemoteReference> = []
-        var targetAncestors = Set(browser.trail.map(\.reference))
-        func index(_ node: FileNode<RemoteEntry>, ancestors: [RemoteReference], insideTarget: Bool) {
-            let reference = node.entry?.reference
-            if let reference {
-                if insideTarget { descendants.insert(reference) }
-                if targetReferences.contains(reference) { targetAncestors.formUnion(ancestors) }
-            }
-            let nextAncestors = reference.map { ancestors + [$0] } ?? ancestors
-            let nextInside = insideTarget || reference.map { targetDirectories.contains($0) } == true
-            for child in node.children ?? [] { index(child, ancestors: nextAncestors, insideTarget: nextInside) }
-        }
-        if let root = browser.tree?.root { index(root, ancestors: [], insideTarget: false) }
-        func contains(_ reference: RemoteReference) -> Bool {
-            if targetReferences.contains(reference) || descendants.contains(reference) { return true }
-            return targets.contains { target in
-                guard target.isDirectory else { return false }
-                if case let .baidu(path, _) = target.reference, case let .baidu(other, _) = reference {
-                    return other.hasPrefix(path.hasSuffix("/") ? path : path + "/")
-                }
-                return false
-            }
-        }
-        let downloads = model.coordinator.jobs.filter { job in
-            guard job.accountKey == account, job.phase == .transferring || job.phase == .downloading else { return false }
-            var references = job.files.compactMap(\.remoteReference)
-            if case .netdisk(let entries) = job.source {
-                references += entries.map(\.reference)
-                if job.phase == .transferring && entries.contains(where: { entry in
-                    guard entry.isDirectory else { return false }
-                    return targets.contains { target in
-                        if case let .baidu(path, _) = entry.reference, case let .baidu(other, _) = target.reference {
-                            return other.hasPrefix(path.hasSuffix("/") ? path : path + "/")
-                        }
-                        return targetAncestors.contains(entry.reference)
-                    }
-                }) { return true }
-            }
-            if let directory = job.transferDirectory { references.append(directory.reference) }
-            return references.contains(where: contains)
-        }.map(\.title)
-        let uploads = model.uploadJobs.filter {
-            $0.account == account && !$0.phase.isTerminal && contains($0.destination)
-        }.map(\.title)
-        return Array((downloads + uploads).prefix(3))
+        pendingDeletion = .init(context: context, targets: targets)
     }
 
     private func validFolderName(_ name: String) -> Bool {
