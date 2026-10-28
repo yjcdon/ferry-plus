@@ -20,6 +20,7 @@
 | `simple-download-audit.json` | 下载表单简化后，百度小文件下载成功且完整摘要一致 |
 | `data-before.json` | 实施前 19 个 JSON 文件摘要基线；最终兼容比对尚未完成 |
 | `data-interim-audit.json` | 原有 18 份校验记录逐字节未变；任务文件因本轮添加任务发生变化，尚不能替代最终任务语义比对 |
+| `data-latest-audit.json` | 再次核对原有 18 份校验记录均未变化；任务语义比对仍待完成 |
 
 ## 用例逐组进展
 
