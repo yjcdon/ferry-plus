@@ -329,7 +329,7 @@ struct NetdiskFilesView: View {
             if browser.currentDirectory == request.context.reference { browser.revealCreated(entry) }
             operationMessage = browser.query.isEmpty ? "已创建“\(entry.name)”。" : "已创建“\(entry.name)”，若未显示请清除筛选查看。"
         } catch {
-            if !Task.isCancelled { operationMessage = "新建结果未确认：\(error.localizedDescription)。请刷新目录核对。" }
+            if !Task.isCancelled { operationMessage = "新建结果未确认：\(error.localizedDescription)\n请刷新目录核对。" }
         }
     }
 
