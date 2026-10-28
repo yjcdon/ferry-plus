@@ -141,7 +141,8 @@ private struct JobDetail: View {
                     ForEach(job.files) { file in
                         VStack(alignment: .leading, spacing: 6) {
                             FileRow(file: file, activity: model.coordinator.activity(ofFile: file.id))
-                            if job.canVerifyCompletedFiles {
+                            if job.canVerifyCompletedFiles,
+                               file.integrityExpectation?.origin == .userProvided || model.coordinator.verifyingLocalFiles.contains(file.id) {
                                 if model.coordinator.verifyingLocalFiles.contains(file.id) {
                                     HStack {
                                         ProgressView().controlSize(.small)
@@ -277,10 +278,9 @@ private struct FileRow: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                Text(file.integrityDescription)
-                    .font(.caption)
-                    .foregroundStyle(file.integrityStatus == .mismatch ? .red : .secondary)
-                    .help(file.integrityExpectation.map { "\($0.algorithm == .sha256 ? "SHA-256" : "MD5")：\($0.digest)" } ?? "暂无文件校验信息。")
+                if file.integrityStatus == .mismatch {
+                    Text("文件内容不一致").font(.caption).foregroundStyle(.red)
+                }
             }
         }
         .monospacedDigit()
