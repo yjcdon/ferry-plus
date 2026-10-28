@@ -142,6 +142,7 @@ struct UploadFilesView: View {
         let id = UUID()
         let fileID: UUID
         let focus: RemoteReference?
+        var directory: RemoteReference? = nil
     }
 
     private struct SourcePickerRequest: Equatable {
@@ -270,7 +271,10 @@ struct UploadFilesView: View {
                             }
                                 .disabled(file.remoteReference == nil || location.request != nil)
                             Button("在 Finder 中显示源文件", systemImage: "folder") { revealSource(file) }
-                            if let replacement = file.replacement, replacement.snapshotObject != nil {
+                            if let replacement = file.replacement, let snapshot = replacement.snapshotObject {
+                                Button("打开旧版本备份", systemImage: "clock.arrow.circlepath") {
+                                    location.request = .init(fileID: file.id, focus: snapshot, directory: replacement.parent)
+                                }.disabled(location.request != nil)
                                 Button("复制旧版本备份名称", systemImage: "doc.on.doc") {
                                     NSPasteboard.general.clearContents()
                                     NSPasteboard.general.setString(replacement.snapshotName, forType: .string)
@@ -323,7 +327,12 @@ struct UploadFilesView: View {
             guard model.accountKey(for: sourceJob.account.provider) == sourceJob.account else {
                 throw UploadRecordError.invalid("请先登录此任务的\(sourceJob.account.provider.title)账号“\(sourceJob.accountName)”再打开云端目录。")
             }
-            let directory = try await coordinator.resultDirectory(jobID: jobID, fileID: request.fileID)
+            let directory: RemoteReference
+            if let backupDirectory = request.directory {
+                directory = backupDirectory
+            } else {
+                directory = try await coordinator.resultDirectory(jobID: jobID, fileID: request.fileID)
+            }
             try Task.checkCancellation()
             guard location.request?.id == request.id else { return }
             guard job?.account == sourceJob.account,
