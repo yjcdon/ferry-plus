@@ -129,10 +129,7 @@ public actor UploadCoordinator {
     /// 明细分页读取，避免展示列表时把整棵目录及所有分片常驻内存。
     public func files(jobID: UUID, offset: Int = 0, limit: Int = 100) async throws -> [UploadFile] {
         guard let job = jobs[jobID] else { throw UploadCoordinatorError.missingJob }
-        guard offset >= 0, (1...500).contains(limit) else { throw UploadRecordError.invalid("上传明细分页无效") }
-        var result: [UploadFile] = []
-        for id in job.fileIDs.dropFirst(offset).prefix(limit) { result.append(try await store.loadFile(id: id, in: job)) }
-        return result
+        return try await store.loadFiles(in: job, offset: offset, limit: limit)
     }
 
     /// 定位已确认产物所在的准确云端目录；嵌套文件只读取已发布父目录，不按同名条目猜测。

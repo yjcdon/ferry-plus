@@ -63,6 +63,16 @@ public actor UploadStore {
         return try readFile(id: id, in: published)
     }
 
+    /// 分页读取当前权威成员；每页只读取一次批次清单，逐项保留文件身份与账号校验。
+    public func loadFiles(in job: UploadJob, offset: Int, limit: Int) throws -> [UploadFile] {
+        guard offset >= 0, (1...500).contains(limit) else { throw UploadRecordError.invalid("上传明细分页无效") }
+        let published = try publishedJob(for: job)
+        return try published.fileIDs.dropFirst(offset).prefix(limit).map {
+            try Task.checkCancellation()
+            return try readMemberFile(id: $0, in: published)
+        }
+    }
+
     /// 按权威 manifest 流式归并文件，只读取一次成员清单；逐项校验身份和账号，不缓存完整文件数组。
     /// 调用方摘要可过时，实际参与归并的成员以此 actor 本次读取的已发布清单为准。
     public func reduceFiles<Result: Sendable>(in job: UploadJob, initial: Result,

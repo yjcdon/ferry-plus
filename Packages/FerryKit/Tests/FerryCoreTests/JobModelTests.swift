@@ -6,6 +6,41 @@ import Testing
 @Suite struct JobModelTests {
     private let link = DiskShareLink.parse("https://pan.baidu.com/s/1qYZEsSc")!
 
+    /// 分页使用已发布清单，旧快照和暂存文件保持独立；每页只读取请求范围。
+    @Test func uploadFilePagesUsePublishedMembersAndValidateSelectedRecords() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent("FerryUploadPages-\(UUID().uuidString)")
+        defer { try? FileManager.default.trashItem(at: directory, resultingItemURL: nil) }
+        let store = UploadStore(directory: directory)
+        let account = AccountKey(provider: .quark, accountID: "page-account")
+        var job = UploadJob(account: account, accountName: "page", title: "page",
+                            destination: .quark(fid: "0"))
+        let files = (0..<3).map { index in
+            UploadFile(jobID: job.id, relativePath: "\(index).bin",
+                       source: .init(url: directory.appendingPathComponent("\(index).bin"), size: 1))
+        }
+        for file in files { try await store.stageFile(file, account: account) }
+        job.fileIDs = [files[0].id, files[1].id]
+        try await store.saveJob(job)
+        var stale = job
+        stale.fileIDs = [files[2].id]
+        #expect(try await store.loadFiles(in: stale, offset: 0, limit: 1).map(\.id) == [files[0].id])
+        #expect(try await store.loadFiles(in: stale, offset: 1, limit: 100).map(\.id) == [files[1].id])
+        #expect(try await store.loadFiles(in: stale, offset: 2, limit: 100).isEmpty)
+        await #expect(throws: UploadRecordError.self) { try await store.loadFiles(in: job, offset: -1, limit: 1) }
+        await #expect(throws: UploadRecordError.self) { try await store.loadFiles(in: job, offset: 0, limit: 0) }
+        await #expect(throws: UploadRecordError.self) { try await store.loadFiles(in: job, offset: 0, limit: 501) }
+        let otherAccount = UploadJob(id: job.id, account: .init(provider: .quark, accountID: "another-account"),
+                                     accountName: "other", title: job.title, destination: job.destination)
+        await #expect(throws: UploadRecordError.self) { try await store.loadFiles(in: otherAccount, offset: 0, limit: 1) }
+
+        // 页外损坏保持隔离，读取包含损坏记录的页时返回实际错误。
+        let secondURL = directory.appendingPathComponent(job.id.uuidString).appendingPathComponent("Files")
+            .appendingPathComponent(files[1].id.uuidString + ".json")
+        try Data("invalid-record".utf8).write(to: secondURL)
+        #expect(try await store.loadFiles(in: job, offset: 0, limit: 1).map(\.id) == [files[0].id])
+        await #expect(throws: (any Error).self) { try await store.loadFiles(in: job, offset: 1, limit: 1) }
+    }
+
     private func entry(_ name: String, directory: Bool = false) -> RemoteEntry {
         RemoteEntry(fsID: Int64(name.hashValue), name: name, path: "/s/" + name, isDirectory: directory, size: directory ? 0 : 10)
     }
