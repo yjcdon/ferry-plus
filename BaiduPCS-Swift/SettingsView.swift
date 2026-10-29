@@ -98,20 +98,15 @@ private struct TransferSettingsView: View {
             }
 
             Section {
-                DisclosureGroup("高级") {
-                    SettingsCountStepper(title: "每个上传文件的并发分片", value: $model.settings.uploadPartsPerFile,
-                        range: FerrySettings.uploadPartsRange, accessibilityName: "每个上传文件的并发分片")
-                    Text("适用于百度和夸克。增加分片并发可提高上传速度，也会增加内存使用。")
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                }
+                SettingsCountStepper(title: "每个上传文件的并发分片", value: $model.settings.uploadPartsPerFile,
+                    range: FerrySettings.uploadPartsRange, accessibilityName: "每个上传文件的并发分片")
+                Text("适用于百度和夸克。增加分片并发可提高上传速度，也会增加内存使用。")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
             }
 
             Section {
                 Toggle("检测剪贴板中的分享链接", isOn: $model.settings.detectsCopiedLinks)
-            } footer: {
-                Text("复制分享链接后切换到 Ferry Plus，自动打开【添加链接】并填入链接和提取码。")
-                    .foregroundStyle(.secondary)
             }
         }
         .settingsFormSurface()
