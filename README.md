@@ -6,7 +6,7 @@
 
 Ferry Plus 是一款简洁的 macOS 原生百度网盘、夸克网盘文件传输工具，基于 [Ferry](https://github.com/yiquncode/BaiduPCS-Swift)，使用 Swift 和 SwiftUI 开发，专为 Apple Silicon Mac 构建。
 
-[下载 Ferry Plus 4.0](https://github.com/yjcdon/ferry-plus/releases/tag/v4.0) · [更新记录](CHANGELOG.md)
+[下载 Ferry Plus 4.1](https://github.com/yjcdon/ferry-plus/releases/tag/v4.1) · [更新记录](CHANGELOG.md)
 
 支持两家网盘的本地文件／文件夹上传、分享链接及账号内文件下载。两个账号可同时登录，上传和下载统一管理，传输速度受网盘服务和账号权限限制。
 
@@ -33,7 +33,7 @@ Ferry Plus 是一款简洁的 macOS 原生百度网盘、夸克网盘文件传�
 
 Release 提供 Apple Silicon App ZIP 与 SHA-256 文件。发布包由源码构建，登录凭据和任务数据保存在用户本机。功能及验证范围见 [4.0 产品方案](docs/v4/product-proposal.md) 和 [验收执行记录](docs/v4/test-execution.md)。
 
-## 4.1 界面优化（开发验收中）
+## 4.1 界面优化
 
 4.1 围绕文件浏览、传输和确认流程统一 macOS 交互：
 
@@ -43,7 +43,7 @@ Release 提供 Apple Silicon App ZIP 与 SHA-256 文件。发布包由源码构�
 - 设置按下载、网盘、网络和账号分类，主窗口、详情和面板采用实色外观。
 - 精简分享选择行和高级校验入口，后台继续保留文件内容检查与历史依据。
 
-已完成两家真实上传下载内容比对、同名策略和分享下载等验收。当前进度见 [4.1 实施记录](docs/v4.1/implementation.md)，逐项结果见 [验收执行记录](docs/v4.1/test-execution.md)，内存目标与采样见 [资源记录](docs/v4.1/resource-sample.md)。
+已完成两家真实上传下载内容比对、同名策略和分享下载等验收。发布记录见 [4.1 实施记录](docs/v4.1/implementation.md)，逐项结果见 [验收执行记录](docs/v4.1/test-execution.md)，内存目标与采样见 [资源记录](docs/v4.1/resource-sample.md)。
 
 ## 使用边界
 
@@ -59,7 +59,7 @@ Release 提供 Apple Silicon App ZIP 与 SHA-256 文件。发布包由源码构�
 
 ### ZIP 安装
 
-从 [4.0 Release](https://github.com/yjcdon/ferry-plus/releases/tag/v4.0) 下载 `Ferry-Plus-4.0-arm64.zip`，解压后把 `Ferry Plus.app` 拖到“应用程序”文件夹即可，无需 DMG。发布页同时提供 SHA-256 校验文件。
+从 [4.1 Release](https://github.com/yjcdon/ferry-plus/releases/tag/v4.1) 下载 `Ferry-Plus-4.1-arm64.zip`，解压后把 `Ferry Plus.app` 拖到“应用程序”文件夹即可，无需 DMG。发布页同时提供 SHA-256 校验文件。
 
 ### Homebrew 安装
 
