@@ -40,9 +40,8 @@ enum UploadAction {
         case .pause: !job.phase.isTerminal && !job.isPaused && !job.cancellationRequested
         case .resume: job.isPaused && !job.phase.isTerminal && !job.cancellationRequested
         case .retry: job.phase == .failed && !job.cancellationRequested
-        case .cancel: !job.phase.isTerminal && !job.cancellationRequested
+        case .cancel, .prioritize: !job.phase.isTerminal && !job.cancellationRequested
         case .remove: job.phase.isTerminal || job.isPaused
-        case .prioritize: !job.phase.isTerminal && !job.cancellationRequested
         case .reconcile: job.phase == .failed || job.isPaused || job.cancellationRequested
         }
     }
@@ -53,7 +52,6 @@ struct UploadRow: View {
     var showsProvider = true
     let onAction: (TransferAction) -> Void
     let onLocateDuplicate: (UUID) -> Void
-    let onResumeDuplicate: () -> Void
     let onInspect: () -> Void
     @Environment(AppModel.self) private var model
 
@@ -72,18 +70,17 @@ struct UploadRow: View {
         } actions: {
             if let action = primaryAction {
                 Button { onAction(action) } label: { Label(action.title, systemImage: action.systemImage) }
-                    .labelStyle(.iconOnly).buttonStyle(.borderless).imageScale(.large)
                     .help(action.title).disabled(!action.allows(.upload(job), model: model))
             } else {
                 Button("查看详情", systemImage: "info.circle", action: onInspect)
-                    .labelStyle(.iconOnly).buttonStyle(.borderless).imageScale(.large).help("查看详情")
+                    .help("查看详情")
             }
         } supplement: {
             if let originalID = job.duplicateOfJobID {
                 HStack(spacing: 10) {
                     Text("已有相同内容的上传").foregroundStyle(.secondary)
                     Button("查看原任务") { onLocateDuplicate(originalID) }
-                    Button("仍然上传", action: onResumeDuplicate)
+                    Button("仍然上传") { onAction(.resume) }
                 }
                 .font(.caption).buttonStyle(.borderless)
             }

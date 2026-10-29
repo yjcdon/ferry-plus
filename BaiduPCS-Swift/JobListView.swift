@@ -42,7 +42,6 @@ struct TransferListView: View {
                             UploadRow(job: job, showsProvider: scope.providerFilter == nil,
                                       onAction: { scope.onAction($0, [item.id]) },
                                       onLocateDuplicate: onLocateUpload,
-                                      onResumeDuplicate: { scope.onAction(.resume, [item.id]) },
                                       onInspect: { scope.onInspect([item.id]) })
                         }
                     }
@@ -270,9 +269,6 @@ struct JobRow: View {
         } actions: {
             if let action = job.primaryAction {
                 JobActionButton(job: job, action: action, onAction: onAction)
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
-                    .imageScale(.large)
             }
         } supplement: {
             if let error = job.error {
@@ -328,6 +324,7 @@ struct TransferRowContent<Progress: View, Actions: View, Supplement: View>: View
                     Text(title).font(.headline).lineLimit(1).truncationMode(.middle).help(title)
                     Spacer(minLength: 8)
                     actions()
+                        .labelStyle(.iconOnly).buttonStyle(.borderless).imageScale(.large)
                 }
                 progress()
                 HStack(spacing: 6) {
@@ -381,12 +378,7 @@ enum JobAction: CaseIterable {
     }
 
     var systemImage: String {
-        switch self {
-        case .pause: "pause.fill"
-        case .resume: "play.fill"
-        case .retry: "arrow.clockwise"
-        case .reveal: "magnifyingglass"
-        }
+        TransferAction(self).systemImage
     }
 }
 
