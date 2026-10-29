@@ -41,6 +41,37 @@ import Testing
         await #expect(throws: (any Error).self) { try await store.loadFiles(in: job, offset: 1, limit: 1) }
     }
 
+    /// 系统选择路径的祖先可以是符号链接；枚举后的真实路径仍保持正确目录层级。
+    @Test func uploadFolderThroughLinkedAncestorKeepsRelativePaths() async throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("FerryUploadAlias-\(UUID().uuidString)")
+        defer { try? FileManager.default.trashItem(at: base, resultingItemURL: nil) }
+        let real = base.appendingPathComponent("real")
+        let root = real.appendingPathComponent("folder")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try Data("nested".utf8).write(to: root.appendingPathComponent("nested.txt"))
+        let alias = base.appendingPathComponent("alias")
+        try FileManager.default.createSymbolicLink(at: alias, withDestinationURL: real)
+        let collector = SourcePaths()
+        try await UploadSource.scan(selections: [alias.appendingPathComponent("folder")]) {
+            await collector.receive($0)
+        }
+        let paths = await collector.paths
+        let issues = await collector.issues
+        #expect(paths == ["folder", "folder/nested.txt"])
+        #expect(issues.isEmpty)
+    }
+
+    private actor SourcePaths {
+        var paths: [String] = []
+        var issues: [String] = []
+        func receive(_ event: UploadSourceScanEvent) {
+            switch event {
+            case .entry(let entry): paths.append(entry.relativePath)
+            case .issue(let issue): issues.append(issue.reason)
+            }
+        }
+    }
+
     private func entry(_ name: String, directory: Bool = false) -> RemoteEntry {
         RemoteEntry(fsID: Int64(name.hashValue), name: name, path: "/s/" + name, isDirectory: directory, size: directory ? 0 : 10)
     }

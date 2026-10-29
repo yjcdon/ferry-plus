@@ -233,8 +233,14 @@ public enum UploadSource {
             }
             try await onEvent(.entry(rootEntry))
             guard rootEntry.kind == .directory else { continue }
+            // 枚举器会展开祖先符号链接（如 /tmp → /private/tmp），相对路径以同一真实根计算。
+            // rootEntry 已先拒绝根项目自身的符号链接，保留原有源文件边界。
+            let resolvedPath = root.withUnsafeFileSystemRepresentation { path in path.flatMap { realpath($0, nil) } }
+            guard let resolvedPath else { throw UploadSourceError.inaccessible(root.path, code: errno) }
+            let enumerationRoot = URL(fileURLWithFileSystemRepresentation: resolvedPath, isDirectory: true, relativeTo: nil)
+            free(resolvedPath)
             let errors = SourceEnumerationErrors()
-            guard let enumerator = FileManager.default.enumerator(at: root, includingPropertiesForKeys: nil,
+            guard let enumerator = FileManager.default.enumerator(at: enumerationRoot, includingPropertiesForKeys: nil,
                     options: [], errorHandler: { url, error in
                         errors.append(.init(url: url, reason: error.localizedDescription))
                         return true
@@ -244,7 +250,7 @@ public enum UploadSource {
             while let child = enumerator.nextObject() as? URL {
                 try Task.checkCancellation(); try await checkpoint()
                 for issue in errors.drain() { try await onEvent(.issue(issue)) }
-                let relative = root.lastPathComponent + "/" + child.pathComponents.dropFirst(root.pathComponents.count).joined(separator: "/")
+                let relative = root.lastPathComponent + "/" + child.pathComponents.dropFirst(enumerationRoot.pathComponents.count).joined(separator: "/")
                 let item: UploadSourceEntry
                 do { item = try entry(child, relativePath: relative) }
                 catch {
