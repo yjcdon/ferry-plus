@@ -64,65 +64,6 @@ private struct SolidWindowConfigurator: NSViewRepresentable {
             if window.backgroundColor != .windowBackgroundColor { window.backgroundColor = .windowBackgroundColor }
             if window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = false }
             if window.titlebarSeparatorStyle != .line { window.titlebarSeparatorStyle = .line }
-            if window.identifier?.rawValue == ContentView.windowID, window.titleVisibility != .hidden {
-                window.titleVisibility = .hidden
-            }
-        }
-    }
-}
-
-/// 标题文字区域将鼠标按下直接交给系统窗口拖动，按钮和搜索保留各自事件。
-struct WindowTitleDragView: NSViewRepresentable {
-    let title: String
-    let subtitle: String?
-
-    func makeNSView(context: Context) -> TitleView { TitleView() }
-
-    func updateNSView(_ view: TitleView, context: Context) {
-        let subtitleText = subtitle ?? ""
-        if view.titleField.stringValue != title { view.titleField.stringValue = title }
-        if view.subtitleField.stringValue != subtitleText { view.subtitleField.stringValue = subtitleText }
-        view.subtitleField.isHidden = subtitle == nil
-        if let window = view.window, window.title != title { window.title = title }
-    }
-
-    final class TitleView: NSView {
-        let titleField = NSTextField(labelWithString: "")
-        let subtitleField = NSTextField(labelWithString: "")
-
-        override init(frame frameRect: NSRect) {
-            super.init(frame: frameRect)
-            titleField.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
-            subtitleField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
-            subtitleField.textColor = .secondaryLabelColor
-            titleField.lineBreakMode = .byTruncatingMiddle
-            subtitleField.lineBreakMode = .byTruncatingTail
-            let stack = NSStackView(views: [titleField, subtitleField])
-            stack.orientation = .vertical
-            stack.alignment = .leading
-            stack.spacing = 0
-            stack.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(stack)
-            NSLayoutConstraint.activate([
-                stack.leadingAnchor.constraint(equalTo: leadingAnchor),
-                stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-                stack.centerYAnchor.constraint(equalTo: centerYAnchor)
-            ])
-        }
-
-        required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            window?.title = titleField.stringValue
-        }
-
-        override var mouseDownCanMoveWindow: Bool { false }
-        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-        override func hitTest(_ point: NSPoint) -> NSView? { super.hitTest(point) == nil ? nil : self }
-        override func mouseDown(with event: NSEvent) {
-            if event.clickCount > 1 { super.mouseDown(with: event) }
-            else { window?.performDrag(with: event) }
         }
     }
 }
