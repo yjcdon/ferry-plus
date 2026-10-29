@@ -25,17 +25,6 @@ struct NetdiskFilesView: View {
     @State private var operationMessage: String?
     @State private var dropEntry: RemoteEntry?
     @State private var isDropTarget = false
-    private static let modificationDateFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.calendar = Calendar(identifier: .gregorian)
-        formatter.timeZone = .autoupdatingCurrent
-        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-        return formatter
-    }()
-
-    @State private var dateWidth: CGFloat = 240
-    @State private var sizeWidth: CGFloat = 90
 
     private struct LoadID: Hashable {
         let account: AccountKey?
@@ -262,29 +251,16 @@ struct NetdiskFilesView: View {
                 ContentUnavailableView("试试其他关键词", systemImage: "magnifyingglass")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                List {
-                    Section {
-                        ForEach(browser.rootNodes) { node in
-                            FileTreeRow(node: node, tree: tree, isIncluded: false, badge: badge, columns: columns,
-                                onUpload: { entry, files in
-                                    if canOperate, let context = browser.context(for: entry) { onUpload(context, files) }
-                                }, onDelete: { prepareDeletion(contextEntries($0)) }, onRename: prepareRename,
-                                orderedChildren: browser.orderedChildren, allowsExpansion: browser.query.isEmpty,
-                                onOpen: { browser.enter($0) }, onDownload: { entry in
-                                    if canOperate, let context = browser.context { onDownload(context, contextEntries(entry)) }
-                                }, onCollapse: { tree.discardDescendantSelection(of: $0) },
-                                onDropTarget: { entry, targeted in
-                                    if targeted { dropEntry = entry }
-                                    else if dropEntry?.reference == entry.reference { dropEntry = nil }
-                                })
-                        }
-                    } header: {
-                        columnHeaders
-                            .font(.callout.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .textCase(nil)
-                    }
-                }.id(ObjectIdentifier(tree))
+                NetdiskOutlineView(browser: browser, tree: tree,
+                    transferFolder: model.settings.transferFolder(for: browser.provider),
+                    onUpload: { entry, files in
+                        guard canOperate else { return }
+                        let context = entry.flatMap { browser.context(for: $0) } ?? browser.context
+                        if let context { onUpload(context, files) }
+                    }, onDownload: { entry in
+                        if canOperate, let context = browser.context { onDownload(context, contextEntries(entry)) }
+                    }, onRename: prepareRename, onDelete: { prepareDeletion(contextEntries($0)) })
+                    .id(ObjectIdentifier(tree))
             }
         } else if let error = browser.errorMessage {
             ContentUnavailableView {
@@ -294,62 +270,6 @@ struct NetdiskFilesView: View {
                 Button("重新登录") { model.presentLogin(for: browser.provider) }
             }
         } else { ProgressView("加载中").frame(maxWidth: .infinity, maxHeight: .infinity) }
-    }
-
-    private var columnHeaders: some View {
-        HStack(spacing: 0) {
-            sortHeader(.name).frame(maxWidth: .infinity, alignment: .leading)
-            WidthResizeHandle(width: $dateWidth, minimum: 48, maximum: 600)
-                .frame(width: 16, height: 28)
-            sortHeader(.modified, leadingInset: 4)
-                .frame(width: dateWidth - 8, alignment: .leading)
-            WidthResizeHandle(width: $sizeWidth, adjacentWidth: $dateWidth, minimum: 48, maximum: 400)
-                .frame(width: 16, height: 28)
-            sortHeader(.size, alignment: .trailing)
-                .frame(width: sizeWidth - 8, alignment: .trailing)
-        }
-    }
-
-    /// 列标题直接切换同级条目的排序，再次点击当前列反转方向，不发起目录请求。
-    private func sortHeader(_ sort: DirectoryBrowserState.Sort, alignment: Alignment = .leading, leadingInset: CGFloat = 0) -> some View {
-        Button {
-            if browser.sort == sort { browser.descending.toggle() }
-            else { browser.sort = sort; browser.descending = false }
-        } label: {
-            HStack(spacing: 4) {
-                Text(sort.title)
-                if browser.sort == sort {
-                    Image(systemName: browser.descending ? "chevron.down" : "chevron.up")
-                        .font(.caption2)
-                }
-            }
-            .padding(.leading, leadingInset)
-            .frame(maxWidth: .infinity, minHeight: 24, alignment: alignment)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("按\(sort.title)排序")
-        .accessibilityValue(browser.sort == sort ? (browser.descending ? "降序" : "升序") : "未排序")
-        .help("点击按\(sort.title)排序，再次点击切换升降序")
-        .disabled(isBusy || browser.isLoading)
-    }
-
-    @ViewBuilder private func badge(_ entry: RemoteEntry) -> some View {
-        if browser.provider == .baidu, entry.isDirectory,
-           RemotePath.normalized(entry.path) == RemotePath.normalized(model.settings.transferFolder(for: browser.provider)) {
-            Text("转存目录").font(.caption).foregroundStyle(.secondary)
-                .padding(.horizontal, 5).padding(.vertical, 1).background(.quaternary, in: .rect(cornerRadius: 4)).fixedSize()
-        }
-    }
-
-    private func columns(_ entry: RemoteEntry) -> some View {
-        HStack(spacing: 8) {
-            Text(entry.modifiedAt.map { Self.modificationDateFormatter.string(from: $0) } ?? "—")
-                .padding(.leading, 12)
-                .frame(width: dateWidth, alignment: .leading)
-            Text(entry.isDirectory ? "—" : entry.size.byteCount)
-                .frame(width: sizeWidth, alignment: .trailing)
-        }.foregroundStyle(.secondary).monospacedDigit().lineLimit(1).fixedSize(horizontal: true, vertical: false)
     }
 
     private func notice(_ message: String) -> some View {

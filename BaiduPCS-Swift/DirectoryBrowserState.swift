@@ -123,6 +123,11 @@ final class DirectoryBrowserState {
         refresh()
     }
 
+    /// 原生列表完成滚动和聚焦后消费一次定位请求。
+    func consumeFocus(_ reference: RemoteReference) {
+        if focusedReference == reference { focusedReference = nil }
+    }
+
     /// 进入目录改变列表根；单纯展开目录不调用此方法。
     func enter(_ entry: RemoteEntry) {
         guard entry.isDirectory, let path = path(to: entry.reference) else { return }
@@ -237,7 +242,6 @@ final class DirectoryBrowserState {
             if let focus = focusedReference, let node = next.root.children?.first(where: { $0.entry?.reference == focus }) {
                 next.setSelected(node, true)
             }
-            focusedReference = nil
             pruneInvisibleSelection(); saveLocation()
         } catch {
             guard !Task.isCancelled, requestID == id else { return }
