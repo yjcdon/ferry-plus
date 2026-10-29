@@ -39,6 +39,8 @@ final class DirectoryBrowserState {
     private(set) var isLoading = false
     private(set) var errorMessage: String?
     private(set) var focusedReference: RemoteReference?
+    private(set) var focusedRowReference: RemoteReference?
+    private(set) var focusedRowIndex: Int?
     var query = "" {
         didSet { if query != oldValue { pruneInvisibleSelection() } }
     }
@@ -128,6 +130,12 @@ final class DirectoryBrowserState {
         if focusedReference == reference { focusedReference = nil }
     }
 
+    /// 行焦点独立于勾选，刷新后按对象恢复，消失时沿用最近可见行的位置。
+    func rememberFocus(_ reference: RemoteReference?, row: Int?) {
+        focusedRowReference = reference
+        focusedRowIndex = row
+    }
+
     /// 进入目录改变列表根；单纯展开目录不调用此方法。
     func enter(_ entry: RemoteEntry) {
         guard entry.isDirectory, let path = path(to: entry.reference) else { return }
@@ -138,6 +146,7 @@ final class DirectoryBrowserState {
         trail = path
         if path.isEmpty { hasUnknownAncestors = false }
         query = ""; tree = nil; errorMessage = nil; focusedReference = nil
+        rememberFocus(nil, row: nil)
         saveLocation(); refresh()
     }
 
@@ -158,6 +167,7 @@ final class DirectoryBrowserState {
             hasUnknownAncestors = true
         }
         query = ""; tree = nil; errorMessage = nil; focusedReference = focus
+        rememberFocus(nil, row: nil)
         saveLocation(); refresh()
     }
 
@@ -186,11 +196,13 @@ final class DirectoryBrowserState {
         guard let disk = model.coordinator.netdisks[provider] else {
             account = nil; session = nil; tree = nil; trail = []; hasUnknownAncestors = false
             query = ""; errorMessage = nil; isLoading = false; requestID = nil; focusedReference = nil
+            rememberFocus(nil, row: nil)
             return
         }
         let key = disk.account
         if account != key {
             tree = nil; trail = []; hasUnknownAncestors = false; query = ""; focusedReference = nil
+            rememberFocus(nil, row: nil)
             if !didResolveAccount, let data = UserDefaults.standard.data(forKey: preferenceKey),
                let saved = try? JSONDecoder().decode(SavedLocation.self, from: data), saved.account == key,
                saved.trail.allSatisfy({ $0.isDirectory && $0.reference.provider == provider }) {
@@ -199,7 +211,10 @@ final class DirectoryBrowserState {
             didResolveAccount = true; account = key
         }
         let identity = ObjectIdentifier(disk)
-        if session != identity { tree = nil; session = identity }
+        if session != identity {
+            tree = nil; session = identity
+            rememberFocus(nil, row: nil)
+        }
         let id = UUID(); requestID = id
         let treeGeneration = generation
         let directory = currentDirectory

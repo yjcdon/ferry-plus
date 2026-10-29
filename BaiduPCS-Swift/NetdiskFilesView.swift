@@ -268,10 +268,13 @@ struct NetdiskFilesView: View {
             } else {
                 NetdiskOutlineView(browser: browser, tree: tree,
                     transferFolder: model.settings.transferFolder(for: browser.provider),
+                    allowsUpload: canOperate,
                     onUpload: { entry, files in
-                        guard canOperate else { return }
+                        guard canOperate else { return false }
                         let context = entry.flatMap { browser.context(for: $0) } ?? browser.context
-                        if let context { onUpload(context, files) }
+                        guard let context else { return false }
+                        onUpload(context, files)
+                        return true
                     }, onDownload: { entry in
                         if canOperate, let context = browser.context { onDownload(context, contextEntries(entry)) }
                     }, onRename: prepareRename, onDelete: { prepareDeletion(contextEntries($0)) })
