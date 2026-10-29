@@ -207,7 +207,7 @@ final class DirectoryBrowserState {
         if account != key {
             tree = nil; trail = []; hasUnknownAncestors = false; query = ""; focusedReference = nil
             rememberFocus(nil, row: nil)
-            if !didResolveAccount, let data = UserDefaults.standard.data(forKey: preferenceKey),
+            if !didResolveAccount, let data = AppPreferences.defaults.data(forKey: preferenceKey),
                let saved = try? JSONDecoder().decode(SavedLocation.self, from: data), saved.account == key,
                saved.trail.allSatisfy({ $0.isDirectory && $0.reference.provider == provider }) {
                 trail = saved.trail; hasUnknownAncestors = saved.hasUnknownAncestors
@@ -303,7 +303,7 @@ final class DirectoryBrowserState {
     private func saveLocation() {
         guard let account else { return }
         let saved = SavedLocation(account: account, trail: trail, hasUnknownAncestors: hasUnknownAncestors)
-        if let data = try? JSONEncoder().encode(saved) { UserDefaults.standard.set(data, forKey: preferenceKey) }
+        if let data = try? JSONEncoder().encode(saved) { AppPreferences.defaults.set(data, forKey: preferenceKey) }
     }
 
     private func allNodes(_ node: FileNode<RemoteEntry>) -> [FileNode<RemoteEntry>] {

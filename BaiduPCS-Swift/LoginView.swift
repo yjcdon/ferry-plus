@@ -10,15 +10,24 @@ struct LoginView: View {
 
     var body: some View {
         Group {
-            switch model.loginMethod {
-            case .web: WebLoginView { model.loginMethod = .cookie }
-            case .cookie: CookieLoginView { model.loginMethod = .web }
-            }
+            #if DEBUG
+            if DemoData.isEnabled { DemoData.loginPlaceholder }
+            else { loginContent }
+            #else
+            loginContent
+            #endif
         }
         .background(WindowReader(window: $window))
         // 重新启动应用时不恢复登录窗口。场景的 `restorationBehavior(.disabled)` 要 macOS 15，
         // 而且 SceneBuilder 不能按系统版本二选一，所以在所有系统上都用 AppKit 关掉窗口恢复。
         .onChange(of: window) { _, window in window?.isRestorable = false }
+    }
+
+    @ViewBuilder private var loginContent: some View {
+        switch model.loginMethod {
+        case .web: WebLoginView { model.loginMethod = .cookie }
+        case .cookie: CookieLoginView { model.loginMethod = .web }
+        }
     }
 }
 

@@ -44,7 +44,7 @@ struct NetdiskOutlineView: NSViewRepresentable {
             column.title = title
             column.minWidth = minimum
             column.maxWidth = id == "name" ? 4000 : 600
-            let saved = UserDefaults.standard.double(forKey: "workspace.columns.v1." + id)
+            let saved = AppPreferences.defaults.double(forKey: "workspace.columns.v1." + id)
             column.width = saved.isFinite && saved >= minimum ? min(saved, column.maxWidth) : width
             column.resizingMask = .userResizingMask
             column.sortDescriptorPrototype = NSSortDescriptor(key: id, ascending: true)
@@ -111,8 +111,8 @@ struct NetdiskOutlineView: NSViewRepresentable {
 
         init(_ input: NetdiskOutlineView) {
             self.input = input
-            let name = CGFloat(UserDefaults.standard.double(forKey: "workspace.columns.v1.name"))
-            let viewport = CGFloat(UserDefaults.standard.double(forKey: "workspace.columns.v1.viewport"))
+            let name = CGFloat(AppPreferences.defaults.double(forKey: "workspace.columns.v1.name"))
+            let viewport = CGFloat(AppPreferences.defaults.double(forKey: "workspace.columns.v1.viewport"))
             if name.isFinite, name >= 180, viewport.isFinite, viewport > 0 {
                 widthAnchor = .init(name: min(name, 4000), viewport: viewport)
             }
@@ -339,9 +339,9 @@ struct NetdiskOutlineView: NSViewRepresentable {
                   let viewportWidth, viewportWidth > 0 else { return }
             widthAnchor = .init(name: name.width, viewport: viewportWidth)
             for column in table.tableColumns {
-                UserDefaults.standard.set(column.width, forKey: "workspace.columns.v1." + column.identifier.rawValue)
+                AppPreferences.defaults.set(column.width, forKey: "workspace.columns.v1." + column.identifier.rawValue)
             }
-            UserDefaults.standard.set(viewportWidth, forKey: "workspace.columns.v1.viewport")
+            AppPreferences.defaults.set(viewportWidth, forKey: "workspace.columns.v1.viewport")
             table.sizeToFit()
         }
 

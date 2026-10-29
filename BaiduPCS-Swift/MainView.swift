@@ -15,8 +15,8 @@ struct MainView: View {
     @State private var providerFilter: Provider?
     @State private var direction: TransferDirectionFilter = .all
     @State private var selection: Set<TransferTaskID> = []
-    @SceneStorage("isInspectorPresented") private var isInspectorPresented = false
-    @SceneStorage("transferInspectorWidth") private var inspectorWidth: Double = 320
+    @SceneStorage(AppPreferences.sceneKey("isInspectorPresented")) private var isInspectorPresented = false
+    @SceneStorage(AppPreferences.sceneKey("transferInspectorWidth")) private var inspectorWidth: Double = 320
     @State private var workspaceWidth: CGFloat = 960
     @State private var detailWidth: CGFloat = 760
     @State private var searchText = ""

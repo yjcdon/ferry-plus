@@ -81,7 +81,11 @@ struct KeychainItem {
          kSecAttrAccount as String: account]
     }
 
+    /// 正式模式读取系统钥匙串，Debug 演示读取独立内存条目。
     func loadChecked() throws -> Data? {
+        #if DEBUG
+        if DemoData.isEnabled { return DemoData.credentials[account] }
+        #endif
         var query = query
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
@@ -93,7 +97,14 @@ struct KeychainItem {
         return data
     }
 
+    /// 按当前模式保存到系统钥匙串或演示内存，调用方沿用相同错误合同。
     func save(_ data: Data) throws {
+        #if DEBUG
+        if DemoData.isEnabled {
+            DemoData.credentials[account] = data
+            return
+        }
+        #endif
         let status = SecItemUpdate(query as CFDictionary, [kSecValueData as String: data] as CFDictionary)
         if status == errSecItemNotFound {
             var item = query
@@ -105,7 +116,14 @@ struct KeychainItem {
         }
     }
 
+    /// 删除当前模式的准确条目，演示退出保持真实凭据。
     func deleteChecked() throws {
+        #if DEBUG
+        if DemoData.isEnabled {
+            DemoData.credentials[account] = nil
+            return
+        }
+        #endif
         let status = SecItemDelete(query as CFDictionary)
         if status != errSecItemNotFound { try check(status, operation: "删除") }
     }

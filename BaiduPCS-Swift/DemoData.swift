@@ -4,11 +4,21 @@ import BaiduKit
 import DownloadKit
 import FerryCore
 import Foundation
+import SwiftUI
 
 /// 截图用的演示数据。用 `-FerryDemo YES` 启动时，应用显示这些任务和账号，使用默认设置，
 /// 不读取 Keychain 中的登录信息和任务列表，也不访问网络。
 enum DemoData {
     static var isEnabled: Bool { UserDefaults.standard.bool(forKey: "FerryDemo") }
+    static let preferences = UserDefaults(suiteName: "io.github.yjcdon.FerryPlus.Demo")!
+    static var credentials: [String: Data] = [:]
+
+    /// 演示账号保持本地样本，登录入口说明当前模式。
+    static var loginPlaceholder: some View {
+        ContentUnavailableView("演示模式", systemImage: "person.crop.circle",
+                               description: Text("账号使用演示数据。"))
+            .frame(width: 480, height: 240)
+    }
 
     /// `-FerryDemoScene loggedOut` 显示未登录、没有任务的列表，`empty` 显示已登录、没有任务的列表。不传时显示演示任务。
     private static var scene: String? { UserDefaults.standard.string(forKey: "FerryDemoScene") }

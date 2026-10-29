@@ -5,7 +5,7 @@ import SwiftUI
 
 /// 设置窗口：传输、网盘、网络和账号四个标签页。
 struct SettingsView: View {
-    @AppStorage("settings.selectedTab.v1") private var tab = 0
+    @AppStorage("settings.selectedTab.v1", store: AppPreferences.defaults) private var tab = 0
 
     var body: some View {
         TabView(selection: $tab) {

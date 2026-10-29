@@ -14,6 +14,17 @@ struct QuarkLoginView: View {
     @State private var window: NSWindow?
 
     var body: some View {
+        Group {
+            #if DEBUG
+            if DemoData.isEnabled { DemoData.loginPlaceholder }
+            else { loginContent }
+            #else
+            loginContent
+            #endif
+        }
+    }
+
+    private var loginContent: some View {
         VStack(spacing: 0) {
             ZStack {
                 if let session {

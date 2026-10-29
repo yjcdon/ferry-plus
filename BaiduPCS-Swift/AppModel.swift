@@ -105,7 +105,7 @@ final class AppModel {
     }
 
     init() {
-        var settings = UserDefaults.standard.data(forKey: Self.settingsKey)
+        var settings = AppPreferences.defaults.data(forKey: Self.settingsKey)
             .flatMap { try? JSONDecoder().decode(FerrySettings.self, from: $0) } ?? FerrySettings()
         #if DEBUG
         if DemoData.isEnabled { settings = FerrySettings() }
@@ -443,12 +443,12 @@ final class AppModel {
     // MARK: - 设置
 
     private func settingsDidChange() {
-        if UserDefaults.standard.object(forKey: "settings.before-v3") == nil,
-           let original = UserDefaults.standard.data(forKey: Self.settingsKey) {
-            UserDefaults.standard.set(original, forKey: "settings.before-v3")
+        if AppPreferences.defaults.object(forKey: "settings.before-v3") == nil,
+           let original = AppPreferences.defaults.data(forKey: Self.settingsKey) {
+            AppPreferences.defaults.set(original, forKey: "settings.before-v3")
         }
         if let data = try? JSONEncoder().encode(settings) {
-            UserDefaults.standard.set(data, forKey: Self.settingsKey)
+            AppPreferences.defaults.set(data, forKey: Self.settingsKey)
         }
         let settings = settings
         Task {

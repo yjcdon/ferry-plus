@@ -32,7 +32,7 @@ final class WorkspaceState {
         didSet {
             if let provider = page?.provider {
                 recentProvider = provider
-                UserDefaults.standard.set(provider.rawValue, forKey: Self.recentKey)
+                AppPreferences.defaults.set(provider.rawValue, forKey: Self.recentKey)
             }
             savePage()
         }
@@ -45,7 +45,7 @@ final class WorkspaceState {
     private static let recentKey = "workspace.recentProvider.v1"
 
     init() {
-        let defaults = UserDefaults.standard
+        let defaults = AppPreferences.defaults
         recentProvider = defaults.string(forKey: Self.recentKey).flatMap(Provider.init(rawValue:)) ?? .baidu
         if let raw = defaults.string(forKey: Self.pageKey) {
             if let provider = Provider(rawValue: raw) { page = .files(provider) }
@@ -76,6 +76,6 @@ final class WorkspaceState {
         case .files(let provider): value = provider.rawValue
         case .transfers(let category): value = "transfers." + category.rawValue
         }
-        UserDefaults.standard.set(value, forKey: Self.pageKey)
+        AppPreferences.defaults.set(value, forKey: Self.pageKey)
     }
 }
