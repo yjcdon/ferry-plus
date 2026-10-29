@@ -16,7 +16,7 @@ Requires **macOS 14+ and Apple Silicon (M-series Macs)**. Open source under Apac
 - **Transfer queue:** pause, resume, retry failures, and filter by drive, direction, or status.
 - **Content checks:** verify transfer content in the background; store credentials in the local macOS Keychain.
 
-Both drives support keeping both copies or skipping an existing name. Baidu also supports replacement with a retained previous version.
+Choose files or folders to start uploading immediately, or drop them into the current directory or a target folder. Same-name files keep both copies by default. Track progress in the transfer queue.
 
 ## Install
 

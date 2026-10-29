@@ -7,7 +7,7 @@ struct MainView: View {
     @Environment(AppModel.self) private var model
     @State private var workspace = WorkspaceState()
     @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
-    @State private var uploadConfirmation: UploadConfirmationTarget?
+    @State private var directUpload = DirectUploadPresenter()
     @State private var downloadConfirmation: DownloadConfirmationTarget?
     @State private var uploadPhases: [UUID: UploadPhase] = [:]
     @State private var hasUploadBaseline = false
@@ -95,6 +95,10 @@ struct MainView: View {
             .focusedSceneValue(\.selectWorkspaceItems, selectWorkspaceItemsAction)
         let events = workspaceEvents(layout, items: items, scope: scope)
         transferDialogs(events)
+            .background(WindowReader(window: Binding(
+                get: { directUpload.parentWindow },
+                set: { directUpload.parentWindow = $0 }
+            )))
     }
 
     private func workspaceLayout(downloads: [Job], uploads: [UploadJob], items: [TransferListItem],
@@ -200,7 +204,10 @@ struct MainView: View {
         .onChange(of: hasWorkspacePresentation, initial: true) { _, presented in
             model.isWorkspaceDialogPresented = presented
         }
-        .onDisappear { model.isWorkspaceDialogPresented = false }
+        .onDisappear {
+            directUpload.cancelPicker()
+            model.isWorkspaceDialogPresented = false
+        }
         .onChange(of: workspace.browser.context != nil) { _, ready in
             if ready { presentRequestedUpload() }
         }
@@ -231,9 +238,6 @@ struct MainView: View {
         .onChange(of: model.uploadJobs.map(\.id)) { revealNewUpload() }
         .onChange(of: model.uploadJobs.map { UploadPhaseSnapshot(id: $0.id, account: $0.account, phase: $0.phase) }, initial: true) { _, snapshots in
             updateDirectoryInvalidation(snapshots)
-        }
-        .sheet(item: $uploadConfirmation, onDismiss: consumeWorkspaceRequest) { target in
-            UploadConfirmationView(target: target) { workspace.pendingFiles = [] }
         }
         .sheet(item: $downloadConfirmation, onDismiss: consumeWorkspaceRequest) { target in
             DownloadConfirmationView(target: target)
@@ -281,7 +285,7 @@ struct MainView: View {
 
     /// 只由主窗口实际流程推导占用；不反读反馈给 AppModel 的标记，避免关闭后自锁。
     private var hasWorkspacePresentation: Bool {
-        uploadConfirmation != nil || downloadConfirmation != nil || inspectorOperationPresented ||
+        directUpload.isBusy || downloadConfirmation != nil || inspectorOperationPresented ||
         workspace.browser.isOperationPresented || pendingRemoval != nil || !downloadRemoval.isIdle || operationError != nil
     }
 
@@ -305,7 +309,7 @@ struct MainView: View {
                 }.font(.callout).padding(10).background(.quaternary)
             }
             NetdiskFilesView(browser: workspace.browser, onUpload: presentUpload, onDownload: presentDownload,
-                             pendingFiles: workspace.pendingFiles,
+                             allowsUpload: !directUpload.isBusy, pendingFiles: workspace.pendingFiles,
                              onConfirmPending: { presentUpload($0, workspace.pendingFiles) },
                              onCancelPending: {
                                  workspace.pendingFiles = []
@@ -322,13 +326,18 @@ struct MainView: View {
         .onDisappear { workspace.lastAddedTransfer = nil }
     }
 
-    /// 来自列表的目标一次冻结；展开和刷新不能改写已经显示的确认。
+    /// 选择和投放共用同一入口；来自列表的账号和目录在操作开始时固定。
     private func presentUpload(_ context: DirectoryContext, _ files: [URL]) {
         guard canPresentConfirmation else { return }
         var seen = Set<URL>()
         let selected = (workspace.pendingFiles + files).map(\.standardizedFileURL).filter { seen.insert($0).inserted }
-        uploadConfirmation = .init(account: context.account, session: context.session, directory: context.reference,
-                                   trail: context.hasUnknownAncestors ? nil : context.trail, files: selected)
+        directUpload.start(context: context, files: selected, model: model) { result in
+            switch result {
+            case .success(true): workspace.pendingFiles = []
+            case .success(false): break
+            case .failure(let error): operationError = error.localizedDescription
+            }
+        }
     }
 
     private func presentDownload(_ context: DirectoryContext, _ entries: [RemoteEntry]) {
@@ -358,7 +367,7 @@ struct MainView: View {
         }
     }
 
-    /// 菜单上传可以先于目录读取完成；目标可用后才打开确认，不丢失已有拖入草稿。
+    /// 菜单上传可以先于目录读取完成；目标可用后打开选择器或提交已有文件。
     private func presentRequestedUpload() {
         guard workspace.isUploadRequested, workspace.isFiles, canPresentConfirmation,
               let context = workspace.browser.context else { return }

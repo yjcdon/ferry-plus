@@ -674,7 +674,7 @@ final class AppModel {
         }
     }
 
-    /// 用户确认网盘、账号及目标后才持久化上传选择；拖入文件本身不产生云端写入。
+    /// 将选择器确认或明确目录上的拖放保存为上传任务；后台完成扫描、传输和内容校验。
     func addUpload(files: [URL], account: AccountKey, destination: RemoteReference,
                    conflictPolicy: UploadConflictPolicy) async throws {
         guard accountKey(for: account.provider) == account, let uploadCoordinator else {
@@ -713,25 +713,6 @@ final class AppModel {
         guard accountKey(for: key.provider) == key,
               baidu == nil || client === baidu,
               quark == nil || installedQuarkClient === quark else { throw UploadDestinationError.otherAccount }
-    }
-
-    /// 上传确认前查询当前账号可用空间；请求前后固定同一客户端，失败交由预检展示具体原因。
-    func uploadAvailableBytes(for account: AccountKey) async throws -> Int64? {
-        try checkUploadSession(account)
-        switch account.provider {
-        case .baidu:
-            guard let client else { throw UploadDestinationError.otherAccount }
-            try checkUploadSession(account, baidu: client)
-            let capacity = try await client.capacity()
-            try checkUploadSession(account, baidu: client)
-            return max(0, capacity.total - capacity.used)
-        case .quark:
-            guard let client = installedQuarkClient else { throw UploadDestinationError.otherAccount }
-            try checkUploadSession(account, quark: client)
-            let capacity = try await client.capacity()
-            try checkUploadSession(account, quark: client)
-            return max(0, capacity.total - capacity.used)
-        }
     }
 
     func netdisk(for provider: Provider) throws -> any Netdisk {

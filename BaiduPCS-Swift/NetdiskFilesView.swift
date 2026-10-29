@@ -7,6 +7,7 @@ struct NetdiskFilesView: View {
     @Bindable var browser: DirectoryBrowserState
     let onUpload: (DirectoryContext, [URL]) -> Void
     let onDownload: (DirectoryContext, [RemoteEntry]) -> Void
+    var allowsUpload = true
     var pendingFiles: [URL] = []
     var onConfirmPending: (DirectoryContext) -> Void = { _ in }
     var onCancelPending: () -> Void = {}
@@ -73,6 +74,7 @@ struct NetdiskFilesView: View {
         !isBusy && pendingNewFolder == nil && pendingRename == nil && pendingDeletion == nil &&
         model.sheet == nil && browser.context.map(isCurrent) == true
     }
+    private var canUpload: Bool { canOperate && allowsUpload }
     private var searchWidth: CGFloat { min(220, max(TaskSearchField.minimumWidth, contentWidth - 560)) }
     private var usesCompactToolbar: Bool { contentWidth < 700 }
     private var usesMinimalToolbar: Bool { contentWidth < 520 }
@@ -236,7 +238,7 @@ struct NetdiskFilesView: View {
             Button("取消", action: onCancelPending)
             Button("上传到当前目录") {
                 if let context = browser.context { onConfirmPending(context) }
-            }.disabled(!canOperate)
+            }.disabled(!canUpload)
         }.font(.callout)
     }
 
@@ -286,7 +288,7 @@ struct NetdiskFilesView: View {
         Button {
             if let context = browser.context { onUpload(context, []) }
         } label: { Label("上传", systemImage: "icloud.and.arrow.up") }
-            .disabled(!canOperate).help("上传到当前目录")
+            .disabled(!canUpload).help("上传到当前目录")
             .accessibilityLabel("上传")
         Button {
             if let context = browser.context { onDownload(context, browser.selectedEntries) }
@@ -328,9 +330,9 @@ struct NetdiskFilesView: View {
             } else {
                 NetdiskOutlineView(browser: browser, tree: tree,
                     transferFolder: model.settings.transferFolder(for: browser.provider),
-                    allowsUpload: canOperate,
+                    allowsUpload: canUpload,
                     onUpload: { entry, files in
-                        guard canOperate else { return false }
+                        guard canUpload else { return false }
                         let context = entry.flatMap { browser.context(for: $0) } ?? browser.context
                         guard let context else { return false }
                         onUpload(context, files)
@@ -360,7 +362,7 @@ struct NetdiskFilesView: View {
                 }
             }
             .dropDestination(for: URL.self) { urls, _ in
-                guard canOperate, let context = browser.context else { return false }
+                guard canUpload, let context = browser.context else { return false }
                 let files = urls.filter(\.isFileURL)
                 guard !files.isEmpty else { return false }
                 onUpload(context, files)
