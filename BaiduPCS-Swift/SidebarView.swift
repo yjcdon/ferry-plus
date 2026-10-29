@@ -105,6 +105,7 @@ struct SidebarView: View {
                             .help("查看全部网盘的传输")
                     }
                 }
+                .padding(.trailing, 12)
                 .textCase(nil)
             }
         }
