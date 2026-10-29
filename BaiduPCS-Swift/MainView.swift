@@ -123,6 +123,7 @@ struct MainView: View {
                                 .frame(maxHeight: .infinity)
                         }
                     }
+                    .toolbar { transferToolbar(scope: scope) }
                     .background {
                         GeometryReader { geometry in
                             Color.clear.onChange(of: geometry.size.width, initial: true) { _, width in detailWidth = width }
@@ -400,7 +401,6 @@ struct MainView: View {
             .navigationTitle(providerFilter.map { "\($0.title) · \(currentCategory.title)" } ?? currentCategory.title)
             .navigationSubtitle("\(items.count) 个任务")
             .focusedSceneValue(\.focusTaskSearch, { searchFocusRequest += 1 })
-            .toolbar { transferToolbar(scope: scope) }
     }
 
     @ToolbarContentBuilder
@@ -420,7 +420,7 @@ struct MainView: View {
             .help(showsInspector ? "隐藏详情" : "显示详情")
         }.solidToolbarBackground()
         if #available(macOS 26.0, *), detailWidth >= 700 { ToolbarSpacer(.fixed, placement: .primaryAction) }
-        ToolbarItem(placement: .primaryAction) {
+        ToolbarItem(id: "transfer.search", placement: .primaryAction) {
             TaskSearchField(text: $searchText, focusRequest: searchFocusRequest)
                 .frame(width: min(240, max(TaskSearchField.minimumWidth, (workspaceWidth - 480) / 2)))
         }.solidToolbarBackground()

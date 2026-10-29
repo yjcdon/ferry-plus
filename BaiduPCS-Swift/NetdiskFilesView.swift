@@ -235,7 +235,7 @@ struct NetdiskFilesView: View {
         if #available(macOS 26.0, *), !usesCompactToolbar {
             ToolbarSpacer(.fixed, placement: .primaryAction)
         }
-        ToolbarItem(placement: .primaryAction) {
+        ToolbarItem(id: "files.search", placement: .primaryAction) {
             TaskSearchField(text: $browser.query, focusRequest: searchFocusRequest, placeholder: "搜索当前目录")
                 .frame(width: searchWidth)
         }
