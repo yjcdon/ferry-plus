@@ -55,6 +55,7 @@ struct DownloadConfirmationView: View {
             }.padding()
         }
         .frame(minWidth: 600, idealWidth: 660)
+        .solidSheetSurface()
         .onChange(of: selectedFolder) { folderError = nil }
         .onChange(of: sessionIdentity) {
             if sessionIdentity != target.session { contextInvalidated = true }

@@ -20,7 +20,7 @@ struct ContentView: View {
             .logOutConfirmation(isPresented: $model.isConfirmingMenuLogOut)
             .sheet(item: $model.sheet) { sheet in
                 switch sheet {
-                case .addLink: AddLinkView()
+                case .addLink: AddLinkView().solidSheetSurface()
                 }
             }
             .onAppear {
@@ -132,6 +132,7 @@ struct Banner<Actions: View>: View {
                         .padding()
                 }
                 .frame(width: 420, height: 240)
+                .background(Color(nsColor: .windowBackgroundColor))
             }
             actions
                 .fixedSize()
@@ -143,22 +144,14 @@ struct Banner<Actions: View>: View {
 }
 
 extension View {
-    /// 在上边缘或下边缘放一条栏，内容从栏下面滚过。macOS 26 用 `safeAreaBar`，系统的滚动边缘效果把栏和内容分开；
-    /// 更早的系统用 `safeAreaInset`，它不处理栏下面的内容，所以给栏加上工具栏材质和分隔线。
-    /// 栏没有内容时不显示背景和分隔线。
-    @ViewBuilder
+    /// 让内容避开顶部或底部的实色操作栏；分隔线只占用该栏实际高度。
     func edgeBar(_ edge: VerticalEdge, @ViewBuilder content: () -> some View) -> some View {
-        if #available(macOS 26, *) {
-            safeAreaBar(edge: edge, spacing: 0, content: content)
-        } else {
-            safeAreaInset(edge: edge, spacing: 0) {
-                content().background {
-                    // 分隔线在栏靠内容的一侧。裁剪后，栏没有内容（高度为 0）时什么也不画。
-                    Rectangle()
-                        .fill(.bar)
-                        .overlay(alignment: edge == .top ? .bottom : .top) { Divider() }
-                        .clipped()
-                }
+        safeAreaInset(edge: edge, spacing: 0) {
+            content().background {
+                Rectangle()
+                    .fill(Color(nsColor: .windowBackgroundColor))
+                    .overlay(alignment: edge == .top ? .bottom : .top) { Divider() }
+                    .clipped()
             }
         }
     }

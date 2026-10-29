@@ -10,6 +10,7 @@ struct FerryApp: App {
         Window("Ferry Plus", id: ContentView.windowID) {
             ContentView()
                 .environment(appDelegate.model)
+                .solidWindowSurface()
         }
         .defaultSize(width: 960, height: 640)
         .commands {
@@ -21,6 +22,7 @@ struct FerryApp: App {
         Window("登录百度网盘", id: LoginView.windowID) {
             LoginView()
                 .environment(appDelegate.model)
+                .solidWindowSurface()
         }
         .windowResizability(.contentSize)
         .commandsRemoved()
@@ -28,6 +30,7 @@ struct FerryApp: App {
         Window("登录夸克网盘", id: QuarkLoginView.windowID) {
             QuarkLoginView()
                 .environment(appDelegate.model)
+                .solidWindowSurface()
         }
         .windowResizability(.contentSize)
         .commandsRemoved()
@@ -35,6 +38,7 @@ struct FerryApp: App {
         Settings {
             SettingsView()
                 .environment(appDelegate.model)
+                .solidWindowSurface()
         }
     }
 }

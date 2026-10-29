@@ -84,6 +84,7 @@ struct UploadConfirmationView: View {
         }
         .frame(minWidth: 580, idealWidth: 640)
         .fixedSize(horizontal: false, vertical: true)
+        .solidSheetSurface()
         .overlay {
             if isDropTarget {
                 RoundedRectangle(cornerRadius: 12).stroke(.tint, lineWidth: 3)

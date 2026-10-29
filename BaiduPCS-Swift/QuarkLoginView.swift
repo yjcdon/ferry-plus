@@ -35,7 +35,7 @@ struct QuarkLoginView: View {
                 Banner(message: errorMessage) {
                     Button("重新校验") { retry() }
                 }
-                .background(.bar)
+                .background(Color(nsColor: .windowBackgroundColor))
             }
             Divider()
             HStack {

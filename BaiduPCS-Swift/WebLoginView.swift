@@ -48,7 +48,7 @@ struct WebLoginView: View {
                     }
                 }
             }
-            .background(.bar)
+            .background(Color(nsColor: .windowBackgroundColor))
 
             Divider()
             HStack {
