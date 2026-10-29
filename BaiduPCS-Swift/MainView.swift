@@ -655,16 +655,16 @@ private struct PendingTransferRemoval {
     }
     var message: String {
         var lines: [String] = []
-        if !downloads.isEmpty {
-            lines.append(removal == .trashingFiles ? "下载：已下载文件移到废纸篓；未完成的下载取消并删除已下载部分。" : "下载：保留已完成文件；未完成的下载取消并删除已下载部分。")
-            for provider in Provider.allCases {
-                let targets = downloads.filter { $0.provider == provider }
-                guard !targets.isEmpty else { continue }
-                let count = targets.count { $0.hasJobDirectory && !$0.isCleanedUp && cleanup[$0.id] == true }
-                lines.append("\(provider.title)：清理 \(count) 个任务转存目录。")
-            }
+        if removal == .trashingFiles, !downloads.isEmpty {
+            lines.append("下载文件将移到废纸篓。")
+        } else {
+            lines.append("已完成的文件将保留。")
         }
-        if !uploads.isEmpty { lines.append("上传：移除任务后，Mac 和网盘中的文件会保留。") }
+        if downloads.contains(where: \.isUnfinished) {
+            lines.append("未完成的下载将取消，并清理已下载部分。")
+        }
+        let count = downloads.count { $0.hasJobDirectory && !$0.isCleanedUp && cleanup[$0.id] == true }
+        if count > 0 { lines.append("同时清理 \(count) 个网盘转存目录。") }
         return lines.joined(separator: "\n")
     }
 }
