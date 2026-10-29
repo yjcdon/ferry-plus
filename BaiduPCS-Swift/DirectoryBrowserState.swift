@@ -50,6 +50,7 @@ final class DirectoryBrowserState {
     var isOperationPresented = false
     @ObservationIgnored private var didResolveAccount = false
     @ObservationIgnored private var requestID: UUID?
+    @ObservationIgnored private var selectsFocusedEntry = true
 
     private struct SavedLocation: Codable {
         let account: AccountKey
@@ -120,7 +121,9 @@ final class DirectoryBrowserState {
     }
     func refresh() { generation += 1 }
 
-    func revealCreated(_ entry: RemoteEntry) {
+    /// 聚焦准确回执；新建可勾选，重命名按原显式勾选状态迁移到新引用。
+    func reveal(_ entry: RemoteEntry, select: Bool) {
+        selectsFocusedEntry = select
         focusedReference = entry.reference
         refresh()
     }
@@ -167,6 +170,7 @@ final class DirectoryBrowserState {
             hasUnknownAncestors = true
         }
         query = ""; tree = nil; errorMessage = nil; focusedReference = focus
+        selectsFocusedEntry = true
         rememberFocus(nil, row: nil)
         saveLocation(); refresh()
     }
@@ -256,7 +260,8 @@ final class DirectoryBrowserState {
             for node in allNodes(next.root) where node.entry.map({ selected.contains($0.reference) }) == true {
                 next.setSelected(node, true)
             }
-            if let focus = focusedReference, let node = next.root.children?.first(where: { $0.entry?.reference == focus }) {
+            if selectsFocusedEntry, let focus = focusedReference,
+               let node = allNodes(next.root).first(where: { $0.entry?.reference == focus }) {
                 next.setSelected(node, true)
             }
             pruneInvisibleSelection(); saveLocation()

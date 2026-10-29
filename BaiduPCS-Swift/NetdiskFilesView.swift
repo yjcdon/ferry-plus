@@ -55,6 +55,7 @@ struct NetdiskFilesView: View {
         let context: DirectoryContext
         let entry: RemoteEntry
         let parent: RemoteReference
+        let wasSelected: Bool
     }
     private struct RenameRequest: Identifiable {
         let id = UUID()
@@ -368,7 +369,8 @@ struct NetdiskFilesView: View {
         guard canOperate, let context = browser.context, let path = browser.path(to: entry.reference) else { return }
         renameName = entry.name
         renameError = nil
-        pendingRename = .init(context: context, entry: entry, parent: path.dropLast().last?.reference ?? context.reference)
+        pendingRename = .init(context: context, entry: entry, parent: path.dropLast().last?.reference ?? context.reference,
+                              wasSelected: browser.tree?.selection.contains(entry.id) == true)
     }
 
     /// 会话一致时提交一次，成功按回执定位新名称；失败刷新当前目录供用户核对。
@@ -381,7 +383,9 @@ struct NetdiskFilesView: View {
                                                 newName: request.name, account: request.target.context.account)
             guard isCurrent(request.target.context) else { throw UploadDestinationError.otherAccount }
             pendingRename = nil
-            if browser.currentDirectory == request.target.context.reference { browser.revealCreated(renamed) }
+            if browser.currentDirectory == request.target.context.reference {
+                browser.reveal(renamed, select: request.target.wasSelected)
+            }
             else { browser.refresh() }
             operationFeedback = .init(message: "已重命名为【\(request.name)】。", isError: false)
         } catch {
@@ -400,7 +404,7 @@ struct NetdiskFilesView: View {
             let entry = try await model.createUploadDirectory(name: request.name, parent: request.context.reference,
                                                              account: request.context.account)
             guard isCurrent(request.context) else { throw UploadDestinationError.otherAccount }
-            if browser.currentDirectory == request.context.reference { browser.revealCreated(entry) }
+            if browser.currentDirectory == request.context.reference { browser.reveal(entry, select: true) }
             pendingNewFolder = nil
             operationFeedback = .init(message: "已创建【\(entry.name)】。", isError: false)
         } catch {
