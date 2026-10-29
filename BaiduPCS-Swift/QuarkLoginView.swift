@@ -22,6 +22,8 @@ struct QuarkLoginView: View {
             loginContent
             #endif
         }
+        .background(WindowReader(window: $window))
+        .onChange(of: window) { _, window in window?.isRestorable = false }
     }
 
     private var loginContent: some View {
@@ -68,8 +70,6 @@ struct QuarkLoginView: View {
         }
         .frame(minWidth: 800, idealWidth: 1000, maxWidth: .infinity,
                minHeight: 600, idealHeight: 720, maxHeight: .infinity)
-        .background(WindowReader(window: $window))
-        .onChange(of: window) { _, window in window?.isRestorable = false }
         .onAppear {
             guard session == nil else { return }
             let session = WebLoginSession(provider: .quark)
