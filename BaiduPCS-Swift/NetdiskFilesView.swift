@@ -23,7 +23,6 @@ struct NetdiskFilesView: View {
     @State private var renameError: String?
     @State private var renaming: RenameRequest?
     @State private var operationFeedback: OperationFeedback?
-    @State private var dropEntry: RemoteEntry?
     @State private var isDropTarget = false
 
     private struct LoadID: Hashable {
@@ -97,21 +96,6 @@ struct NetdiskFilesView: View {
             Divider()
             content
                 .disabled(isBusy)
-                .overlay {
-                    if isDropTarget {
-                        RoundedRectangle(cornerRadius: 8).stroke(.tint, lineWidth: 2).padding(3).allowsHitTesting(false)
-                    }
-                }
-                .dropDestination(for: URL.self) { urls, _ in
-                    guard canOperate, dropEntry == nil, let context = browser.context else { return false }
-                    let files = urls.filter(\.isFileURL)
-                    guard !files.isEmpty else { return false }
-                    onUpload(context, files)
-                    return true
-                } isTargeted: {
-                    isDropTarget = $0
-                    if !$0 { dropEntry = nil }
-                }
             Divider()
             HStack {
                 if let tree = browser.tree { FileSelectionSummary(entries: tree.selectedEntries) }
@@ -140,11 +124,10 @@ struct NetdiskFilesView: View {
         .onChange(of: pendingNewFolder != nil || pendingDeletion != nil || pendingRename != nil || isBusy) { _, presented in
             browser.isOperationPresented = presented
         }
-        .onChange(of: browser.tree.map(ObjectIdentifier.init)) { _, _ in dropEntry = nil }
         .onDisappear {
             browser.clearSelection()
             browser.isOperationPresented = false
-            dropEntry = nil
+            isDropTarget = false
             operationFeedback = nil
         }
         .sheet(item: $pendingNewFolder) { target in
@@ -260,11 +243,9 @@ struct NetdiskFilesView: View {
             }
         } else if let tree = browser.tree {
             if tree.root.children?.isEmpty == true {
-                ContentUnavailableView("此目录为空", systemImage: "folder")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                emptyContent("此目录为空", systemImage: "folder")
             } else if browser.rootNodes.isEmpty {
-                ContentUnavailableView("试试其他关键词", systemImage: "magnifyingglass")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                emptyContent("试试其他关键词", systemImage: "magnifyingglass")
             } else {
                 NetdiskOutlineView(browser: browser, tree: tree,
                     transferFolder: model.settings.transferFolder(for: browser.provider),
@@ -288,6 +269,24 @@ struct NetdiskFilesView: View {
                 Button("重新登录") { model.presentLogin(for: browser.provider) }
             }
         } else { ProgressView("加载中").frame(maxWidth: .infinity, maxHeight: .infinity) }
+    }
+
+    /// 空内容提供当前目录投放；有列表时由原生表格管理拖放和表头事件。
+    private func emptyContent(_ title: String, systemImage: String) -> some View {
+        ContentUnavailableView(title, systemImage: systemImage)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .overlay {
+                if isDropTarget {
+                    RoundedRectangle(cornerRadius: 8).stroke(.tint, lineWidth: 2).padding(3).allowsHitTesting(false)
+                }
+            }
+            .dropDestination(for: URL.self) { urls, _ in
+                guard canOperate, let context = browser.context else { return false }
+                let files = urls.filter(\.isFileURL)
+                guard !files.isEmpty else { return false }
+                onUpload(context, files)
+                return true
+            } isTargeted: { isDropTarget = $0 }
     }
 
     private func notice(_ message: String) -> some View {
