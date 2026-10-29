@@ -211,10 +211,10 @@ struct UploadInspector: View {
                     }
                     LabeledContent("网盘", value: job.account.provider.title)
                     LabeledContent("账号", value: job.accountName)
-                    LabeledContent("文件", value: "完成 \(job.completedCount) · 失败 \(job.failedCount) · 跳过 \(job.skippedCount)")
+                    LabeledContent("项目", value: "完成 \(job.completedCount) · 失败 \(job.failedCount) · 跳过 \(job.skippedCount)")
                     if let error = job.error { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
                 }
-            }.padding()
+            }.frame(maxWidth: .infinity, alignment: .leading).padding()
             Divider()
             content.frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
@@ -354,7 +354,7 @@ struct UploadInspector: View {
         do {
             guard let sourceJob = job, let coordinator = model.uploadCoordinator else { throw UploadCoordinatorError.missingJob }
             guard model.accountKey(for: sourceJob.account.provider) == sourceJob.account else {
-                throw UploadRecordError.invalid("请先登录此任务的\(sourceJob.account.provider.title)账号“\(sourceJob.accountName)”再打开云端目录。")
+                throw UploadRecordError.invalid("请先登录\(sourceJob.account.provider.title)账号【\(sourceJob.accountName)】再打开云端目录。")
             }
             let directory: RemoteReference
             if let backupDirectory = request.directory {
