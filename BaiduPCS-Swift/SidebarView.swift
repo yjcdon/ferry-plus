@@ -80,12 +80,12 @@ struct SidebarView: View {
                         .tag(WorkspacePage.files(provider))
                         .listRowBackground(Group {
                             if page?.provider == nil, providerFilter == provider {
-                                RoundedRectangle(cornerRadius: 6).fill(Color.accentColor)
+                                RoundedRectangle(cornerRadius: 4).fill(Color.accentColor.opacity(0.12))
                                     .padding(.horizontal, 10)
                             }
                         })
-                        .foregroundStyle(providerFilter == provider ? Color.white : Color.primary)
-                        .accessibilityAddTraits(providerFilter == provider ? .isSelected : [])
+                        .foregroundStyle(page == .files(provider) ? Color.white : Color.primary)
+                        .accessibilityValue(page?.provider == nil && providerFilter == provider ? "当前传输范围" : "")
                 }
             }
             Section {
@@ -109,6 +109,8 @@ struct SidebarView: View {
                 .textCase(nil)
             }
         }
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: .windowBackgroundColor))
         .edgeBar(.bottom) {
             AccountView()
                 .padding(.horizontal, 12)

@@ -6,6 +6,7 @@ import SwiftUI
 struct MainView: View {
     @Environment(AppModel.self) private var model
     @State private var workspace = WorkspaceState()
+    @State private var columnVisibility: NavigationSplitViewVisibility = .automatic
     @State private var uploadConfirmation: UploadConfirmationTarget?
     @State private var downloadConfirmation: DownloadConfirmationTarget?
     @State private var uploadPhases: [UUID: UploadPhase] = [:]
@@ -17,6 +18,7 @@ struct MainView: View {
     @SceneStorage("isInspectorPresented") private var isInspectorPresented = false
     @SceneStorage("transferInspectorWidth") private var inspectorWidth: Double = 320
     @State private var workspaceWidth: CGFloat = 960
+    @State private var detailWidth: CGFloat = 760
     @State private var searchText = ""
     @State private var searchFocusRequest = 0
     @State private var pendingRemoval: PendingTransferRemoval?
@@ -138,7 +140,7 @@ struct MainView: View {
 
     private func workspaceLayout(downloads: [Job], uploads: [UploadJob], items: [TransferListItem],
                                  scope: TransferSelection) -> some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $columnVisibility) {
             SidebarView(page: $workspace.page, providerFilter: providerFilter,
                         onShowAll: {
                             providerFilter = nil
@@ -152,9 +154,9 @@ struct MainView: View {
                 // 显式宽度与独立拖动条避免 inspector 和原生分栏相互反馈尺寸。
                 HStack(spacing: 0) {
                     transferContent(items: items, scope: scope)
-                    if isInspectorPresented {
+                    if showsInspector {
                         WidthResizeHandle(width: effectiveInspectorWidth, minimum: 280,
-                                          maximum: workspaceWidth / 2, fillsHeight: true)
+                                          maximum: maximumInspectorWidth, fillsHeight: true)
                             .frame(width: 8)
                             .frame(maxHeight: .infinity)
                         TransferInspector(scope: scope, onDownloadRemove: requestDownloadRemoval,
@@ -163,10 +165,17 @@ struct MainView: View {
                             .frame(maxHeight: .infinity)
                     }
                 }
+                .background {
+                    GeometryReader { geometry in
+                        Color.clear.onChange(of: geometry.size.width, initial: true) { _, width in detailWidth = width }
+                    }
+                }
             }
         }
-        // 详情开启时同时容纳任务列表和可调整的详情栏。
-        .frame(minWidth: !workspace.isFiles && isInspectorPresented ? 960 : 820, minHeight: 400)
+        .frame(minWidth: 640, minHeight: 400)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .toolbarBackground(Color(nsColor: .windowBackgroundColor), for: .windowToolbar)
+        .toolbarBackground(.visible, for: .windowToolbar)
         .background {
             GeometryReader { geometry in
                 Color.clear
@@ -175,10 +184,23 @@ struct MainView: View {
         }
     }
 
-    /// 详情宽度按窗口宽度限至一半，缩放窗口时保留用户设置的偏好宽度。
+    /// 空间不足时收起详情，用户的展开与宽度偏好随窗口恢复。
+    private var showsInspector: Bool { isInspectorPresented && detailWidth >= 640 }
+
+    private var maximumInspectorWidth: CGFloat { min(workspaceWidth / 2, detailWidth - 328) }
+
+    /// 显式打开窄窗详情时让侧栏腾出空间；自动收起只影响实际展示。
+    private var inspectorPresentation: Binding<Bool> {
+        Binding(get: { showsInspector }, set: { presented in
+            isInspectorPresented = presented
+            if presented && detailWidth < 640 { columnVisibility = .detailOnly }
+        })
+    }
+
+    /// 详情至多半窗，并为主列表保留可用空间；拖动只保存用户偏好宽度。
     private var effectiveInspectorWidth: Binding<CGFloat> {
         Binding(
-            get: { min(max(CGFloat(inspectorWidth), 280), workspaceWidth / 2) },
+            get: { min(max(CGFloat(inspectorWidth), 280), max(280, maximumInspectorWidth)) },
             set: { inspectorWidth = Double($0) }
         )
     }
@@ -214,7 +236,7 @@ struct MainView: View {
             if case .transfers(let selected) = page { category = selected }
         }
         .focusedSceneValue(\.transferSelection, workspace.isFiles ? nil : scope)
-        .focusedSceneValue(\.transferInspectorPresented, workspace.isFiles ? nil : $isInspectorPresented)
+        .focusedSceneValue(\.transferInspectorPresented, workspace.isFiles ? nil : inspectorPresentation)
         .focusedSceneValue(\.workspaceIsFiles, workspace.isFiles)
         .onChange(of: items.map(\.id)) { _, ids in selection.formIntersection(ids) }
         .onChange(of: model.lastAddedJobID) { _, id in
@@ -439,7 +461,7 @@ struct MainView: View {
                 .frame(width: 280).frame(maxWidth: .infinity).padding(.vertical, 8)
                 Banners()
             }
-            .edgeBar(.bottom) { StatusBar(direction: direction, provider: providerFilter) }
+            .edgeBar(.bottom) { StatusBar(direction: direction, items: items) }
             .navigationTitle(providerFilter.map { "\($0.title) · \(currentCategory.title)" } ?? currentCategory.title)
             .navigationSubtitle("\(items.count) 个任务")
             .focusedSceneValue(\.focusTaskSearch, { searchFocusRequest += 1 })
@@ -739,16 +761,16 @@ private struct TransferInspector: View {
     }
 }
 
-/// 按当前网盘和传输方向汇总任务，统计栏和明细使用同一范围。
+/// 直接汇总当前可见任务，分类、搜索、统计和批量命令共用同一范围。
 private struct StatusBar: View {
     let direction: TransferDirectionFilter
-    let provider: Provider?
+    let items: [TransferListItem]
     @Environment(AppModel.self) private var model
     @State private var showsStatistics = false
 
     var body: some View {
-        let jobs = direction == .upload ? [] : model.coordinator.jobs.filter { provider == nil || $0.provider == provider }
-        let uploads = direction == .download ? [] : model.uploadJobs.filter { provider == nil || $0.account.provider == provider }
+        let jobs = items.compactMap { item -> Job? in if case .download(let job) = item { return job }; return nil }
+        let uploads = items.compactMap { item -> UploadJob? in if case .upload(let job) = item { return job }; return nil }
         let uploadedBytes = uploads.reduce(Int64(0)) { $0 + $1.completedBytes }
         let uploadTotalBytes = uploads.reduce(Int64(0)) { $0 + $1.totalBytes }
         let uploadSummary = "上传 \(uploadedBytes.byteCount) / \(uploadTotalBytes.byteCount)"
