@@ -4,6 +4,8 @@
 
 内存目标：常规空闲物理占用约 100 MB。使用系统 `footprint`／`vmmap` 的 physical footprint 观察该目标，RSS 作为常驻页的补充指标。操作峰值与结束后的回落单独记录。
 
+用户再次确认将约 100 MB 作为日常使用目标。验收覆盖文件浏览、传输列表及上传结束后的空闲场景，并观察连续操作的回落情况。
+
 ## 相同场景
 
 串行运行 `/Applications/Ferry Plus.app` 4.0 发布版和 `.build/Ferry Plus.app` 4.1 Release 构建（采样源码 `a02e90a`）。使用相同账号和任务数据，半屏、隐藏侧栏，在百度样本目录进入一次子目录再返回三行列表。预热后间隔两秒取三次 `ps` CPU 与 RSS。
@@ -47,3 +49,9 @@
 以 `footprint` 逐阶段测量：普通传输页 96 MB → 展开约百项夸克分享列表 124 MB → 关闭后 120 MB → 自然回落 102 MB → 随后空闲 101 MB。该场景的日常占用接近目标，分享浏览产生短时增量。原始日志统一前缀 `/tmp/ferry-v41-memory-`：`vmmap.log`、`heap.log`、`before-share.log`、`open-share.log`、`after-share.log`、`after-share-settled.log`、`final-idle.log`。
 
 `5df850f` 整合两处重复计算清理后重建 Release。新进程 60880 完成目录展开、勾选及刷新后，物理占用 57 MB，CPU 0%；日志 `latest-release.log`（同前缀）。新进程与旧进程的操作历史不同，此数值用于记录当前场景，长期操作结果继续沿用上述明确场景分别核对。最新 App 12140 KiB，ZIP 3880685 字节，旧 ZIP／摘要已移到废纸篓。
+
+## 上传场景补充
+
+源码 `f24cb22`，Release 进程 64573。在最窄窗口通过文件菜单上传百度样本 `parts.bin`（12,582,929 字节）。上传开始前至上传早期共 40 次物理占用采样，范围 72–83 MB，原始记录为 `.build/v41-evidence/upload-memory-latest.json`。这段采样覆盖上传的前一阶段。
+
+随后真实界面显示该任务【已完成 · 12.6 MB】，百度范围 16 个任务全部完成。完成后的物理占用为 75 MB，进程历史峰值 101 MB，空闲 CPU 0%，复查 RSS 123440 KiB（约 120.5 MiB）。物理占用及 CPU 的复查记录为 `/tmp/ferry-v41-memory-upload-completed.log`。本场景达到日常约 100 MB 的物理占用目标；长列表等场景继续按各自操作记录判断。
