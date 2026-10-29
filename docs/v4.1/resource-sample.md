@@ -4,7 +4,7 @@
 
 ## 相同场景
 
-串行运行 `/Applications/Ferry Plus.app` 4.0 发布版和 `.build/Ferry Plus.app` 4.1 Release 构建。使用相同账号和任务数据，半屏、隐藏侧栏，在百度样本目录进入一次子目录再返回三行列表。预热后间隔两秒取三次 `ps` CPU 与 RSS。
+串行运行 `/Applications/Ferry Plus.app` 4.0 发布版和 `.build/Ferry Plus.app` 4.1 Release 构建（采样源码 `a02e90a`）。使用相同账号和任务数据，半屏、隐藏侧栏，在百度样本目录进入一次子目录再返回三行列表。预热后间隔两秒取三次 `ps` CPU 与 RSS。
 
 | 指标 | 4.0 | 4.1 |
 | --- | --- | --- |
@@ -29,3 +29,5 @@
 ## 构建产物
 
 保留 `.build/Ferry Plus.app`、`.build/dist/Ferry-Plus-4.1-arm64.zip` 与摘要文件。4.0 旧 ZIP 及摘要已移动至本机废纸篓。正式安装路径仍为 4.0。
+
+后续窗口分栏与搜索裁切修复整合至 `858645a`，重建后 App 占用 12060 KiB，ZIP 为 3867487 字节。相对 4.0 分别增加 136 KiB 与 22465 字节。上表 CPU／RSS 保留原采样构建标识，最终整合构建的连续操作趋势继续验收。
