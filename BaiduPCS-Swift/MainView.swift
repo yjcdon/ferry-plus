@@ -498,20 +498,20 @@ struct MainView: View {
                 downloadRemoval.queue.removeFirst()
                 continue
             }
-            await removeDownload(request, disposition: .preserve)
+            await removeDownload(request)
         }
         publishDownloadRemovalErrors()
     }
 
-    /// 真正删除前由 Core 重新核对清单与归档；失败保留列表选择，不把空废纸篓失败数组当作成功。
-    private func removeDownload(_ request: DownloadRemovalRequest, disposition: DownloadIntegrityDisposition) async {
+    /// Core 完成依据归档后移除任务；失败时保留列表选择并汇总处理提示。
+    private func removeDownload(_ request: DownloadRemovalRequest) async {
         guard visibleItems.contains(where: { $0.id == .init(direction: .download, id: request.id) }) else {
             if downloadRemoval.queue.first?.id == request.id { downloadRemoval.queue.removeFirst() }
             return
         }
         do {
             try await model.remove(request.job, trashingFiles: request.removal == .trashingFiles,
-                                   cleanupConfirmed: request.cleanup, integrityDisposition: disposition)
+                                   cleanupConfirmed: request.cleanup)
             selection.remove(.init(direction: .download, id: request.id))
         } catch {
             downloadRemoval.errors.append(request.job.title + "：" + error.localizedDescription)
