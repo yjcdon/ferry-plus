@@ -87,6 +87,7 @@ private struct TransferSettingsView: View {
                 SettingsCountStepper(title: "同时上传任务数", value: $model.settings.maxConcurrentUploads,
                     range: FerrySettings.concurrentUploadsRange, accessibilityName: "同时上传任务数")
             }
+            .accessibilityElement(children: .contain)
 
             Section {
                 TransferRateField(title: "上传限速", bytesPerSecond: $model.settings.uploadBytesPerSecond)
