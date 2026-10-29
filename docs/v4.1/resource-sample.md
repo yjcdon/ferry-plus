@@ -45,3 +45,5 @@
 同一 Release 构建，进程 55751 已完成分享下载、文件管理与列表操作。系统 `vmmap` 报告物理占用 98.6 MiB、历史峰值 181.3 MiB；随后 `heap` 报告物理占用 95.9 MiB，实际 malloc 分配约 50.5 MiB。历史峰值尚未归因。
 
 以 `footprint` 逐阶段测量：普通传输页 96 MB → 展开约百项夸克分享列表 124 MB → 关闭后 120 MB → 自然回落 102 MB → 随后空闲 101 MB。该场景的日常占用接近目标，分享浏览产生短时增量。原始日志统一前缀 `/tmp/ferry-v41-memory-`：`vmmap.log`、`heap.log`、`before-share.log`、`open-share.log`、`after-share.log`、`after-share-settled.log`、`final-idle.log`。
+
+`5df850f` 整合两处重复计算清理后重建 Release。新进程 60880 完成目录展开、勾选及刷新后，物理占用 57 MB，CPU 0%；日志 `latest-release.log`（同前缀）。新进程与旧进程的操作历史不同，此数值用于记录当前场景，长期操作结果继续沿用上述明确场景分别核对。最新 App 12140 KiB，ZIP 3880685 字节，旧 ZIP／摘要已移到废纸篓。
