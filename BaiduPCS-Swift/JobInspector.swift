@@ -11,14 +11,13 @@ struct JobInspector: View {
     let onAction: ([Job], JobAction) -> Void
     /// 请求移除任务。调用方决定是否先确认。
     let onRemove: ([Job], JobRemoval) -> Void
-    let onVerify: (UUID, JobFile) -> Void
 
     var body: some View {
         switch jobs.count {
         case 0:
             ContentUnavailableView("未选择任务", systemImage: "sidebar.trailing")
         case 1:
-            JobDetail(job: jobs[0], onAction: onAction, onRemove: { onRemove(jobs, $0) }, onVerify: onVerify)
+            JobDetail(job: jobs[0], onAction: onAction, onRemove: { onRemove(jobs, $0) })
                 // 换任务时重新滚动到顶部。
                 .id(jobs[0].id)
         default:
@@ -76,7 +75,6 @@ private struct JobDetail: View {
     let onAction: ([Job], JobAction) -> Void
     let onRemove: (JobRemoval) -> Void
     @Environment(AppModel.self) private var model
-    let onVerify: (UUID, JobFile) -> Void
 
     var body: some View {
         // 不在这里读取进度，进度变化只让读取它的子视图刷新。
@@ -141,26 +139,14 @@ private struct JobDetail: View {
                     ForEach(job.files) { file in
                         VStack(alignment: .leading, spacing: 6) {
                             FileRow(file: file, activity: model.coordinator.activity(ofFile: file.id))
-                            if job.canVerifyCompletedFiles,
-                               file.integrityExpectation?.origin == .userProvided || model.coordinator.verifyingLocalFiles.contains(file.id) {
-                                if model.coordinator.verifyingLocalFiles.contains(file.id) {
-                                    HStack {
-                                        ProgressView().controlSize(.small)
-                                        Text("正在校验本地文件").font(.caption)
-                                        Button("取消") { Task { await model.coordinator.cancelLocalVerification(fileID: file.id) } }
-                                    }
-                                } else {
-                                    Button(file.integrityExpectation == nil ? "校验本地文件" : "重新校验本地文件") { onVerify(job.id, file) }
-                                        .buttonStyle(.borderless)
-                                        .disabled(!model.canOperate(on: job) || job.files.contains { model.coordinator.verifyingLocalFiles.contains($0.id) })
-                                }
-                            }
                         }
                     }
                 }
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: .windowBackgroundColor))
         .edgeBar(.bottom) {
             HStack {
                 if let action = job.primaryAction, action != .reveal {
@@ -211,8 +197,10 @@ private struct JobStats: View {
         let isDownloading = job.phase == .downloading && !job.isPaused
         Group {
             LabeledContent("已下载", value: job.files.isEmpty ? "—" : progress.sizeSummary)
-            LabeledContent("速度", value: isDownloading ? progress.speedText ?? "—" : "—")
-            LabeledContent("剩余时间", value: isDownloading ? progress.remainingTimeText ?? "—" : "—")
+            if isDownloading {
+                if let speed = progress.speedText { LabeledContent("速度", value: speed) }
+                if let remaining = progress.remainingTimeText { LabeledContent("剩余时间", value: remaining) }
+            }
             LabeledContent("文件", value: job.files.isEmpty
                            ? "—" : "\(job.files.count(where: \.isCompleted)) / \(job.files.count)")
         }
@@ -306,88 +294,5 @@ extension Job {
         guard case .netdisk(let entries) = source, let first = entries.first else { return nil }
         let path = entries.count == 1 ? first.path : "\(first.path) 等 \(entries.count) 项"
         return "我的网盘 · \(path)"
-    }
-}
-
-/// 用户为本地完成文件明确提供摘要；可信原始依据只读，纠正用户输入需单独确认。
-struct CompletedFileVerificationSheet: View {
-    let jobID: UUID
-    let file: JobFile
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    @State private var algorithm: IntegrityAlgorithm
-    @State private var digest: String
-    @State private var isSubmitting = false
-    @State private var error: String?
-    @State private var succeeded = false
-
-    init(jobID: UUID, file: JobFile) {
-        self.jobID = jobID
-        self.file = file
-        _algorithm = State(initialValue: file.integrityExpectation?.algorithm ?? .sha256)
-        _digest = State(initialValue: file.integrityExpectation?.digest ?? "")
-    }
-
-    private var currentBasis: IntegrityExpectation? {
-        model.coordinator.jobs.first(where: { $0.id == jobID })?.files.first(where: { $0.id == file.id })?.integrityExpectation
-    }
-    private var trustedBasis: Bool { currentBasis.map { $0.origin != .userProvided } ?? false }
-    private var running: Bool { isSubmitting || model.coordinator.verifyingLocalFiles.contains(file.id) }
-    private var changingUserBasis: Bool {
-        guard let basis = currentBasis, basis.origin == .userProvided else { return false }
-        return algorithm != basis.algorithm || digest.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() != basis.digest
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("校验本地文件").font(.headline)
-            Text(file.relativePath).lineLimit(2).textSelection(.enabled)
-            Text("检查已下载的文件。")
-                .font(.callout).foregroundStyle(.secondary)
-            Picker("算法", selection: $algorithm) {
-                Text("SHA-256").tag(IntegrityAlgorithm.sha256)
-                Text("MD5").tag(IntegrityAlgorithm.md5)
-            }.pickerStyle(.segmented).disabled(trustedBasis || running)
-            TextField("输入原始文件摘要", text: $digest)
-                .textFieldStyle(.roundedBorder).disabled(trustedBasis || running)
-            if trustedBasis {
-                Text("使用已记录的原始校验依据。").font(.caption).foregroundStyle(.secondary)
-            } else if changingUserBasis {
-                Text("将替换此前手动输入的摘要，并重新校验本地文件。").font(.caption).foregroundStyle(.secondary)
-            }
-            if let error { Text(error).foregroundStyle(.red).font(.callout).fixedSize(horizontal: false, vertical: true) }
-            if succeeded { Label("本地文件内容一致", systemImage: "checkmark.circle").foregroundStyle(.green) }
-            HStack {
-                if running {
-                    ProgressView().controlSize(.small)
-                    Text("正在校验").font(.callout)
-                }
-                Spacer()
-                Button(running ? "取消校验" : "关闭") {
-                    Task {
-                        await model.coordinator.cancelLocalVerification(fileID: file.id)
-                        dismiss()
-                    }
-                }.keyboardShortcut(.cancelAction)
-                Button(changingUserBasis ? "更新摘要并校验" : "校验") {
-                    error = nil; succeeded = false; isSubmitting = true
-                    Task { @MainActor in
-                        defer { isSubmitting = false }
-                        do {
-                            try await model.coordinator.verifyCompletedFile(jobID: jobID, fileID: file.id,
-                                algorithm: algorithm, digest: digest, replacingUserProvided: changingUserBasis)
-                            succeeded = true
-                        } catch is CancellationError {
-                            error = "校验已取消，可重试。"
-                        } catch { self.error = error.localizedDescription }
-                    }
-                }
-                .keyboardShortcut(.defaultAction)
-                .disabled(running || digest.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-            }
-        }
-        .padding(24).frame(width: 480)
-        .interactiveDismissDisabled(running)
-        .onDisappear { Task { await model.coordinator.cancelLocalVerification(fileID: file.id) } }
     }
 }

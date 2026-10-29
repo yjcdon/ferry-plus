@@ -119,11 +119,11 @@ struct UploadRow: View {
 }
 
 /// 每页最多 100 项；响应代次校验与 .task 取消共同阻止翻页后的迟到内容覆盖。
-struct UploadFilesView: View {
+struct UploadInspector: View {
     let jobID: UUID
     let title: String
+    let scope: TransferSelection
     @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
     @State private var offset = 0
     @State private var generation = 0
     @State private var files: [UploadFile] = []
@@ -170,7 +170,6 @@ struct UploadFilesView: View {
         let integrityRevision: Int
         let count: Int
         let phase: UploadPhase?
-        let completedBytes: Int64
         let completedCount: Int
         let failedCount: Int
         let skippedCount: Int
@@ -179,21 +178,37 @@ struct UploadFilesView: View {
     private var job: UploadJob? { model.uploadJobs.first { $0.id == jobID } }
     private var request: PageRequest {
         .init(offset: offset, generation: generation, integrityRevision: model.integrityRecordsRevision, count: job?.fileIDs.count ?? 0, phase: job?.phase,
-              completedBytes: job?.completedBytes ?? 0, completedCount: job?.completedCount ?? 0,
+              completedCount: job?.completedCount ?? 0,
               failedCount: job?.failedCount ?? 0, skippedCount: job?.skippedCount ?? 0, error: job?.error)
     }
 
     var body: some View {
         let page = request
         VStack(spacing: 0) {
-            HStack {
-                Text(title).font(.headline).lineLimit(1).truncationMode(.middle)
+            VStack(alignment: .leading, spacing: 8) {
+                Text(title).font(.headline).textSelection(.enabled)
                 if let job {
-                    Text(job.batchStatusText).font(.caption).foregroundStyle(.secondary)
+                    Text(job.batchStatusText).font(.callout).foregroundStyle(.secondary)
+                    if !job.phase.isTerminal {
+                        if [.committing, .verifying, .publishing].contains(job.phase), !job.isPaused {
+                            ProgressView().progressViewStyle(.linear)
+                        } else {
+                            ProgressView(value: Double(job.completedBytes), total: Double(max(1, job.totalBytes)))
+                        }
+                    }
+                    LabeledContent("已上传", value: "\(job.completedBytes.byteCount) / \(job.totalBytes.byteCount)")
+                    if job.phase == .uploading, !job.isPaused,
+                       let metrics = job.stageMetrics, metrics.phase == .uploading,
+                       metrics.averageBytesPerSecond > 0 {
+                        LabeledContent("速度", value: "\(Int64(metrics.averageBytesPerSecond.rounded()).byteCount)/s")
+                        LabeledContent("当前文件剩余", value: Duration.seconds(metrics.estimatedRemainingSeconds)
+                            .formatted(.units(allowed: [.hours, .minutes, .seconds], width: .narrow, maximumUnitCount: 2)))
+                    }
+                    LabeledContent("网盘", value: job.account.provider.title)
+                    LabeledContent("账号", value: job.accountName)
+                    LabeledContent("文件", value: "完成 \(job.completedCount) · 失败 \(job.failedCount) · 跳过 \(job.skippedCount)")
+                    if let error = job.error { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
                 }
-                Spacer()
-                Button { generation += 1 } label: { Image(systemName: "arrow.clockwise") }
-                    .help("刷新明细").disabled(isLoading)
             }.padding()
             Divider()
             content.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -204,10 +219,17 @@ struct UploadFilesView: View {
                 Spacer()
                 Button("上一页") { offset = max(0, offset - pageSize) }.disabled(offset == 0 || isLoading)
                 Button("下一页") { offset += pageSize }.disabled(offset + pageSize >= (job?.fileIDs.count ?? 0) || isLoading)
-                Button("关闭") { dismiss() }.keyboardShortcut(.cancelAction)
             }.padding()
+            HStack {
+                Button { generation += 1 } label: { Label("刷新明细", systemImage: "arrow.clockwise") }
+                    .labelStyle(.iconOnly).help("刷新明细").disabled(isLoading)
+                Spacer()
+                Menu("操作") { TransferActionsMenu(scope: scope) }
+                    .menuStyle(.borderlessButton).fixedSize()
+            }.padding(.horizontal).padding(.bottom, 12)
         }
-        .frame(minWidth: 620, idealWidth: 700, minHeight: 420, idealHeight: 520)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(Color(nsColor: .windowBackgroundColor))
         .task(id: page) { await load(page) }
         .task(id: relocation.request?.id) {
             guard let request = relocation.request else { return }
@@ -256,11 +278,12 @@ struct UploadFilesView: View {
         else {
             List(files) { file in
                 VStack(alignment: .leading, spacing: 5) {
-                    HStack {
+                    VStack(alignment: .leading, spacing: 4) {
                         Label(file.relativePath, systemImage: file.isDirectory ? "folder" : "doc")
-                            .lineLimit(1).truncationMode(.middle).help(file.relativePath)
-                        Spacer()
-                        Text(file.phase.displayName).foregroundStyle(.secondary)
+                            .lineLimit(2).truncationMode(.middle).help(file.relativePath)
+                        HStack {
+                            Text(file.phase.displayName).font(.caption).foregroundStyle(.secondary)
+                            Spacer()
                         Menu {
                             Button("打开云端所在目录", systemImage: "cloud") {
                                 location.request = .init(fileID: file.id, focus: file.isDirectory ? nil : file.remoteReference)
@@ -278,6 +301,7 @@ struct UploadFilesView: View {
                             }
                         } label: { Label("定位", systemImage: "location") }
                             .menuStyle(.borderlessButton).fixedSize().help("定位文件")
+                        }
                     }
                     if !integrityDescription(file).isEmpty {
                         Text(integrityDescription(file)).font(.caption).foregroundStyle(.secondary)
@@ -337,7 +361,6 @@ struct UploadFilesView: View {
                   model.accountKey(for: sourceJob.account.provider) == sourceJob.account else {
                 throw UploadRecordError.invalid("账号或上传任务已变化，请重新定位。")
             }
-            dismiss()
             model.requestCloudLocation(account: sourceJob.account, directory: directory, focus: request.focus)
         } catch is CancellationError { }
         catch {

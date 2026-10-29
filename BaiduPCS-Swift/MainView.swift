@@ -24,9 +24,7 @@ struct MainView: View {
     @State private var pendingRemoval: PendingTransferRemoval?
     @State private var uploadCommand: UploadCommand?
     @State private var operationError: String?
-    @State private var uploadDetail: UploadDetailRequest?
     @State private var revealedUploadID: UUID?
-    @State private var localVerification: LocalVerificationRequest?
     @State private var downloadRemoval = DownloadRemovalFlow()
 
     private struct DownloadRemovalRequest: Identifiable {
@@ -35,59 +33,17 @@ struct MainView: View {
         let cleanup: Bool?
         var id: UUID { job.id }
     }
-    private struct ManualIntegrityRemoval {
-        let request: DownloadRemovalRequest
-        let manifest: IntegrityManifest?
-        let preparationError: String?
-    }
-
-    /// 系统先关闭展示再回调按钮或导出结果，期间保留阶段载荷，不提前丢弃移除依据。
     private struct DownloadRemovalFlow {
-        enum Phase {
-            case idle
-            case processing
-            case awaitingDecision(ManualIntegrityRemoval, presented: Bool)
-            case exporting(ManualIntegrityRemoval, IntegrityManifestDocument, presented: Bool)
-        }
         var queue: [DownloadRemovalRequest] = []
         var errors: [String] = []
-        var phase: Phase = .idle
-
-        var isIdle: Bool { if case .idle = phase { true } else { false } }
-        var pending: ManualIntegrityRemoval? {
-            switch phase {
-            case .awaitingDecision(let pending, _), .exporting(let pending, _, _): pending
-            case .idle, .processing: nil
-            }
-        }
-        var isDecisionPresented: Bool {
-            get { if case .awaitingDecision(_, let presented) = phase { presented } else { false } }
-            set { if case .awaitingDecision(let pending, _) = phase { phase = .awaitingDecision(pending, presented: newValue) } }
-        }
-        var isExportPresented: Bool {
-            get { if case .exporting(_, _, let presented) = phase { presented } else { false } }
-            set { if case .exporting(let pending, let document, _) = phase { phase = .exporting(pending, document, presented: newValue) } }
-        }
-        var exportDocument: IntegrityManifestDocument? {
-            if case .exporting(_, let document, _) = phase { document } else { nil }
-        }
-    }
-
-
-    private struct LocalVerificationRequest: Identifiable {
-        let jobID: UUID
-        let file: JobFile
-        var id: String { "\(jobID)-\(file.id)" }
+        var isProcessing = false
+        var isIdle: Bool { !isProcessing }
     }
 
     private struct UploadCommand: Identifiable {
         let id = UUID()
         let action: UploadAction
         let jobs: [UploadJob]
-    }
-    private struct UploadDetailRequest: Identifiable {
-        let id: UUID
-        let title: String
     }
     private var currentCategory: JobCategory { category ?? .all }
     private var query: String { searchText.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -134,8 +90,7 @@ struct MainView: View {
         let layout = workspaceLayout(downloads: downloads, uploads: uploads, items: items, scope: scope)
             .focusedSceneValue(\.selectWorkspaceItems, selectWorkspaceItemsAction)
         let events = workspaceEvents(layout, items: items, scope: scope)
-        let dialogs = transferDialogs(events)
-        integrityRemovalDialogs(dialogs)
+        transferDialogs(events)
     }
 
     private func workspaceLayout(downloads: [Job], uploads: [UploadJob], items: [TransferListItem],
@@ -159,8 +114,7 @@ struct MainView: View {
                                           maximum: maximumInspectorWidth, fillsHeight: true)
                             .frame(width: 8)
                             .frame(maxHeight: .infinity)
-                        TransferInspector(scope: scope, onDownloadRemove: requestDownloadRemoval,
-                            onVerify: { jobID, file in localVerification = .init(jobID: jobID, file: file) })
+                        TransferInspector(scope: scope, onDownloadRemove: requestDownloadRemoval)
                             .frame(width: effectiveInspectorWidth.wrappedValue)
                             .frame(maxHeight: .infinity)
                     }
@@ -274,51 +228,6 @@ struct MainView: View {
         .alert("传输操作提示", isPresented: Binding(
             get: { operationError != nil }, set: { if !$0 { operationError = nil } }
         )) { Button("好") { operationError = nil } } message: { Text(operationError ?? "") }
-        // 复验会改变任务分类；Sheet 归主窗口持有，不能随已完成列表中的行消失而取消。
-        .sheet(item: $localVerification) { request in
-            CompletedFileVerificationSheet(jobID: request.jobID, file: request.file)
-        }
-        .sheet(item: $uploadDetail, onDismiss: consumeWorkspaceRequest) { detail in UploadFilesView(jobID: detail.id, title: detail.title) }
-    }
-
-    private func integrityRemovalDialogs<Content: View>(_ content: Content) -> some View {
-        content
-        .confirmationDialog("保留文件校验信息？", isPresented: Binding(
-            get: { downloadRemoval.isDecisionPresented }, set: { downloadRemoval.isDecisionPresented = $0 }
-        ), presenting: downloadRemoval.pending) { pending in
-            if let manifest = pending.manifest {
-                Button("保存校验信息并移除") {
-                    do {
-                        let document = try IntegrityManifestDocument(manifest: manifest)
-                        downloadRemoval.phase = .exporting(pending, document, presented: true)
-                    } catch { operationError = error.localizedDescription }
-                }
-            }
-            Button("直接移除", role: .destructive) {
-                downloadRemoval.phase = .idle
-                Task { await removeDownload(pending.request, disposition: .discardUnarchivable); await drainDownloadRemovals() }
-            }
-            Button("取消", role: .cancel) { cancelDownloadRemoval() }
-        } message: { pending in
-            Text(pending.preparationError ?? "“\(pending.request.job.title)”的校验信息需要单独保存。")
-        }
-        .onChange(of: downloadRemoval.isDecisionPresented) { _, presented in
-            if !presented, case .awaitingDecision(_, presented: false) = downloadRemoval.phase { cancelDownloadRemoval() }
-        }
-        .fileExporter(isPresented: Binding(
-            get: { downloadRemoval.isExportPresented }, set: { downloadRemoval.isExportPresented = $0 }
-        ), document: downloadRemoval.exportDocument,
-                      contentTypes: [.json], defaultFilename: downloadRemoval.pending.map { "下载校验-\($0.request.id.uuidString).json" } ?? "下载校验.json", onCompletion: { result in
-            guard let pending = downloadRemoval.pending, let manifest = pending.manifest else { return }
-            downloadRemoval.phase = .idle
-            switch result {
-            case .success:
-                Task { await removeDownload(pending.request, disposition: .exportedManifest(manifest)); await drainDownloadRemovals() }
-            case .failure(let error):
-                if (error as NSError).code != NSUserCancelledError { downloadRemoval.errors.append(error.localizedDescription) }
-                cancelDownloadRemoval()
-            }
-        }, onCancellation: cancelDownloadRemoval)
         .alert("请在 Finder 中处理剩余文件", isPresented: Binding(
             get: { !model.untrashedItems.isEmpty }, set: { if !$0 { model.untrashedItems = [] } }
         ), presenting: model.untrashedItems) { items in
@@ -342,7 +251,7 @@ struct MainView: View {
 
     /// 只由主窗口实际流程推导占用；不反读反馈给 AppModel 的标记，避免关闭后自锁。
     private var hasWorkspacePresentation: Bool {
-        uploadConfirmation != nil || downloadConfirmation != nil || uploadDetail != nil || localVerification != nil ||
+        uploadConfirmation != nil || downloadConfirmation != nil ||
         workspace.browser.isOperationPresented || pendingRemoval != nil || !downloadRemoval.isIdle || operationError != nil
     }
 
@@ -554,24 +463,13 @@ struct MainView: View {
     /// 一批任务逐个保存依据；每个任务单独清单，避免不同任务的同名路径误合并。
     private func drainDownloadRemovals() async {
         guard downloadRemoval.isIdle else { return }
-        downloadRemoval.phase = .processing
-        defer { if case .processing = downloadRemoval.phase { downloadRemoval.phase = .idle } }
+        downloadRemoval.isProcessing = true
+        defer { downloadRemoval.isProcessing = false }
         while let request = downloadRemoval.queue.first {
             guard visibleItems.contains(where: { $0.id == .init(direction: .download, id: request.id) }),
                   model.coordinator.jobs.contains(where: { $0.id == request.id }) else {
                 downloadRemoval.queue.removeFirst()
                 continue
-            }
-            do {
-                if let manifest = try model.coordinator.removalIntegrityManifest(request.id) {
-                    downloadRemoval.phase = .awaitingDecision(
-                        .init(request: request, manifest: manifest, preparationError: nil), presented: true)
-                    return
-                }
-            } catch {
-                downloadRemoval.phase = .awaitingDecision(.init(request: request, manifest: nil,
-                    preparationError: "保存校验信息失败：" + error.localizedDescription + " 可以重试，或直接移除任务。"), presented: true)
-                return
             }
             await removeDownload(request, disposition: .preserve)
         }
@@ -592,16 +490,6 @@ struct MainView: View {
             downloadRemoval.errors.append(request.job.title + "：" + error.localizedDescription)
         }
         if downloadRemoval.queue.first?.id == request.id { downloadRemoval.queue.removeFirst() }
-    }
-
-    /// 取消后清空后续项；已开始的异步移除保留处理锁，直至其返回。
-    private func cancelDownloadRemoval() {
-        switch downloadRemoval.phase {
-        case .processing: break
-        default: downloadRemoval.phase = .idle
-        }
-        downloadRemoval.queue = []
-        publishDownloadRemovalErrors()
     }
 
     /// 完成或取消本批次时只发布已经发生的失败；清空缓冲，避免下一次操作重复提示。
@@ -644,8 +532,7 @@ struct MainView: View {
         let targets = visibleItems.filter { wanted.contains($0.id) }
         guard !targets.isEmpty else { return }
         selection = Set(targets.map(\.id))
-        if targets.count == 1, case .upload(let job) = targets[0] { uploadDetail = .init(id: job.id, title: job.title) }
-        else { isInspectorPresented = true }
+        inspectorPresentation.wrappedValue = true
     }
 
     /// 新增任务定位原来源，清理会遮住它的筛选；全部传输视图保持全部，不强迫切换方向。
@@ -736,7 +623,6 @@ private struct TransferPauseResumeButton: View {
 private struct TransferInspector: View {
     let scope: TransferSelection
     let onDownloadRemove: ([Job], JobRemoval) -> Void
-    let onVerify: (UUID, JobFile) -> Void
     private var downloads: [Job] {
         scope.selectedItems.compactMap { if case .download(let job) = $0 { return job }; return nil }
     }
@@ -745,19 +631,10 @@ private struct TransferInspector: View {
         else if downloads.count == scope.selectedItems.count {
             JobInspector(jobs: downloads, onAction: { jobs, action in
                 scope.onAction(TransferAction(action), jobs.map { .init(direction: .download, id: $0.id) })
-            }, onRemove: onDownloadRemove, onVerify: onVerify)
+            }, onRemove: onDownloadRemove)
         }
         else if scope.selectedItems.count == 1, case .upload(let job) = scope.selectedItems[0] {
-            Form {
-                Section {
-                    Text(job.title).font(.headline).textSelection(.enabled)
-                    LabeledContent("账号", value: "\(job.account.provider.title) · \(job.accountName)")
-                    LabeledContent("阶段", value: job.batchStatusText)
-                    LabeledContent("已完成 / 失败 / 跳过", value: "\(job.completedCount) / \(job.failedCount) / \(job.skippedCount)")
-                    if let error = job.error { Text(error).foregroundStyle(.red).textSelection(.enabled) }
-                }
-                Section("操作") { TransferActionsMenu(scope: scope) }
-            }.formStyle(.grouped)
+            UploadInspector(jobID: job.id, title: job.title, scope: scope).id(job.id)
         } else {
             ContentUnavailableView {
                 Label("已选择 \(scope.selectedItems.count) 个传输任务", systemImage: "square.stack")
