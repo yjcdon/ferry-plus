@@ -129,6 +129,17 @@ struct MainView: View {
             }
         }
         .frame(minWidth: 640, minHeight: 400)
+        .toolbar(removing: .sidebarToggle)
+        .toolbar {
+            ToolbarItem(placement: .navigation) {
+                Button {
+                    columnVisibility = columnVisibility == .detailOnly ? .all : .detailOnly
+                } label: { Image(systemName: "sidebar.left") }
+                    .buttonStyle(.plain)
+                    .help(columnVisibility == .detailOnly ? "显示侧边栏" : "隐藏侧边栏")
+                    .accessibilityLabel(columnVisibility == .detailOnly ? "显示侧边栏" : "隐藏侧边栏")
+            }.solidToolbarBackground()
+        }
         .background(Color(nsColor: .windowBackgroundColor))
         .toolbarBackground(Color(nsColor: .windowBackgroundColor), for: .windowToolbar)
         .toolbarBackground(.visible, for: .windowToolbar)
