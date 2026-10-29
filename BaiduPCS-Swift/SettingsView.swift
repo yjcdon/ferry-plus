@@ -199,32 +199,22 @@ private struct NetdiskSettingsView: View {
                     }
                 }
                 .help("会员预设会同时调整每个文件的连接数和同时下载文件数。")
-                DisclosureGroup("高级") {
-                    SettingsCountStepper(title: "每个文件的连接数", value: $model.settings.connectionsPerFile,
-                        range: model.settings.allowedConnections, accessibilityName: "百度网盘每个文件的连接数")
-                    concurrencyFooter
-                        .font(.callout)
-                }
+                SettingsCountStepper(title: "每个文件的连接数", value: $model.settings.connectionsPerFile,
+                    range: model.settings.allowedConnections, accessibilityName: "百度网盘每个文件的连接数")
+                concurrencyFooter
+                    .font(.callout)
             } header: {
                 Text("百度网盘")
-            } footer: {
-                Text("每个分享任务使用独立子目录。清理范围为本任务创建的转存文件。")
-                    .foregroundStyle(.secondary)
             }
 
             Section {
                 TextField("转存目录", text: $quarkTransferFolder, prompt: Text("/Ferry Plus"))
                     .onSubmit(commitTransferFolders)
                 Toggle("下载完成后清理转存文件", isOn: $model.settings.quarkCleanupAfterDownload)
-                DisclosureGroup("高级") {
-                    SettingsCountStepper(title: "每个文件的连接数", value: $model.settings.quarkConnectionsPerFile,
-                        range: model.settings.allowedConnections, accessibilityName: "夸克网盘每个文件的连接数")
-                }
+                SettingsCountStepper(title: "每个文件的连接数", value: $model.settings.quarkConnectionsPerFile,
+                    range: model.settings.allowedConnections, accessibilityName: "夸克网盘每个文件的连接数")
             } header: {
                 Text("夸克网盘")
-            } footer: {
-                Text("每个分享任务使用独立子目录。清理范围为本任务创建的转存文件。")
-                    .foregroundStyle(.secondary)
             }
 
         }
