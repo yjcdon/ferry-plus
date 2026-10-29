@@ -30,7 +30,8 @@ struct TransferListView: View {
             } else { ContentUnavailableView(category.emptyTitle, systemImage: category.systemImage) }
         } else {
             List(selection: $selection) {
-                ForEach(items, id: \.rowLayoutID) { item in
+                ForEach(rows) { row in
+                    let item = row.item
                     Group {
                         switch item {
                         case .download(let job):
@@ -60,6 +61,9 @@ struct TransferListView: View {
             .onDeleteCommand { scope.onRemove(scope.selectedItems.map(\.id), .keepingFiles) }
         }
     }
+
+    /// 从当前账号和移除活动推导行结构；观察展示需要的状态，业务选择沿用任务 ID。
+    private var rows: [TransferRowItem] { items.map { .init(item: $0, model: model) } }
 }
 
 /// 原生 List 会缓存行高；只有内容结构变化时重建展示行，选中与命令仍使用稳定任务身份。
@@ -68,7 +72,32 @@ fileprivate struct TransferRowLayoutID: Hashable {
     var hasProgress = false
     var hasDuplicate = false
     var hasPartialFailure = false
+    var isRemoving = false
+    var needsAccountLogin = false
+    var hasWarning = false
     var error: String?
+}
+
+/// 临时只读呈现项；结构变化更新原生 List 行高，进度字节变化保持同一展示身份。
+fileprivate struct TransferRowItem: Identifiable {
+    let item: TransferListItem
+    let id: TransferRowLayoutID
+
+    init(item: TransferListItem, model: AppModel) {
+        self.item = item
+        switch item {
+        case .download(let job):
+            let isRemoving = model.coordinator.removingJobs.contains(job.id)
+            let needsAccountLogin = job.accountKey.map { model.accountKey(for: job.provider) != $0 } ?? false
+            id = .init(task: item.id, hasProgress: job.phase != .completed || isRemoving,
+                       isRemoving: isRemoving, needsAccountLogin: needsAccountLogin,
+                       hasWarning: job.warning != nil, error: job.error)
+        case .upload(let job):
+            id = .init(task: item.id, hasProgress: !job.phase.isTerminal,
+                       hasDuplicate: job.duplicateOfJobID != nil, hasPartialFailure: job.hasPartialFailure,
+                       error: job.error)
+        }
+    }
 }
 
 /// 只读投影，不复制任何传输执行状态；相同 UUID 在两个方向也具有不同身份。
@@ -79,14 +108,6 @@ enum TransferListItem: Identifiable {
         switch self {
         case .download(let job): .init(direction: .download, id: job.id)
         case .upload(let job): .init(direction: .upload, id: job.id)
-        }
-    }
-    fileprivate var rowLayoutID: TransferRowLayoutID {
-        switch self {
-        case .download(let job): .init(task: id, hasProgress: job.phase != .completed, error: job.error)
-        case .upload(let job):
-            .init(task: id, hasProgress: !job.phase.isTerminal, hasDuplicate: job.duplicateOfJobID != nil,
-                  hasPartialFailure: job.hasPartialFailure, error: job.error)
         }
     }
     var createdAt: Date {
@@ -437,32 +458,6 @@ struct JobProgressBar: View {
         if job.phase == .failed(.download) { return .red }
         if job.phase == .downloading && job.isPaused { return .gray }
         return nil
-    }
-}
-
-/// 任务的状态行：来源图标、状态，以及已下载 / 总大小 · 速度 · 剩余时间。
-struct JobStatusLine: View {
-    let job: Job
-    let activity: JobActivity
-    let isRemoving: Bool
-    @Environment(AppModel.self) private var model
-
-    var body: some View {
-        HStack(spacing: 6) {
-            ProviderIcon(provider: job.provider, size: 14,
-                         accessibilityDescription: job.provider.title + (job.isNetdisk ? "，账号内文件" : "，分享链接"))
-                .help(job.provider.title + (job.isNetdisk ? " · 账号内文件" : " · 分享链接"))
-            Text(isRemoving
-                 ? "正在移除"
-                 : job.files.contains(where: { model.coordinator.verifyingLocalFiles.contains($0.id) }) ? "正在校验本地文件"
-                 : job.statusText(isRunning: activity.isRunning, cleansUp: model.settings.cleanupAfterDownload(for: job.provider)))
-            if !job.files.isEmpty {
-                Text(job.phase == .downloading && !job.isPaused ? activity.progress.summary : activity.progress.sizeSummary)
-            }
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .monospacedDigit()
     }
 }
 
