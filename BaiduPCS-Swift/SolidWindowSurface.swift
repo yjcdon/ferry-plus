@@ -74,7 +74,7 @@ private struct SolidWindowConfigurator: NSViewRepresentable {
     }
 }
 
-/// 标题区域按屏幕坐标跟随鼠标移动窗口；按钮与搜索继续使用各自事件。
+/// 主窗口顶栏的标题与空白共用拖动入口，控件保留原生事件。
 struct WindowTitleDragView: NSViewRepresentable {
     let title: String
     let subtitle: String?
@@ -88,8 +88,13 @@ struct WindowTitleDragView: NSViewRepresentable {
         view.subtitleField.isHidden = subtitle == nil
     }
 
+    static func dismantleNSView(_ view: TitleView, coordinator: ()) {
+        view.stopDragging()
+    }
+
     final class TitleView: NSView {
-        private var dragOrigin: (pointer: NSPoint, window: NSPoint)?
+        private var dragOrigin: (pointer: NSPoint, frame: NSRect, restoreZoom: Bool)?
+        private var dragMonitor: Any?
         let titleField = NSTextField(labelWithString: "")
         let subtitleField = NSTextField(labelWithString: "")
 
@@ -115,29 +120,95 @@ struct WindowTitleDragView: NSViewRepresentable {
 
         required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-        override var mouseDownCanMoveWindow: Bool { false }
-        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-        override func hitTest(_ point: NSPoint) -> NSView? { super.hitTest(point) == nil ? nil : self }
-        /// 保存按下时的屏幕位置，使窗口移动后事件坐标仍保持同一基准。
-        override func mouseDown(with event: NSEvent) {
-            guard let window, !window.styleMask.contains(.fullScreen) else { return }
-            if event.clickCount > 1 {
-                dragOrigin = nil
-                super.mouseDown(with: event)
-            } else {
-                dragOrigin = (screenPoint(for: event, in: window), window.frame.origin)
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil, dragMonitor == nil else { return }
+            dragMonitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]) { [weak self] event in
+                guard let self else { return event }
+                return self.handleTitlebarEvent(event)
             }
         }
 
-        /// 直接使用 AppKit 窗口坐标更新位置，随鼠标拖动逐次执行。
-        override func mouseDragged(with event: NSEvent) {
-            guard let window, let origin = dragOrigin else { return }
-            let pointer = screenPoint(for: event, in: window)
-            window.setFrameOrigin(NSPoint(x: origin.window.x + pointer.x - origin.pointer.x,
-                                          y: origin.window.y + pointer.y - origin.pointer.y))
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            stopDragging()
+            super.viewWillMove(toWindow: newWindow)
         }
 
-        override func mouseUp(with event: NSEvent) { dragOrigin = nil }
+        /// 视图离开窗口时释放事件入口；同一个窗口仅保留一份拖动状态。
+        func stopDragging() {
+            if let dragMonitor { NSEvent.removeMonitor(dragMonitor) }
+            dragMonitor = nil
+            dragOrigin = nil
+        }
+
+        /// 只接管从当前主窗口顶栏空白开始的拖动，内容区和控件继续正常派发。
+        private func handleTitlebarEvent(_ event: NSEvent) -> NSEvent? {
+            guard let window, event.window === window else { return event }
+            switch event.type {
+            case .leftMouseDown:
+                dragOrigin = nil
+                guard window.attachedSheet == nil,
+                      !window.styleMask.contains(.fullScreen),
+                      isTitlebarBackground(event.locationInWindow, in: window) else { return event }
+                window.makeKeyAndOrderFront(nil)
+                if event.clickCount == 2 {
+                    window.performZoom(nil)
+                    return nil
+                }
+                dragOrigin = (screenPoint(for: event, in: window), window.frame, window.isZoomed)
+                return nil
+            case .leftMouseDragged:
+                guard let origin = dragOrigin else { return event }
+                let pointer = screenPoint(for: event, in: window)
+                if origin.restoreZoom {
+                    // 放大窗口实际开始拖动时恢复原尺寸，并让顶栏继续贴住拖动位置。
+                    guard hypot(pointer.x - origin.pointer.x, pointer.y - origin.pointer.y) >= 3 else { return nil }
+                    window.performZoom(nil)
+                    let horizontalAnchor = (origin.pointer.x - origin.frame.minX) / origin.frame.width
+                    let topInset = origin.frame.maxY - origin.pointer.y
+                    window.setFrameOrigin(NSPoint(x: pointer.x - window.frame.width * horizontalAnchor,
+                                                  y: pointer.y + topInset - window.frame.height))
+                    dragOrigin = (pointer, window.frame, false)
+                } else {
+                    window.setFrameOrigin(NSPoint(x: origin.frame.minX + pointer.x - origin.pointer.x,
+                                                  y: origin.frame.minY + pointer.y - origin.pointer.y))
+                }
+                return nil
+            case .leftMouseUp:
+                guard dragOrigin != nil else { return event }
+                dragOrigin = nil
+                return nil
+            default:
+                return event
+            }
+        }
+
+        /// 根据窗口布局和可见工具栏项目划定空白，随窗口宽度与工具栏收纳同步。
+        private func isTitlebarBackground(_ point: NSPoint, in window: NSWindow) -> Bool {
+            // 窗口外缘留给系统调整尺寸；顶栏高度使用当前窗口布局。
+            let titlebar = NSRect(x: 4, y: window.contentLayoutRect.maxY,
+                                  width: window.frame.width - 8,
+                                  height: window.frame.height - window.contentLayoutRect.maxY - 4)
+            guard titlebar.contains(point) else { return false }
+            for type: NSWindow.ButtonType in [.closeButton, .miniaturizeButton, .zoomButton] {
+                if let button = window.standardWindowButton(type),
+                   button.convert(button.bounds, to: nil).contains(point) { return false }
+            }
+            for item in window.toolbar?.visibleItems ?? [] {
+                if item.itemIdentifier == .flexibleSpace || item.itemIdentifier == .space { continue }
+                guard let view = item.view, !isDescendant(of: view) else { continue }
+                if view.convert(view.bounds, to: nil).contains(point) { return false }
+            }
+            // 系统工具栏的溢出按钮由 AppKit 创建，也保留其原生交互。
+            if let frameView = window.contentView?.superview {
+                var hit = frameView.hitTest(frameView.convert(point, from: nil))
+                while let view = hit {
+                    if view is NSControl, !view.isDescendant(of: self) { return false }
+                    hit = view.superview
+                }
+            }
+            return true
+        }
 
         /// 优先使用事件自身的全局位置，避免窗口移动后旧局部坐标再次叠加位移。
         private func screenPoint(for event: NSEvent, in window: NSWindow) -> NSPoint {

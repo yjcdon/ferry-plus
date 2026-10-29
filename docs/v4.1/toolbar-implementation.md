@@ -9,9 +9,12 @@
 - 宽窗文件页与传输页在动作组前加入公开的 `ToolbarSpacer(.flexible, placement: .primaryAction)`，由弹性间距吸收左侧空间，使动作和独立搜索靠右排列；低于 700 点内容宽度时沿用紧凑收纳。该增强受 macOS 26 可用性保护，macOS 14 沿用原生布局。依据：[ToolbarSpacer](https://developer.apple.com/documentation/swiftui/toolbarspacer) 与 [flexible](https://developer.apple.com/documentation/swiftui/spacersizing/flexible)；SDK 26.5 声明已核对，实际宽窗排列由整合构建验收。
 - 实色衬底内的文件操作和传输操作逐按钮显式声明辅助名称，详情按钮随显示状态、暂停／继续按钮随当前能力更新名称；菜单与独立原生搜索沿用已有业务名称。图标、帮助、分组和业务动作保持一致，独立名称由整合 App 的 AX 读取复验。
 - 文件命令组、传输操作组及独立搜索复用 `toolbarControlSurface`：32 点高的系统实色胶囊衬底与 0.5 点语义描边，组内保持原按钮与命令。原生共享材质继续隐藏，分组、宽窄收纳和搜索焦点沿用原流程。
-- 窗口沿用 AppKit 原生标题栏及空白背景拖动，实色配置明确开启窗口可移动属性；衬底描边只绘制外观，鼠标事件交给原按钮和搜索。使用最低支持系统已有的 [isMovableByWindowBackground](https://developer.apple.com/documentation/appkit/nswindow/ismovablebywindowbackground) 属性。
-- 主窗口采用 `hiddenTitleBar` 与 `unified` 单行工具栏。导航标题是窗口名称的唯一来源；macOS 15 起通过公开的 `toolbar(removing: .title)` 移除系统重复标题，标题文字区域单独承接鼠标。拖动采用按下时的屏幕坐标与窗口原点，随 `mouseDragged` 更新窗口位置，`mouseUp` 清理起点；双击交给原生响应链，具体系统行为单列验收。按钮、搜索与列拖动继续使用各自事件。拖动使用 `CGEvent.unflippedLocation` 提供的 AppKit 屏幕坐标；无 Core Graphics 来源的 AppKit 事件使用窗口转换。实际双向位移已验证为一比一，记录见 test-execution.md；双击交接行为继续单列验收。
 
 API 已核对本机 macOS 26.5 SDK 的 SwiftUI 接口，sharedBackgroundVisibility 受 macOS 26 可用性判断保护。官方说明：[sharedBackgroundVisibility](https://developer.apple.com/documentation/swiftui/toolbarcontent/sharedbackgroundvisibility(_:))。
 
 语法解析、差异检查及完整 App 源码快照的 macOS 14 目标类型检查通过。工具栏收纳和焦点的实际操作由整合验收 C20—C22 承接。文件工作区工具栏由主代理在 NetdiskFilesView 同步接入。
+- 主窗口采用 `hiddenTitleBar` 与 `unified` 单行工具栏。导航标题是窗口名称的唯一来源；macOS 15 起移除系统重复标题。
+- 顶栏标题及空白共用窗口级拖动入口：根据 `contentLayoutRect` 取得顶栏高度，并按可见工具栏项目、窗口按钮及系统控件的实际边界划定交互范围；窗口外缘保留系统缩放。
+- `WindowTitleDragView` 连接主窗口时注册一份 App 内鼠标监听，分离或销毁时移除；闭包弱引用视图。拖动使用事件全局坐标计算窗口位移，单次手势结束清理起点。
+- 双击标题或顶栏空白调用 AppKit `performZoom`，由系统保存和恢复窗口尺寸。放大状态下拖动超过 3 点时先恢复原尺寸，按按下位置的水平比例与顶栏顶部距离重新锚定窗口，再继续移动；鼠标拖动和触控板三指拖移共用鼠标事件链。按钮、搜索框和业务内容继续使用各自事件。
+- API 依据：[App 内事件监听](https://developer.apple.com/documentation/appkit/nsevent/addlocalmonitorforevents(matching:handler:))；该入口仅处理左键按下、拖动和释放。
