@@ -409,6 +409,9 @@ struct MainView: View {
 
     @ToolbarContentBuilder
     private func transferToolbar(scope: TransferSelection) -> some ToolbarContent {
+        if #available(macOS 26.0, *), detailWidth >= 700 {
+            ToolbarSpacer(.flexible, placement: .primaryAction)
+        }
         if detailWidth < 520 {
             ToolbarItem(placement: .primaryAction) {
                 Menu("操作") {

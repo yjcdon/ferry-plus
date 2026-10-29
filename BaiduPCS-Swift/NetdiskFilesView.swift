@@ -231,6 +231,9 @@ struct NetdiskFilesView: View {
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
+        if #available(macOS 26.0, *), !usesCompactToolbar {
+            ToolbarSpacer(.flexible, placement: .primaryAction)
+        }
         ToolbarItem(placement: .primaryAction) {
             HStack(spacing: 12) {
                 if usesMinimalToolbar {
