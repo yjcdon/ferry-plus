@@ -5,7 +5,7 @@
 ## 环境与样本
 
 - Apple Silicon，本机系统报告 macOS 27.2，SDK 26.5，部署目标 macOS 14。
-- 实际运行 .build/Ferry Plus.app；/Applications 内正式 App 仍为 4.0。复用两家既有登录及固定签名授权。
+- 前期使用 .build/Ferry Plus.app 验收；2026-10-29 按用户要求将同一最新构建安装至 /Applications/Ferry Plus.app，当前本机版本为 4.1。复用两家既有登录及固定签名授权。
 - 两家独立远端目录：FerryPlus-V41-20261029-CUA；本地样本位于 .build/v41-evidence/source/sample。
 - 原始样本：empty.txt 0 字节、small.txt 3400 字节、nested/parts.bin 12582929 字节，包含两层目录。生成内容仅用于本轮验收。
 - 两家回读位置：`.build/v41-evidence/downloads/baidu`、`.build/v41-evidence/downloads/quark/sample`。独立读取原始样本与两家实际下载文件，逐项重算大小及 SHA-256，6 项均一致；完整摘要见 [Core 审查记录](core-final-review.md#双网盘回环证据)。
