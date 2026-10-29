@@ -461,7 +461,7 @@ struct JobProgressBar: View {
     }
 }
 
-/// 任务的错误、“属于另一个百度账号”的说明和警告。
+/// 任务的错误、原账号登录入口和结果提示。
 struct JobNotes: View {
     let job: Job
     @Environment(AppModel.self) private var model
@@ -474,7 +474,7 @@ struct JobNotes: View {
                 .textSelection(.enabled)
         }
         if let owner = job.accountKey, model.accountKey(for: job.provider) != owner {
-            Text("这个任务属于\(job.provider.title)账号“\(job.accountName ?? owner.accountID)”（\(owner.accountID)）。登录原账号后可以继续。")
+            Text(accountRecoveryText)
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Button("登录任务所属的\(job.provider.title)账号") { model.presentLogin(for: job.provider) }
@@ -485,5 +485,13 @@ struct JobNotes: View {
                 .font(.caption)
                 .foregroundStyle(.orange)
         }
+    }
+
+    /// 有昵称时明确原账号；历史任务沿用原账号提示，账号标识仍用于内部归属判断。
+    private var accountRecoveryText: String {
+        if let name = job.accountName {
+            return "登录\(job.provider.title)账号【\(name)】后可继续此任务。"
+        }
+        return "登录此任务原来的\(job.provider.title)账号后可继续。"
     }
 }
