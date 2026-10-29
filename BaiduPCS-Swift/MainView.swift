@@ -114,7 +114,7 @@ struct MainView: View {
                         transferContent(items: items, scope: scope)
                         if showsInspector {
                             WidthResizeHandle(width: effectiveInspectorWidth, minimum: 280,
-                                              maximum: maximumInspectorWidth, fillsHeight: true)
+                                              maximum: maximumInspectorWidth)
                                 .frame(width: 8)
                                 .frame(maxHeight: .infinity)
                             TransferInspector(scope: scope, onDownloadRemove: requestDownloadRemoval,
