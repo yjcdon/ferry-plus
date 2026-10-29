@@ -106,7 +106,7 @@ struct NetdiskFilesView: View {
                 if let tree = browser.tree { FileSelectionSummary(entries: tree.selectedEntries) }
                 Spacer()
                 if browser.isLoading { ProgressView().controlSize(.small) }
-            }.padding(.horizontal).padding(.vertical, 8)
+            }.padding(.horizontal).padding(.vertical, 14)
         }
         .background {
             GeometryReader { proxy in
