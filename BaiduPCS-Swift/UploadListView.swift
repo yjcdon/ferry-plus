@@ -123,6 +123,7 @@ struct UploadInspector: View {
     let jobID: UUID
     let title: String
     let scope: TransferSelection
+    let onPresentationChange: (Bool) -> Void
     @Environment(AppModel.self) private var model
     @State private var offset = 0
     @State private var generation = 0
@@ -176,6 +177,10 @@ struct UploadInspector: View {
         let error: String?
     }
     private var job: UploadJob? { model.uploadJobs.first { $0.id == jobID } }
+    private var isPresentingOperation: Bool {
+        relocation.isPickerPresented || relocation.request != nil || relocation.error != nil ||
+        location.request != nil || location.error != nil
+    }
     private var request: PageRequest {
         .init(offset: offset, generation: generation, integrityRevision: model.integrityRecordsRevision, count: job?.fileIDs.count ?? 0, phase: job?.phase,
               completedCount: job?.completedCount ?? 0,
@@ -265,7 +270,9 @@ struct UploadInspector: View {
         }
         .onDisappear {
             relocation = .init(); location = .init()
+            onPresentationChange(false)
         }
+        .onChange(of: isPresentingOperation, initial: true) { _, presented in onPresentationChange(presented) }
     }
 
     @ViewBuilder private var content: some View {

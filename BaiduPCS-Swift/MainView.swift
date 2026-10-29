@@ -24,6 +24,7 @@ struct MainView: View {
     @State private var pendingRemoval: PendingTransferRemoval?
     @State private var uploadCommand: UploadCommand?
     @State private var operationError: String?
+    @State private var inspectorOperationPresented = false
     @State private var revealedUploadID: UUID?
     @State private var downloadRemoval = DownloadRemovalFlow()
 
@@ -114,7 +115,8 @@ struct MainView: View {
                                           maximum: maximumInspectorWidth, fillsHeight: true)
                             .frame(width: 8)
                             .frame(maxHeight: .infinity)
-                        TransferInspector(scope: scope, onDownloadRemove: requestDownloadRemoval)
+                        TransferInspector(scope: scope, onDownloadRemove: requestDownloadRemoval,
+                                          onPresentationChange: { inspectorOperationPresented = $0 })
                             .frame(width: effectiveInspectorWidth.wrappedValue)
                             .frame(maxHeight: .infinity)
                     }
@@ -251,7 +253,7 @@ struct MainView: View {
 
     /// 只由主窗口实际流程推导占用；不反读反馈给 AppModel 的标记，避免关闭后自锁。
     private var hasWorkspacePresentation: Bool {
-        uploadConfirmation != nil || downloadConfirmation != nil ||
+        uploadConfirmation != nil || downloadConfirmation != nil || inspectorOperationPresented ||
         workspace.browser.isOperationPresented || pendingRemoval != nil || !downloadRemoval.isIdle || operationError != nil
     }
 
@@ -623,6 +625,7 @@ private struct TransferPauseResumeButton: View {
 private struct TransferInspector: View {
     let scope: TransferSelection
     let onDownloadRemove: ([Job], JobRemoval) -> Void
+    let onPresentationChange: (Bool) -> Void
     private var downloads: [Job] {
         scope.selectedItems.compactMap { if case .download(let job) = $0 { return job }; return nil }
     }
@@ -634,7 +637,8 @@ private struct TransferInspector: View {
             }, onRemove: onDownloadRemove)
         }
         else if scope.selectedItems.count == 1, case .upload(let job) = scope.selectedItems[0] {
-            UploadInspector(jobID: job.id, title: job.title, scope: scope).id(job.id)
+            UploadInspector(jobID: job.id, title: job.title, scope: scope,
+                            onPresentationChange: onPresentationChange).id(job.id)
         } else {
             ContentUnavailableView {
                 Label("已选择 \(scope.selectedItems.count) 个传输任务", systemImage: "square.stack")
