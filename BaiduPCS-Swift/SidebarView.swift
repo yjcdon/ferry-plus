@@ -84,7 +84,6 @@ struct SidebarView: View {
                                     .padding(.horizontal, 10)
                             }
                         })
-                        .foregroundStyle(page == .files(provider) ? Color.white : Color.primary)
                         .accessibilityValue(page?.provider == nil && providerFilter == provider ? "当前传输范围" : "")
                 }
             }
