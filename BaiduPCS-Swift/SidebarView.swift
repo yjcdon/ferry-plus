@@ -114,7 +114,7 @@ struct SidebarView: View {
         .edgeBar(.bottom) {
             AccountView()
                 .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+                .workspaceFooter()
         }
     }
 }

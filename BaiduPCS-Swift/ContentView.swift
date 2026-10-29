@@ -144,6 +144,11 @@ struct Banner<Actions: View>: View {
 }
 
 extension View {
+    /// 主工作区两侧底栏共用高度，使账号入口、选择摘要和传输统计居中对齐。
+    func workspaceFooter() -> some View {
+        frame(height: 44)
+    }
+
     /// 让内容避开顶部或底部的实色操作栏；分隔线只占用该栏实际高度。
     func edgeBar(_ edge: VerticalEdge, @ViewBuilder content: () -> some View) -> some View {
         safeAreaInset(edge: edge, spacing: 0) {

@@ -780,7 +780,7 @@ private struct StatusBar: View {
             .monospacedDigit()
             .lineLimit(1)
             .padding(.horizontal)
-            .padding(.vertical, 6)
+            .workspaceFooter()
         }
     }
 }
