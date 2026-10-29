@@ -80,17 +80,17 @@ struct Banners: View {
                 }
             }
             if model.account == nil, model.coordinator.jobs.contains(where: { $0.provider == .baidu && $0.isUnfinished }) {
-                Banner(message: "未登录百度网盘。添加任务、重试或获取新的下载链接前，请登录。") {
+                Banner(message: "请登录百度网盘。") {
                     Button("登录") { model.presentLogin() }
                 }
             } else if model.isLoginExpired {
-                Banner(message: "百度网盘登录已失效。正在进行的下载会继续；添加任务或获取新的下载链接前，请重新登录。") {
+                Banner(message: "请重新登录百度网盘。") {
                     Button("重新登录") { model.presentLogin() }
                 }
             }
             if let problem = model.quark.problem {
                 Banner(message: "夸克网盘：" + problem) {
-                    Button("重新校验") { Task { await model.quark.revalidate() } }
+                    Button("重试") { Task { await model.quark.revalidate() } }
                     Button("登录") { model.presentLogin(for: .quark) }
                 }
             }
