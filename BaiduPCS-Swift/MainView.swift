@@ -465,25 +465,30 @@ struct MainView: View {
             .navigationTitle(providerFilter.map { "\($0.title) · \(currentCategory.title)" } ?? currentCategory.title)
             .navigationSubtitle("\(items.count) 个任务")
             .focusedSceneValue(\.focusTaskSearch, { searchFocusRequest += 1 })
-            .toolbar {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    Button { model.presentAddLink() } label: { Label("添加分享链接", systemImage: "link") }
-                        .help("添加分享链接")
-                }
-                if #available(macOS 26.0, *) {
-                    ToolbarSpacer(.fixed, placement: .primaryAction)
-                }
-                ToolbarItem(placement: .primaryAction) { TransferPauseResumeButton(scope: scope) }
-                ToolbarItem(placement: .primaryAction) {
-                    Button { isInspectorPresented.toggle() } label: {
-                        Label(isInspectorPresented ? "隐藏详情" : "显示详情", systemImage: "sidebar.trailing")
-                    }
-                    .help(isInspectorPresented ? "隐藏详情" : "显示详情")
-                }
-                ToolbarItem(placement: .primaryAction) {
-                    TaskSearchField(text: $searchText, focusRequest: searchFocusRequest).frame(width: 104)
-                }
+            .toolbar { transferToolbar(scope: scope) }
+    }
+
+    @ToolbarContentBuilder
+    private func transferToolbar(scope: TransferSelection) -> some ToolbarContent {
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button { model.presentAddLink() } label: { Label("添加分享链接", systemImage: "link") }
+                .help("添加分享链接")
+        }.solidToolbarBackground()
+        if #available(macOS 26.0, *) { ToolbarSpacer(.fixed, placement: .primaryAction) }
+        ToolbarItemGroup(placement: .primaryAction) {
+            TransferPauseResumeButton(scope: scope)
+            Button {
+                inspectorPresentation.wrappedValue.toggle()
+            } label: {
+                Label(showsInspector ? "隐藏详情" : "显示详情", systemImage: "sidebar.trailing")
             }
+            .help(showsInspector ? "隐藏详情" : "显示详情")
+        }.solidToolbarBackground()
+        if #available(macOS 26.0, *) { ToolbarSpacer(.fixed, placement: .primaryAction) }
+        ToolbarItem(placement: .primaryAction) {
+            TaskSearchField(text: $searchText, focusRequest: searchFocusRequest)
+                .frame(width: min(240, max(140, (workspaceWidth - 480) / 2)))
+        }.solidToolbarBackground()
     }
 
     /// 即使菜单携带旧快照，执行入口也只接收当前仍可见的同方向身份。
