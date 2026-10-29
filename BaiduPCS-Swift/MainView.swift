@@ -409,7 +409,7 @@ struct MainView: View {
             Button { model.presentAddLink() } label: { Label("添加分享链接", systemImage: "link") }
                 .help("添加分享链接")
         }.solidToolbarBackground()
-        if #available(macOS 26.0, *) { ToolbarSpacer(.fixed, placement: .primaryAction) }
+        if #available(macOS 26.0, *), detailWidth >= 700 { ToolbarSpacer(.fixed, placement: .primaryAction) }
         ToolbarItemGroup(placement: .primaryAction) {
             TransferPauseResumeButton(scope: scope)
             Button {
@@ -419,7 +419,7 @@ struct MainView: View {
             }
             .help(showsInspector ? "隐藏详情" : "显示详情")
         }.solidToolbarBackground()
-        if #available(macOS 26.0, *) { ToolbarSpacer(.fixed, placement: .primaryAction) }
+        if #available(macOS 26.0, *), detailWidth >= 700 { ToolbarSpacer(.fixed, placement: .primaryAction) }
         ToolbarItem(placement: .primaryAction) {
             TaskSearchField(text: $searchText, focusRequest: searchFocusRequest)
                 .frame(width: min(240, max(TaskSearchField.minimumWidth, (workspaceWidth - 480) / 2)))

@@ -222,17 +222,14 @@ struct NetdiskFilesView: View {
                 if let context = browser.context { onDownload(context, browser.selectedEntries) }
             } label: { Label("下载", systemImage: "arrow.down.to.line") }
                 .disabled(!canOperate || browser.selectedEntries.isEmpty).help("下载勾选项目")
-            Button {
-                if let context = browser.context {
-                    folderName = ""; folderError = nil
-                    pendingNewFolder = .init(context: context)
-                }
-            } label: { Label("新建文件夹", systemImage: "folder.badge.plus") }
-                .disabled(!canOperate).help("在当前目录新建文件夹")
-            Button { prepareDeletion(browser.selectedEntries) } label: { Label("移到回收站", systemImage: "trash") }
-                .disabled(!canOperate || browser.selectedEntries.isEmpty).help("将勾选项目移到网盘回收站")
-            Button { browser.refresh() } label: { Label("刷新", systemImage: "arrow.clockwise") }
-                .disabled(isBusy || browser.isLoading).help("刷新当前目录")
+            if usesCompactToolbar {
+                Menu("操作") { directoryActions }
+                    .menuStyle(.borderlessButton).fixedSize()
+                    .help("新建文件夹、移到回收站和刷新")
+                    .accessibilityLabel("文件操作")
+            } else {
+                directoryActions
+            }
         }
         .solidToolbarBackground()
         if #available(macOS 26.0, *), !usesCompactToolbar {
@@ -243,6 +240,21 @@ struct NetdiskFilesView: View {
                 .frame(width: searchWidth)
         }
         .solidToolbarBackground()
+    }
+
+    /// 次要目录操作在宽窗平铺、窄窗收入菜单，共用同一目标和启用条件。
+    @ViewBuilder private var directoryActions: some View {
+        Button {
+            if let context = browser.context {
+                folderName = ""; folderError = nil
+                pendingNewFolder = .init(context: context)
+            }
+        } label: { Label("新建文件夹", systemImage: "folder.badge.plus") }
+            .disabled(!canOperate).help("在当前目录新建文件夹")
+        Button { prepareDeletion(browser.selectedEntries) } label: { Label("移到回收站", systemImage: "trash") }
+            .disabled(!canOperate || browser.selectedEntries.isEmpty).help("将勾选项目移到网盘回收站")
+        Button { browser.refresh() } label: { Label("刷新", systemImage: "arrow.clockwise") }
+            .disabled(isBusy || browser.isLoading).help("刷新当前目录")
     }
 
     @ViewBuilder private var content: some View {

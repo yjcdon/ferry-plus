@@ -2,7 +2,7 @@
 
 对应任务：T07。日期：2026-10-29。
 
-- 传输工具栏分为分享链接、暂停／继续与详情、搜索三组；macOS 26 用公开的 ToolbarSpacer 分组，并通过 solidToolbarBackground 隐藏共享玻璃背景。
+- 传输工具栏分为分享链接、暂停／继续与详情、搜索三组；macOS 26 宽窗用公开的 ToolbarSpacer 分组，内容区小于 700 点时省去固定间隔，并通过 solidToolbarBackground 隐藏共享玻璃背景。
 - 任务搜索复用 NSSearchField 和原焦点请求链路，按窗口宽度在 160—240 点间调整；⌘F、清除和即时筛选沿用已有实现。实际控件内距测量见[搜索尺寸记录](search-sizing-implementation.md)。
 - macOS 14 保留等价标准工具栏命令；实色窗口背景承担分组层级。
 
