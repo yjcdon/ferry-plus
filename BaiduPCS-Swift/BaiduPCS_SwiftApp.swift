@@ -12,8 +12,8 @@ struct FerryApp: App {
                 .environment(appDelegate.model)
                 .solidWindowSurface()
         }
-        .windowStyle(.titleBar)
-        .windowToolbarStyle(.expanded)
+        .windowStyle(.hiddenTitleBar)
+        .windowToolbarStyle(.unified)
         .defaultSize(width: 960, height: 640)
         .commands {
             SidebarCommands()

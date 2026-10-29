@@ -2,6 +2,12 @@ import AppKit
 import SwiftUI
 
 extension View {
+    /// 自绘标题保留同一份导航标题，系统工具栏负责其余命令和收纳。
+    @ViewBuilder
+    func customWindowTitle() -> some View {
+        if #available(macOS 15.0, *) { toolbar(removing: .title) }
+        else { self }
+    }
     /// 工具栏操作组使用统一实色衬底，保持搜索与按钮分组清晰。
     func toolbarControlSurface() -> some View {
         labelStyle(.iconOnly)
@@ -65,5 +71,72 @@ private struct SolidWindowConfigurator: NSViewRepresentable {
             if window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = false }
             if window.titlebarSeparatorStyle != .line { window.titlebarSeparatorStyle = .line }
         }
+    }
+}
+
+/// 标题区域按屏幕坐标跟随鼠标移动窗口；按钮与搜索继续使用各自事件。
+struct WindowTitleDragView: NSViewRepresentable {
+    let title: String
+    let subtitle: String?
+
+    func makeNSView(context: Context) -> TitleView { TitleView() }
+
+    func updateNSView(_ view: TitleView, context: Context) {
+        let subtitleText = subtitle ?? ""
+        if view.titleField.stringValue != title { view.titleField.stringValue = title }
+        if view.subtitleField.stringValue != subtitleText { view.subtitleField.stringValue = subtitleText }
+        view.subtitleField.isHidden = subtitle == nil
+    }
+
+    final class TitleView: NSView {
+        private var dragOrigin: (pointer: NSPoint, window: NSPoint)?
+        let titleField = NSTextField(labelWithString: "")
+        let subtitleField = NSTextField(labelWithString: "")
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            titleField.font = .boldSystemFont(ofSize: NSFont.systemFontSize)
+            subtitleField.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+            subtitleField.textColor = .secondaryLabelColor
+            titleField.lineBreakMode = .byTruncatingMiddle
+            subtitleField.lineBreakMode = .byTruncatingTail
+            let stack = NSStackView(views: [titleField, subtitleField])
+            stack.orientation = .vertical
+            stack.alignment = .leading
+            stack.spacing = 0
+            stack.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+                stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+                stack.centerYAnchor.constraint(equalTo: centerYAnchor)
+            ])
+        }
+
+        required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
+
+        override var mouseDownCanMoveWindow: Bool { false }
+        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+        override func hitTest(_ point: NSPoint) -> NSView? { super.hitTest(point) == nil ? nil : self }
+        /// 保存按下时的屏幕位置，使窗口移动后事件坐标仍保持同一基准。
+        override func mouseDown(with event: NSEvent) {
+            guard let window, !window.styleMask.contains(.fullScreen) else { return }
+            if event.clickCount > 1 {
+                dragOrigin = nil
+                super.mouseDown(with: event)
+            } else {
+                dragOrigin = (NSEvent.mouseLocation, window.frame.origin)
+            }
+        }
+
+        /// 直接使用 AppKit 窗口坐标更新位置，随鼠标拖动逐次执行。
+        override func mouseDragged(with event: NSEvent) {
+            guard let window, let origin = dragOrigin else { return }
+            let pointer = NSEvent.mouseLocation
+            window.setFrameOrigin(NSPoint(x: origin.window.x + pointer.x - origin.pointer.x,
+                                          y: origin.window.y + pointer.y - origin.pointer.y))
+        }
+
+        override func mouseUp(with event: NSEvent) { dragOrigin = nil }
     }
 }

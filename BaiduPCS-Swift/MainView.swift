@@ -136,10 +136,10 @@ struct MainView: View {
             }
             .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
             .navigationTitle(windowTitle)
-            .navigationSubtitle(workspace.isFiles ? "" : "\(items.count) 个任务")
             .navigationSplitViewColumnWidth(min: 320, ideal: 640, max: .infinity)
         }
         .navigationSplitViewStyle(.balanced)
+        .customWindowTitle()
         .frame(minWidth: 640, minHeight: 400)
         .toolbar(removing: .sidebarToggle)
         .toolbar {
@@ -150,6 +150,10 @@ struct MainView: View {
                     .buttonStyle(.plain)
                     .help(columnVisibility == .detailOnly ? "显示侧边栏" : "隐藏侧边栏")
                     .accessibilityLabel(columnVisibility == .detailOnly ? "显示侧边栏" : "隐藏侧边栏")
+            }.solidToolbarBackground()
+            ToolbarItem(id: "workspace.title", placement: .navigation) {
+                WindowTitleDragView(title: windowTitle, subtitle: workspace.isFiles ? nil : "\(items.count) 个任务")
+                    .frame(width: min(180, max(120, workspaceWidth / 5)), height: 32)
             }.solidToolbarBackground()
         }
         .background(Color(nsColor: .windowBackgroundColor))
