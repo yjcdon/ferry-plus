@@ -12,6 +12,7 @@ struct NetdiskFilesView: View {
     var onCancelPending: () -> Void = {}
     @Environment(AppModel.self) private var model
     @State private var searchFocusRequest = 0
+    @State private var contentWidth: CGFloat = 0
     @State private var pendingNewFolder: NewFolderTarget?
     @State private var folderName = ""
     @State private var folderError: String?
@@ -71,6 +72,8 @@ struct NetdiskFilesView: View {
         !isBusy && pendingNewFolder == nil && pendingRename == nil && pendingDeletion == nil &&
         model.sheet == nil && browser.context.map(isCurrent) == true
     }
+    private var searchWidth: CGFloat { min(220, max(110, contentWidth - 560)) }
+    private var usesCompactToolbar: Bool { contentWidth < 700 }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -102,6 +105,13 @@ struct NetdiskFilesView: View {
                 Spacer()
                 if browser.isLoading { ProgressView().controlSize(.small) }
             }.padding(.horizontal).padding(.vertical, 8)
+        }
+        .background {
+            GeometryReader { proxy in
+                Color.clear
+                    .onAppear { contentWidth = proxy.size.width }
+                    .onChange(of: proxy.size.width) { _, width in contentWidth = width }
+            }.allowsHitTesting(false)
         }
         .navigationTitle(browser.provider.title)
         .toolbar { toolbar }
@@ -224,12 +234,12 @@ struct NetdiskFilesView: View {
                 .disabled(isBusy || browser.isLoading).help("刷新当前目录")
         }
         .solidToolbarBackground()
-        if #available(macOS 26.0, *) {
+        if #available(macOS 26.0, *), !usesCompactToolbar {
             ToolbarSpacer(.fixed, placement: .primaryAction)
         }
         ToolbarItem(placement: .primaryAction) {
             TaskSearchField(text: $browser.query, focusRequest: searchFocusRequest, placeholder: "搜索当前目录")
-                .frame(minWidth: 140, idealWidth: 180, maxWidth: 240)
+                .frame(width: searchWidth)
         }
         .solidToolbarBackground()
     }
