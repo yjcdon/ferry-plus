@@ -290,7 +290,7 @@ struct NetdiskFilesView: View {
             .accessibilityLabel("上传")
         Button {
             if let context = browser.context { onDownload(context, browser.selectedEntries) }
-        } label: { Label("下载", systemImage: "arrow.down.to.line") }
+        } label: { Label("下载", systemImage: "arrow.down") }
             .disabled(!canOperate || browser.selectedEntries.isEmpty).help("下载勾选项目")
             .accessibilityLabel("下载")
     }
