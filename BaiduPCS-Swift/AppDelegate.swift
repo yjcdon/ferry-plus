@@ -124,7 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
         UNUserNotificationCenter.current().delegate = self
         #if DEBUG
-        if DemoData.isEnabled, let appearance = DemoData.appearance { NSApp.appearance = appearance }
+        if let appearance = DemoData.appearance { NSApp.appearance = appearance }
         #endif
         Task { await model.start() }
     }

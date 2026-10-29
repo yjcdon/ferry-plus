@@ -18,7 +18,7 @@ enum DemoData {
     static var category: String? { UserDefaults.standard.string(forKey: "FerryDemoCategory") }
     /// `-FerryDemoSelect`：选中这个标题的任务，并显示详情栏。
     static var selectedTitle: String? { UserDefaults.standard.string(forKey: "FerryDemoSelect") }
-    /// `-FerryDemoAppearance dark` 或 `light`：不跟随系统外观。
+    /// Debug 启动参数 `-FerryDemoAppearance dark` 或 `light` 单独指定 App 外观，账号与任务模式继续由 FerryDemo 控制。
     static var appearance: NSAppearance? {
         switch UserDefaults.standard.string(forKey: "FerryDemoAppearance") {
         case "dark": NSAppearance(named: .darkAqua)
