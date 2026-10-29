@@ -56,6 +56,11 @@ struct NetdiskOutlineView: NSViewRepresentable {
         table.doubleAction = #selector(Coordinator.openFocused)
         table.registerForDraggedTypes([.fileURL])
         table.onSpace = { [weak coordinator = context.coordinator] in coordinator?.toggleFocused() }
+        table.onOpen = { [weak coordinator = context.coordinator] in coordinator?.openSelected() }
+        table.onGoUp = { [weak browser] in
+            guard let browser, browser.canGoUp else { return }
+            browser.navigate(to: Array(browser.trail.dropLast()))
+        }
         table.onMenu = { [weak coordinator = context.coordinator] row in coordinator?.menu(for: row) }
         scroll.documentView = table
         scroll.onViewportWidthChange = { [weak coordinator = context.coordinator] width in
@@ -355,6 +360,12 @@ struct NetdiskOutlineView: NSViewRepresentable {
             if entry.isDirectory { input.browser.enter(entry) }
         }
 
+        /// 键盘打开使用当前行焦点，和勾选集合保持独立。
+        func openSelected() {
+            guard let table, let entry = (table.item(atRow: table.selectedRow) as? FileNode<RemoteEntry>)?.entry else { return }
+            if entry.isDirectory { input.browser.enter(entry) }
+        }
+
         func toggleFocused() {
             guard let table, let node = table.item(atRow: table.selectedRow) as? FileNode<RemoteEntry> else { return }
             var parent = table.parent(forItem: node) as? FileNode<RemoteEntry>
@@ -433,9 +444,18 @@ private final class FileListScrollView: NSScrollView {
 /// 行焦点的空格操作与右键位置由原生表格派发，文本编辑继续使用系统按键。
 final class FileOutline: NSOutlineView {
     var onSpace: (() -> Void)?
+    var onOpen: (() -> Void)?
+    var onGoUp: (() -> Void)?
     var onMenu: ((Int) -> NSMenu?)?
     override func keyDown(with event: NSEvent) {
-        if event.charactersIgnoringModifiers == " ", event.modifierFlags.intersection(.deviceIndependentFlagsMask).isEmpty {
+        let modifiers = event.modifierFlags.intersection([.command, .option, .control, .shift])
+        if modifiers == .command, event.keyCode == 126 {
+            onGoUp?()
+        } else if modifiers == .command, event.keyCode == 125 {
+            onOpen?()
+        } else if modifiers.isEmpty, event.keyCode == 36 || event.keyCode == 76 {
+            onOpen?()
+        } else if event.charactersIgnoringModifiers == " ", modifiers.isEmpty {
             onSpace?()
         } else { super.keyDown(with: event) }
     }
