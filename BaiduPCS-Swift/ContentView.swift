@@ -150,7 +150,9 @@ extension View {
             content().background {
                 Rectangle()
                     .fill(Color(nsColor: .windowBackgroundColor))
-                    .overlay(alignment: edge == .top ? .bottom : .top) { Divider() }
+                    .overlay(alignment: edge == .top ? .bottom : .top) {
+                        Rectangle().fill(Color(nsColor: .separatorColor)).frame(height: 1)
+                    }
                     .clipped()
             }
         }

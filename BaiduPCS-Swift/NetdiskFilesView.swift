@@ -187,18 +187,36 @@ struct NetdiskFilesView: View {
                 browser.navigate(to: Array(browser.trail.dropLast()))
             } label: { Image(systemName: "chevron.left") }
                 .help("返回上一级").disabled(!browser.canGoUp || isBusy)
-            ScrollView(.horizontal) {
-                HStack(spacing: 6) {
-                    Button("根目录") { browser.navigate(to: []) }
-                    if browser.hasUnknownAncestors { Text("/ …").foregroundStyle(.secondary) }
-                    ForEach(Array(browser.trail.enumerated()), id: \.element.id) { index, folder in
-                        Text("/").foregroundStyle(.secondary)
-                        Button(folder.name) { browser.navigate(to: Array(browser.trail.prefix(index + 1))) }
-                    }
-                }.buttonStyle(.plain).lineLimit(1)
+            ViewThatFits(in: .horizontal) {
+                breadcrumb(compact: false).fixedSize(horizontal: true, vertical: false)
+                breadcrumb(compact: true)
             }.disabled(isBusy)
             Spacer(minLength: 0)
         }
+    }
+
+    /// 完整路径优先展示；空间不足时才将中间目录收入菜单，保留根目录和当前位置。
+    private func breadcrumb(compact: Bool) -> some View {
+        HStack(spacing: 6) {
+            Button("根目录") { browser.navigate(to: []) }.fixedSize()
+            if browser.hasUnknownAncestors { Text("/ …").foregroundStyle(.secondary) }
+            if compact, browser.trail.count > 1 {
+                Text("/").foregroundStyle(.secondary)
+                Menu {
+                    ForEach(Array(browser.trail.dropLast().enumerated()), id: \.element.id) { index, folder in
+                        Button(folder.name) { browser.navigate(to: Array(browser.trail.prefix(index + 1))) }
+                    }
+                } label: { Text("…") }
+                    .menuStyle(.borderlessButton).fixedSize().help("上级目录")
+            }
+            ForEach(Array(browser.trail.enumerated()), id: \.element.id) { index, folder in
+                if !compact || index == browser.trail.count - 1 {
+                    Text("/").foregroundStyle(.secondary)
+                    Button(folder.name) { browser.navigate(to: Array(browser.trail.prefix(index + 1))) }
+                        .truncationMode(.middle)
+                }
+            }
+        }.buttonStyle(.plain).lineLimit(1)
     }
 
     private var pendingUpload: some View {

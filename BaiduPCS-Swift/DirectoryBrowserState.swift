@@ -227,6 +227,12 @@ final class DirectoryBrowserState {
         isLoading = true; errorMessage = nil
         defer { if requestID == id { isLoading = false; requestID = nil } }
         do {
+            if hasUnknownAncestors, case .baidu = directory {
+                let resolved = try await resolveBaiduTrail(directory, disk: disk)
+                try Task.checkCancellation()
+                guard requestID == id, currentDirectory == directory, session == identity else { return }
+                trail = resolved; hasUnknownAncestors = false
+            }
             let environment = try model.uploadEnvironment(for: key)
             let next = FileTree<RemoteEntry>(initialSelection: .none, list: { [weak self, weak model] entry in
                 guard let self, let model else { throw CancellationError() }
@@ -273,6 +279,26 @@ final class DirectoryBrowserState {
     }
 
     private var preferenceKey: String { "workspace.directory.v1." + provider.rawValue }
+
+    /// 按百度绝对路径读取真实祖先条目，使定位后的路径导航继续携带准确目录身份。
+    private func resolveBaiduTrail(_ directory: RemoteReference, disk: any Netdisk) async throws -> [RemoteEntry] {
+        let components = directory.identifier.split(separator: "/")
+        var parent = provider.rootReference
+        var result: [RemoteEntry] = []
+        for component in components {
+            let entries = try await disk.listDirectory(parent)
+            try Task.checkCancellation()
+            guard let entry = entries.first(where: { $0.isDirectory && $0.name == String(component) }) else {
+                throw UploadRecordError.invalid("目录已变化，请返回根目录重新打开。")
+            }
+            result.append(entry)
+            parent = entry.reference
+        }
+        guard result.last?.reference == directory else {
+            throw UploadRecordError.invalid("目录已变化，请返回根目录重新打开。")
+        }
+        return result
+    }
 
     private func saveLocation() {
         guard let account else { return }
