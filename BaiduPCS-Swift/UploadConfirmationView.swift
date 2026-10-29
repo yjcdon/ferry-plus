@@ -53,7 +53,7 @@ struct UploadConfirmationView: View {
         self.target = target
         self.onSubmitted = onSubmitted
         _files = State(initialValue: Self.uniqueLocalURLs(target.files.filter(\.isFileURL)))
-        _selectionError = State(initialValue: target.files.contains(where: { !$0.isFileURL }) ? "只能上传本地文件或文件夹。" : nil)
+        _selectionError = State(initialValue: target.files.contains(where: { !$0.isFileURL }) ? "请选择本地文件或文件夹。" : nil)
     }
 
     var body: some View {
@@ -344,7 +344,7 @@ struct UploadConfirmationView: View {
     }
 
     private static func appendFiles(_ urls: [URL], files: Binding<[URL]>, error: Binding<String?>) {
-        error.wrappedValue = urls.contains(where: { !$0.isFileURL }) ? "只能上传本地文件或文件夹。" : nil
+        error.wrappedValue = urls.contains(where: { !$0.isFileURL }) ? "请选择本地文件或文件夹。" : nil
         files.wrappedValue = uniqueLocalURLs(files.wrappedValue + urls.filter(\.isFileURL))
     }
 

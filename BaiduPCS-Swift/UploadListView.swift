@@ -482,7 +482,7 @@ struct UploadInspector: View {
                           evidence.algorithm == .sha256, evidence.algorithm == expected.algorithm,
                           evidence.digest == expected.digest, evidence.origin == expected.origin,
                           evidence.size == file.source.size else {
-                        throw UploadRecordError.invalid("校验记录与上传文件归属不一致：\(file.relativePath)")
+                        throw UploadRecordError.invalid("【\(file.relativePath)】的状态读取失败，请重新打开任务。")
                     }
                     descriptions[file.id] = switch record.status {
                     case .verified: "文件内容一致"

@@ -15,6 +15,7 @@
 
 ## 检查证据
 
+- 上传确认的初始项目和追加项目统一提示【请选择本地文件或文件夹。】，沿用本地 URL 筛选与去重规则；本次仅调整文案，差异检查通过。
 - `swiftc -frontend -parse BaiduPCS-Swift/NetdiskFilesView.swift` 通过。
 - `git diff --check` 通过。
 - 焦点与勾选分离修复后，使用 SDK 26.5、Swift 6、macOS 14 目标对全部 App 源码静态类型检查通过；revealCreated 全部调用迁移到显式 select 参数。
