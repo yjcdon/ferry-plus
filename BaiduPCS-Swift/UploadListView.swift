@@ -128,6 +128,7 @@ struct UploadInspector: View {
     @State private var offset = 0
     @State private var generation = 0
     @State private var files: [UploadFile] = []
+    @State private var loadedOffset: Int?
     @State private var isLoading = true
     @State private var error: String?
     @State private var integrityDescriptions: [UUID: String] = [:]
@@ -222,8 +223,8 @@ struct UploadInspector: View {
                 Text(job == nil ? "任务已移除" : "第 \(offset / pageSize + 1) 页 · 共 \(job?.fileIDs.count ?? 0) 项")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button("上一页") { offset = max(0, offset - pageSize) }.disabled(offset == 0 || isLoading)
-                Button("下一页") { offset += pageSize }.disabled(offset + pageSize >= (job?.fileIDs.count ?? 0) || isLoading)
+                Button("上一页") { showPage(max(0, offset - pageSize)) }.disabled(offset == 0 || isLoading)
+                Button("下一页") { showPage(offset + pageSize) }.disabled(offset + pageSize >= (job?.fileIDs.count ?? 0) || isLoading)
             }.padding()
             HStack {
                 Button { generation += 1 } label: { Label("刷新明细", systemImage: "arrow.clockwise") }
@@ -266,7 +267,7 @@ struct UploadInspector: View {
         )) { Button("好") { relocation.error = nil } } message: { Text(relocation.error ?? "") }
         .onChange(of: job?.fileIDs.count) {
             let count = job?.fileIDs.count ?? 0
-            if offset >= count { offset = max(0, ((count - 1) / pageSize) * pageSize) }
+            if offset >= count { showPage(max(0, ((count - 1) / pageSize) * pageSize)) }
         }
         .onDisappear {
             relocation = .init(); location = .init()
@@ -276,13 +277,14 @@ struct UploadInspector: View {
     }
 
     @ViewBuilder private var content: some View {
-        if isLoading { ProgressView("加载中") }
-        else if let error {
-            ContentUnavailableView {
-                Label("明细读取失败", systemImage: "exclamationmark.triangle")
-            } description: { Text(error) } actions: { Button("重试") { generation += 1 } }
-        } else if files.isEmpty { ContentUnavailableView("文件明细将显示在这里", systemImage: "doc") }
-        else {
+        if files.isEmpty {
+            if isLoading { ProgressView("加载中") }
+            else if let error {
+                ContentUnavailableView {
+                    Label("明细读取失败", systemImage: "exclamationmark.triangle")
+                } description: { Text(error) } actions: { Button("重试") { generation += 1 } }
+            } else { ContentUnavailableView("文件明细将显示在这里", systemImage: "doc") }
+        } else {
             List(files) { file in
                 VStack(alignment: .leading, spacing: 5) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -345,7 +347,28 @@ struct UploadInspector: View {
                     }
                 }.padding(.vertical, 3)
             }
+            .overlay(alignment: .topTrailing) {
+                if isLoading { ProgressView().controlSize(.small).padding(8).accessibilityLabel("正在刷新明细") }
+            }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if let error {
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
+                        Spacer(minLength: 0)
+                        Button("重试") { generation += 1 }.controlSize(.small).disabled(isLoading)
+                    }
+                    .padding(8)
+                    .background(Color(nsColor: .windowBackgroundColor))
+                }
+            }
         }
+    }
+
+    /// 换页时先清空上一页对象，避免新页标题下出现上一页的可操作条目。
+    private func showPage(_ nextOffset: Int) {
+        offset = nextOffset
+        loadedOffset = nil; files = []; integrityDescriptions = [:]
+        isLoading = true; error = nil
     }
 
     /// 先关闭传输明细，再交给主文件页定位；查询及导航始终绑定原任务账号。
@@ -428,7 +451,10 @@ struct UploadInspector: View {
     /// 摘要变化触发按页读取，不做定时轮询，也不让不可见明细常驻完整清单。
     private func load(_ page: PageRequest) async {
         guard page == request else { return }
-        isLoading = true; error = nil; files = []; integrityDescriptions = [:]
+        isLoading = true; error = nil
+        if loadedOffset != page.offset {
+            files = []; integrityDescriptions = [:]
+        }
         guard let coordinator = model.uploadCoordinator, let sourceJob = job else {
             isLoading = false; error = "上传任务读取失败，请重新打开。"
             return
@@ -462,7 +488,7 @@ struct UploadInspector: View {
             }
             try Task.checkCancellation()
             guard page == request, job?.account == sourceJob.account else { return }
-            integrityDescriptions = descriptions; files = result; isLoading = false
+            integrityDescriptions = descriptions; files = result; loadedOffset = page.offset; isLoading = false
         } catch {
             guard !Task.isCancelled, page == request else { return }
             self.error = error.localizedDescription; isLoading = false
