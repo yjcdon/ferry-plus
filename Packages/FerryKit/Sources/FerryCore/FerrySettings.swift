@@ -100,19 +100,6 @@ public struct FerrySettings: Codable, Sendable, Hashable {
         (provider == .baidu ? connectionsPerFile : quarkConnectionsPerFile).clamped(to: allowedConnections)
     }
 
-    /// 当前两项等于的预设。不等于任何预设时为 `nil`。
-    public var concurrencyPreset: ConcurrencyPreset? {
-        ConcurrencyPreset.allCases.first {
-            $0.maxConcurrentFiles == maxConcurrentFiles && $0.connectionsPerFile == connectionsPerFile
-        }
-    }
-
-    public mutating func apply(_ preset: ConcurrencyPreset) {
-        maxConcurrentFiles = preset.maxConcurrentFiles
-        connectionsPerFile = preset.connectionsPerFile
-        limitConcurrency()
-    }
-
     /// 只覆盖并发设置，其余沿用 `base`。
     public func downloadConfiguration(base: DownloadConfiguration = DownloadConfiguration()) -> DownloadConfiguration {
         var limited = self
@@ -121,28 +108,6 @@ public struct FerrySettings: Codable, Sendable, Hashable {
         configuration.maxConcurrentFiles = limited.maxConcurrentFiles
         configuration.segmentsPerFile = max(limited.connectionsPerFile, limited.quarkConnectionsPerFile)
         return configuration
-    }
-}
-
-/// 按网盘会员类型给出的同时下载文件数和每个文件的连接数。
-public enum ConcurrencyPreset: CaseIterable, Sendable {
-    /// 非超级会员（包括普通会员）。使用多个连接会被限速。
-    case regular
-    /// 超级会员。参考实现建议同时下载 1 到 2 个文件，总连接数不超过 12。
-    case svip
-
-    public var maxConcurrentFiles: Int {
-        switch self {
-        case .regular: 1
-        case .svip: 2
-        }
-    }
-
-    public var connectionsPerFile: Int {
-        switch self {
-        case .regular: 1
-        case .svip: 6
-        }
     }
 }
 

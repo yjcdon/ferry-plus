@@ -388,14 +388,24 @@ import Testing
         #expect(decoded.connectionsPerFile == 2)
     }
 
-    @Test func settingsMatchConcurrencyPresets() {
-        var settings = FerrySettings()
-        #expect(settings.concurrencyPreset == .regular)
-        settings.apply(.svip)
-        #expect(settings.concurrencyPreset == .svip)
-        #expect(settings.downloadConfiguration().segmentsPerFile == ConcurrencyPreset.svip.connectionsPerFile)
-        settings.connectionsPerFile += 1
-        #expect(settings.concurrencyPreset == nil)
+    @Test func manualConcurrencyAppliesProviderConnectionsAndBudget() throws {
+        var settings = FerrySettings(maxConcurrentFiles: 3, connectionsPerFile: 2)
+        settings.quarkConnectionsPerFile = 4
+        let configuration = settings.downloadConfiguration()
+        #expect(configuration.maxConcurrentFiles == 3)
+        #expect(configuration.segmentsPerFile == 4)
+        #expect(settings.connections(for: .baidu) == 2)
+        #expect(settings.connections(for: .quark) == 4)
+
+        settings.quarkConnectionsPerFile = 16
+        settings.limitConcurrency()
+        let limited = settings.downloadConfiguration()
+        #expect(settings.maxConcurrentFiles == 3)
+        #expect(settings.connectionsPerFile == 2)
+        #expect(settings.quarkConnectionsPerFile == 6)
+        #expect(limited.segmentsPerFile == 6)
+        #expect(limited.maxConcurrentFiles * limited.segmentsPerFile <= FerrySettings.totalConnectionsLimit)
+        #expect(try JSONDecoder().decode(FerrySettings.self, from: JSONEncoder().encode(settings)) == settings)
     }
 
     @Test func downloadContextCarriesRemotePath() {
