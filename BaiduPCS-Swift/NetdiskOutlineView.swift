@@ -13,6 +13,7 @@ struct NetdiskOutlineView: NSViewRepresentable {
     let onDownload: (RemoteEntry) -> Void
     let onRename: (RemoteEntry) -> Void
     let onDelete: (RemoteEntry) -> Void
+    let onNewFolder: (() -> Void)?
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -384,6 +385,15 @@ struct NetdiskOutlineView: NSViewRepresentable {
         }
 
         func menu(for row: Int) -> NSMenu? {
+            menuEntry = nil
+            if row == -1 {
+                guard input.onNewFolder != nil else { return nil }
+                let menu = NSMenu()
+                let item = NSMenuItem(title: "新建文件夹", action: #selector(newFolder), keyEquivalent: "")
+                item.target = self
+                menu.addItem(item)
+                return menu
+            }
             guard input.allowsUpload, let table,
                   let entry = (table.item(atRow: row) as? FileNode<RemoteEntry>)?.entry else { return nil }
             menuEntry = entry
@@ -398,6 +408,7 @@ struct NetdiskOutlineView: NSViewRepresentable {
             return menu
         }
 
+        @objc private func newFolder() { input.onNewFolder?() }
         @objc private func download() { if let menuEntry { input.onDownload(menuEntry) } }
         @objc private func upload() { if let menuEntry { _ = input.onUpload(menuEntry, []) } }
         @objc private func rename() { if let menuEntry { input.onRename(menuEntry) } }

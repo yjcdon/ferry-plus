@@ -12,7 +12,7 @@ Requires **macOS 14+ and Apple Silicon (M-series Macs)**. Open source under Apac
 
 - **Two drives, one app:** sign in to Baidu and Quark, switch drives, browse folders, search the current directory, and sort files.
 - **Uploads and downloads:** upload files or folders with drag and drop; download cloud files and shared links while preserving folder structure.
-- **File management:** create folders, rename items, and move selected files or folders to the cloud recycle bin.
+- **File management:** create folders from the empty-area context menu; rename items and move selected files or folders to the cloud recycle bin.
 - **Transfer queue:** pause, resume, retry failures, and filter by drive, direction, or status.
 - **Content checks:** verify transfer content in the background; store credentials in the local macOS Keychain.
 

@@ -262,7 +262,7 @@ struct NetdiskFilesView: View {
                     if usesCompactToolbar {
                         Menu("操作") { directoryActions }
                             .menuStyle(.borderlessButton).fixedSize()
-                            .help("新建文件夹、移到回收站和刷新")
+                            .help("移到回收站和刷新")
                             .accessibilityLabel("文件操作")
                     } else {
                         directoryActions
@@ -299,14 +299,6 @@ struct NetdiskFilesView: View {
 
     /// 次要目录操作在宽窗平铺、窄窗收入菜单，共用同一目标和启用条件。
     @ViewBuilder private var directoryActions: some View {
-        Button {
-            if let context = browser.context {
-                folderName = ""; folderError = nil
-                pendingNewFolder = .init(context: context)
-            }
-        } label: { Label("新建文件夹", systemImage: "folder.badge.plus") }
-            .disabled(!canOperate).help("在当前目录新建文件夹")
-            .accessibilityLabel("新建文件夹")
         Button { prepareDeletion(browser.selectedEntries) } label: { Label("移到回收站", systemImage: "trash") }
             .disabled(!canOperate || browser.selectedEntries.isEmpty).help("将勾选项目移到网盘回收站")
             .accessibilityLabel("移到回收站")
@@ -333,13 +325,16 @@ struct NetdiskFilesView: View {
                     allowsUpload: canUpload,
                     onUpload: { entry, files in
                         guard canUpload else { return false }
-                        let context = entry.flatMap { browser.context(for: $0) } ?? browser.context
+                        let context: DirectoryContext?
+                        if let entry { context = browser.context(for: entry) }
+                        else { context = browser.context }
                         guard let context else { return false }
                         onUpload(context, files)
                         return true
                     }, onDownload: { entry in
                         if canOperate, let context = browser.context { onDownload(context, contextEntries(entry)) }
-                    }, onRename: prepareRename, onDelete: { prepareDeletion(contextEntries($0)) })
+                    }, onRename: prepareRename, onDelete: { prepareDeletion(contextEntries($0)) },
+                    onNewFolder: newFolderAction)
                     .id(ObjectIdentifier(tree))
             }
         } else if let error = browser.errorMessage {
@@ -356,6 +351,10 @@ struct NetdiskFilesView: View {
     private func emptyContent(_ title: String, systemImage: String) -> some View {
         ContentUnavailableView(title, systemImage: systemImage)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .contextMenu {
+                Button("新建文件夹", action: prepareNewFolder).disabled(!canOperate)
+            }
             .overlay {
                 if isDropTarget {
                     RoundedRectangle(cornerRadius: 8).stroke(.tint, lineWidth: 2).padding(3).allowsHitTesting(false)
@@ -368,6 +367,18 @@ struct NetdiskFilesView: View {
                 onUpload(context, files)
                 return true
             } isTargeted: { isDropTarget = $0 }
+    }
+
+    private var newFolderAction: (() -> Void)? {
+        guard canOperate else { return nil }
+        return { prepareNewFolder() }
+    }
+
+    /// 空白处的新建命令沿用当前目录与现有名称校验弹窗。
+    private func prepareNewFolder() {
+        guard canOperate, let context = browser.context else { return }
+        folderName = ""; folderError = nil
+        pendingNewFolder = .init(context: context)
     }
 
     private func notice(_ message: String) -> some View {
