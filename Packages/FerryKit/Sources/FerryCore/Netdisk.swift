@@ -13,6 +13,8 @@ public protocol Netdisk: AnyObject, Sendable {
                         previous: TransferProgress?,
                         onProgress: @Sendable (TransferProgress) async throws -> Void) async throws -> TransferProgress
     func deleteDirectory(_ directory: TransferDirectory) async throws
+    /// 修改账号内一个准确对象的名称，返回服务端确认的新条目。
+    func rename(entry: RemoteEntry, parent: RemoteReference, newName: String, account: AccountKey) async throws -> RemoteEntry
     /// 用户确认后将账号内一个准确对象移入回收站；请求只发送一次，未确认结果不得直接重发。
     func moveToTrash(entry: RemoteEntry, parent: RemoteReference, account: AccountKey) async throws
 }
@@ -26,9 +28,9 @@ public enum NetdiskDeletionError: Error, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .unsupported: "当前网盘未提供文件删除能力。"
-        case .invalidSelection: "删除目标或父目录无效，不能删除网盘根目录。"
+        case .invalidSelection: "请选择文件或文件夹后重试。"
         case .entryChanged: "所选文件已不在原目录或身份发生变化，请刷新后重新选择。"
-        case .unconfirmed(let reason): "删除结果尚未确认，请刷新目录核对后再操作：\(reason)"
+        case .unconfirmed(let reason): "删除结果待确认，请刷新查看：\(reason)"
         }
     }
 }
@@ -45,8 +47,13 @@ extension Netdisk {
         throw NetdiskDeletionError.unsupported
     }
 
+    public func rename(entry: RemoteEntry, parent: RemoteReference, newName: String, account: AccountKey) async throws -> RemoteEntry {
+        throw NetdiskRenameError.unsupported
+    }
+
     /// 写入前重新读取父目录，拒绝旧列表、另一账号、根目录和越界对象。
-    func checkTrashSelection(entry: RemoteEntry, parent: RemoteReference, requestingAccount: AccountKey) async throws {
+    @discardableResult
+    func checkMutationSelection(entry: RemoteEntry, parent: RemoteReference, requestingAccount: AccountKey) async throws -> [RemoteEntry] {
         guard requestingAccount == account, parent.provider == account.provider, entry.reference.provider == account.provider else {
             throw CoordinatorError.otherAccount
         }
@@ -71,6 +78,7 @@ extension Netdisk {
         guard matches.count == 1, let current = matches.first,
               current.name == entry.name, current.isDirectory == entry.isDirectory else { throw NetdiskDeletionError.entryChanged }
         try Task.checkCancellation()
+        return children
     }
 
     /// 服务端回执后只做有限目录核对；索引延迟和查询失败不触发第二次删除。

@@ -12,8 +12,8 @@ final class QuarkAccountSession {
 
         var title: String {
             switch self {
-            case .loggedOut: "未登录"
-            case .checking: "正在校验登录…"
+            case .loggedOut: "待登录"
+            case .checking: "正在校验登录"
             case .loggedIn: "已登录"
             case .expired: "登录已失效"
             case .problem: "登录校验未完成"
@@ -49,7 +49,7 @@ final class QuarkAccountSession {
                 state = .checking
             }
         } catch {
-            problem = "无法读取夸克登录信息：\(error.localizedDescription)"
+            problem = "夸克登录信息读取失败：\(error.localizedDescription)"
             state = .problem(problem!)
         }
     }

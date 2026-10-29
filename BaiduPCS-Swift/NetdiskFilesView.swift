@@ -18,10 +18,23 @@ struct NetdiskFilesView: View {
     @State private var creation: Creation?
     @State private var pendingDeletion: Deletion?
     @State private var deletion: Deletion?
+    @State private var pendingRename: RenameTarget?
+    @State private var renameName = ""
+    @State private var renameError: String?
+    @State private var renaming: RenameRequest?
     @State private var operationMessage: String?
     @State private var dropEntry: RemoteEntry?
     @State private var isDropTarget = false
-    @State private var dateWidth: CGFloat = 150
+    private static let modificationDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.timeZone = .autoupdatingCurrent
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
+
+    @State private var dateWidth: CGFloat = 240
     @State private var sizeWidth: CGFloat = 90
 
     private struct LoadID: Hashable {
@@ -39,12 +52,20 @@ struct NetdiskFilesView: View {
         let context: DirectoryContext
         let targets: [(entry: RemoteEntry, parent: RemoteReference)]
     }
-    private var isBusy: Bool { creation != nil || deletion != nil }
+    private struct RenameTarget: Identifiable {
+        let id = UUID()
+        let context: DirectoryContext
+        let entry: RemoteEntry
+        let parent: RemoteReference
+    }
+    private struct RenameRequest: Identifiable {
+        let id = UUID()
+        let target: RenameTarget
+        let name: String
+    }
+    private var isBusy: Bool { creation != nil || deletion != nil || renaming != nil }
     private var sessionIdentity: ObjectIdentifier? {
         model.coordinator.netdisks[browser.provider].map(ObjectIdentifier.init)
-    }
-    private var accountName: String {
-        model.coordinator.accountNames[browser.provider] ?? browser.provider.title
     }
     private var loadID: LoadID {
         .init(account: model.accountKey(for: browser.provider), session: sessionIdentity, generation: browser.generation)
@@ -97,15 +118,24 @@ struct NetdiskFilesView: View {
             }.padding(.horizontal).padding(.vertical, 8)
         }
         .navigationTitle(browser.provider.title)
-        .navigationSubtitle(accountName)
         .toolbar { toolbar }
         .task(id: loadID) { await browser.load(model: model) }
+        .task(id: operationMessage) {
+            guard operationMessage != nil else { return }
+            do {
+                try await Task.sleep(for: .seconds(10))
+                operationMessage = nil
+            } catch is CancellationError {
+                // 新提示或页面关闭会取消旧提示的倒计时。
+            } catch { assertionFailure("Unexpected sleep error: \(error)") }
+        }
         .task(id: creation?.id) { if let creation { await createFolder(creation) } }
         .task(id: deletion?.id) { if let deletion { await delete(deletion) } }
+        .task(id: renaming?.id) { if let renaming { await rename(renaming) } }
         .focusedSceneValue(\.focusTaskSearch, { searchFocusRequest += 1 })
         .onChange(of: loadID.account) { _, _ in operationMessage = nil }
         .onChange(of: loadID.session) { _, _ in operationMessage = nil }
-        .onChange(of: showsNewFolder || pendingDeletion != nil || isBusy) { _, presented in
+        .onChange(of: showsNewFolder || pendingDeletion != nil || pendingRename != nil || isBusy) { _, presented in
             browser.isOperationPresented = presented
         }
         .onChange(of: browser.tree.map(ObjectIdentifier.init)) { _, _ in dropEntry = nil }
@@ -126,7 +156,8 @@ struct NetdiskFilesView: View {
                 }
                 creation = .init(context: context, name: folderName)
             }.disabled(!validFolderName(folderName))
-        } message: { Text("在\(newFolderContext?.provider.title ?? browser.provider.title)的“\(newFolderContext?.pathDescription ?? "当前目录")”中新建文件夹。") }
+        } message: { Text("在\(newFolderContext?.provider.title ?? browser.provider.title)的【\(newFolderContext?.pathDescription ?? "当前目录")】中新建文件夹。") }
+        .sheet(item: $pendingRename, content: renameSheet)
         .sheet(item: $pendingDeletion) { request in
             VStack(spacing: 0) {
                 HStack { Text("移到网盘回收站？").font(.headline); Spacer() }.padding()
@@ -207,6 +238,9 @@ struct NetdiskFilesView: View {
             Button { browser.refresh() } label: { Label("刷新", systemImage: "arrow.clockwise") }
                 .disabled(isBusy || browser.isLoading).help("刷新当前目录")
         }
+        if #available(macOS 26.0, *) {
+            ToolbarSpacer(.fixed, placement: .primaryAction)
+        }
         ToolbarItem(placement: .primaryAction) {
             TaskSearchField(text: $browser.query, focusRequest: searchFocusRequest, placeholder: "搜索当前目录")
                 .frame(width: 150)
@@ -216,7 +250,7 @@ struct NetdiskFilesView: View {
     @ViewBuilder private var content: some View {
         if model.accountKey(for: browser.provider) == nil {
             ContentUnavailableView {
-                Label("尚未登录\(browser.provider.title)", systemImage: "person.crop.circle")
+                Label("登录\(browser.provider.title)", systemImage: "person.crop.circle")
             } description: { Text("登录后浏览和管理网盘文件。") } actions: {
                 Button("登录") { model.presentLogin(for: browser.provider) }
             }
@@ -225,7 +259,7 @@ struct NetdiskFilesView: View {
                 ContentUnavailableView("此目录为空", systemImage: "folder")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if browser.rootNodes.isEmpty {
-                ContentUnavailableView("没有匹配的文件", systemImage: "magnifyingglass")
+                ContentUnavailableView("试试其他关键词", systemImage: "magnifyingglass")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
@@ -234,7 +268,7 @@ struct NetdiskFilesView: View {
                             FileTreeRow(node: node, tree: tree, isIncluded: false, badge: badge, columns: columns,
                                 onUpload: { entry, files in
                                     if canOperate, let context = browser.context(for: entry) { onUpload(context, files) }
-                                }, onDelete: { prepareDeletion(contextEntries($0)) },
+                                }, onDelete: { prepareDeletion(contextEntries($0)) }, onRename: prepareRename,
                                 orderedChildren: browser.orderedChildren, allowsExpansion: browser.query.isEmpty,
                                 onOpen: { browser.enter($0) }, onDownload: { entry in
                                     if canOperate, let context = browser.context { onDownload(context, contextEntries(entry)) }
@@ -244,12 +278,17 @@ struct NetdiskFilesView: View {
                                     else if dropEntry?.reference == entry.reference { dropEntry = nil }
                                 })
                         }
-                    } header: { columnHeaders }
+                    } header: {
+                        columnHeaders
+                            .font(.callout.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .textCase(nil)
+                    }
                 }.id(ObjectIdentifier(tree))
             }
         } else if let error = browser.errorMessage {
             ContentUnavailableView {
-                Label("无法读取网盘", systemImage: "exclamationmark.triangle")
+                Label("网盘读取失败", systemImage: "exclamationmark.triangle")
             } description: { Text(error) } actions: {
                 Button("重试") { browser.refresh() }
                 Button("重新登录") { model.presentLogin(for: browser.provider) }
@@ -258,12 +297,16 @@ struct NetdiskFilesView: View {
     }
 
     private var columnHeaders: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 0) {
             sortHeader(.name).frame(maxWidth: .infinity, alignment: .leading)
-            sortHeader(.modified, leadingInset: 12).frame(width: dateWidth, alignment: .leading)
-                .overlay(alignment: .leading) { ColumnResizeHandle(width: $dateWidth, minimum: 48, maximum: 600).frame(width: 16, height: 24) }
-            sortHeader(.size, alignment: .trailing).frame(width: sizeWidth, alignment: .trailing)
-                .overlay(alignment: .leading) { ColumnResizeHandle(width: $sizeWidth, adjacentWidth: $dateWidth, minimum: 48, maximum: 400).frame(width: 16, height: 24) }
+            WidthResizeHandle(width: $dateWidth, minimum: 48, maximum: 600)
+                .frame(width: 16, height: 28)
+            sortHeader(.modified, leadingInset: 4)
+                .frame(width: dateWidth - 8, alignment: .leading)
+            WidthResizeHandle(width: $sizeWidth, adjacentWidth: $dateWidth, minimum: 48, maximum: 400)
+                .frame(width: 16, height: 28)
+            sortHeader(.size, alignment: .trailing)
+                .frame(width: sizeWidth - 8, alignment: .trailing)
         }
     }
 
@@ -301,7 +344,7 @@ struct NetdiskFilesView: View {
 
     private func columns(_ entry: RemoteEntry) -> some View {
         HStack(spacing: 8) {
-            Text(entry.modifiedAt?.formatted(date: .abbreviated, time: .omitted) ?? "—")
+            Text(entry.modifiedAt.map { Self.modificationDateFormatter.string(from: $0) } ?? "—")
                 .padding(.leading, 12)
                 .frame(width: dateWidth, alignment: .leading)
             Text(entry.isDirectory ? "—" : entry.size.byteCount)
@@ -337,6 +380,72 @@ struct NetdiskFilesView: View {
         pendingDeletion = .init(context: context, targets: targets)
     }
 
+    /// 校验失败保留名称和弹窗，红框与简短提示直接标记需要修改的输入。
+    private func renameSheet(_ target: RenameTarget) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("重命名").font(.headline)
+            TextField("名称", text: $renameName)
+                .textFieldStyle(.plain)
+                .padding(8)
+                .background(Color(nsColor: .textBackgroundColor), in: .rect(cornerRadius: 5))
+                .overlay {
+                    RoundedRectangle(cornerRadius: 5)
+                        .stroke(renameError == nil ? Color.secondary.opacity(0.4) : Color.red,
+                                lineWidth: renameError == nil ? 1 : 2)
+                }
+                .disabled(isBusy)
+                .onChange(of: renameName) { _, _ in renameError = nil }
+            if let renameError { Text(renameError).font(.callout).foregroundStyle(.red) }
+            HStack {
+                if renaming != nil { ProgressView().controlSize(.small) }
+                Spacer()
+                Button("取消", role: .cancel) { pendingRename = nil }
+                    .keyboardShortcut(.cancelAction).disabled(isBusy)
+                Button("确定") { submitRename(target) }
+                    .keyboardShortcut(.defaultAction).disabled(isBusy)
+            }
+        }
+        .padding(20)
+        .frame(width: 480)
+        .interactiveDismissDisabled(isBusy)
+    }
+
+    /// 仅在点击确定时校验名称，不用禁用按钮隐藏无效输入的原因。
+    private func submitRename(_ target: RenameTarget) {
+        if let message = NetdiskRenameError.validationMessage(renameName, provider: target.context.provider) {
+            renameError = message
+            return
+        }
+        guard renameName != target.entry.name else { pendingRename = nil; return }
+        renameError = nil
+        renaming = .init(target: target, name: renameName)
+    }
+
+    /// 右键条目独立改名，使用树中的准确父目录，不扩展为多项操作。
+    private func prepareRename(_ entry: RemoteEntry) {
+        guard canOperate, let context = browser.context, let path = browser.path(to: entry.reference) else { return }
+        renameName = entry.name
+        renameError = nil
+        pendingRename = .init(context: context, entry: entry, parent: path.dropLast().last?.reference ?? context.reference)
+    }
+
+    /// 会话一致时提交一次，完成后刷新当前树；查询或网络失败也允许用户刷新核对。
+    private func rename(_ request: RenameRequest) async {
+        defer {
+            renaming = nil
+            if isCurrent(request.target.context) { browser.refresh() }
+        }
+        do {
+            guard isCurrent(request.target.context) else { throw UploadDestinationError.otherAccount }
+            let disk = try model.netdisk(for: request.target.context.provider)
+            _ = try await disk.rename(entry: request.target.entry, parent: request.target.parent,
+                                      newName: request.name, account: request.target.context.account)
+            pendingRename = nil
+        } catch {
+            if !Task.isCancelled { renameError = error.localizedDescription }
+        }
+    }
+
     private func validFolderName(_ name: String) -> Bool {
         !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && name != "." && name != ".." &&
         !name.contains("/") && !name.contains("\\") && !name.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains)
@@ -354,7 +463,7 @@ struct NetdiskFilesView: View {
             operationMessage = browser.query.isEmpty ? "已创建“\(entry.name)”。" : "已创建“\(entry.name)”，若未显示请清除筛选查看。"
         } catch {
             if !Task.isCancelled && isCurrent(request.context) {
-                operationMessage = "无法确认文件夹是否已创建，请刷新后查看。\n\(error.localizedDescription)"
+                operationMessage = "创建结果待确认，请刷新查看。\n\(error.localizedDescription)"
             }
         }
     }
@@ -383,66 +492,7 @@ struct NetdiskFilesView: View {
         guard isCurrent(request.context), !Task.isCancelled else { return }
         let unconfirmed = request.targets.count - confirmed
         operationMessage = "已移入回收站 \(confirmed) 项。" +
-            (unconfirmed > 0 ? "\n无法确认 \(unconfirmed) 项。" : "") +
+            (unconfirmed > 0 ? "\n待确认 \(unconfirmed) 项，请刷新查看。" : "") +
             (failures.isEmpty ? "" : "\n" + failures.joined(separator: "\n"))
-    }
-}
-
-/// 原生鼠标事件以窗口坐标计算位移，列边界移动时拖动起点保持不变。
-private struct ColumnResizeHandle: NSViewRepresentable {
-    @Binding var width: CGFloat
-    var adjacentWidth: Binding<CGFloat>? = nil
-    let minimum: CGFloat
-    let maximum: CGFloat
-
-    func makeNSView(context: Context) -> ResizeView {
-        ResizeView(width: $width, adjacentWidth: adjacentWidth, minimum: minimum, maximum: maximum)
-    }
-
-    func updateNSView(_ view: ResizeView, context: Context) {
-        view.width = $width
-        view.adjacentWidth = adjacentWidth
-        view.minimum = minimum
-        view.maximum = maximum
-    }
-
-    final class ResizeView: NSView {
-        var width: Binding<CGFloat>
-        var adjacentWidth: Binding<CGFloat>?
-        var minimum: CGFloat
-        var maximum: CGFloat
-        private var initialX: CGFloat = 0
-        private var initialWidth: CGFloat = 0
-        private var initialAdjacentWidth: CGFloat = 0
-
-        init(width: Binding<CGFloat>, adjacentWidth: Binding<CGFloat>?, minimum: CGFloat, maximum: CGFloat) {
-            self.width = width
-            self.adjacentWidth = adjacentWidth
-            self.minimum = minimum
-            self.maximum = maximum
-            super.init(frame: .zero)
-        }
-        required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
-
-        override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-        override func resetCursorRects() { addCursorRect(bounds, cursor: .resizeLeftRight) }
-        override func draw(_ dirtyRect: NSRect) {
-            NSColor.secondaryLabelColor.withAlphaComponent(0.35).setFill()
-            NSRect(x: 1, y: (bounds.height - 14) / 2, width: 1, height: 14).fill()
-        }
-        override func mouseDown(with event: NSEvent) {
-            initialX = event.locationInWindow.x
-            initialWidth = width.wrappedValue
-            initialAdjacentWidth = adjacentWidth?.wrappedValue ?? 0
-        }
-        override func mouseDragged(with event: NSEvent) {
-            var delta = event.locationInWindow.x - initialX
-            delta = min(initialWidth - minimum, max(initialWidth - maximum, delta))
-            if let adjacentWidth {
-                delta = min(600 - initialAdjacentWidth, max(48 - initialAdjacentWidth, delta))
-                adjacentWidth.wrappedValue = initialAdjacentWidth + delta
-            }
-            width.wrappedValue = initialWidth - delta
-        }
     }
 }

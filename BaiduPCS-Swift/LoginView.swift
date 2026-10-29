@@ -60,11 +60,11 @@ private struct CookieLoginView: View {
             .formStyle(.grouped)
 
             HStack {
-                Button("网页登录…", action: useWebLogin)
+                Button("网页登录", action: useWebLogin)
                     .disabled(isLoggingIn)
                 if isLoggingIn {
                     ProgressView().controlSize(.small)
-                    Text("正在校验…").foregroundStyle(.secondary)
+                    Text("正在校验").foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("取消", role: .cancel) { dismiss() }

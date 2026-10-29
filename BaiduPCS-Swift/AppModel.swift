@@ -568,7 +568,7 @@ final class AppModel {
             downloadDirectoryProblem = nil
         } catch {
             downloadDirectory = Self.defaultDownloadDirectory
-            downloadDirectoryProblem = "无法访问之前选择的下载目录，文件会下载到“下载”目录。请重新选择下载目录。"
+            downloadDirectoryProblem = "文件将下载到“下载”目录，请重新选择下载位置。"
         }
     }
 
@@ -584,7 +584,7 @@ final class AppModel {
             coordinator.downloadFolder = DownloadFolder(url: url, bookmark: settings.downloadDirectoryBookmark)
         } catch {
             if isAccessing { url.stopAccessingSecurityScopedResource() }
-            downloadDirectoryProblem = "无法保存下载目录的访问权限：\(error.localizedDescription)"
+            downloadDirectoryProblem = "下载目录授权保存失败，请重新选择：\(error.localizedDescription)"
         }
     }
 
@@ -737,7 +737,7 @@ final class AppModel {
 
     func netdisk(for provider: Provider) throws -> any Netdisk {
         guard let disk = coordinator.netdisks[provider] else {
-            throw AppAccountError(message: "\(provider.title)尚未登录，请先登录。")
+            throw AppAccountError(message: "请登录\(provider.title)。")
         }
         return disk
     }

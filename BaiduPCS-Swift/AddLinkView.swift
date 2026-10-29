@@ -75,7 +75,7 @@ struct AddLinkView: View {
             if let link = DiskShareLink.parse(linkText) {
                 let account = model.accountKey(for: link.provider)
                 Label {
-                    Text("\(link.provider.title) · \(account == nil ? "未登录" : model.coordinator.accountNames[link.provider] ?? "已登录账号")")
+                    Text("\(link.provider.title) · \(account == nil ? "待登录" : model.coordinator.accountNames[link.provider] ?? "已登录账号")")
                 } icon: {
                     ProviderIcon(provider: link.provider, size: 16)
                 }
@@ -101,15 +101,15 @@ struct AddLinkView: View {
             ShareBrowser(tree: share.tree)
                 .id(ObjectIdentifier(share.tree))
         } else if isOpening {
-            ProgressView("正在打开分享…")
+            ProgressView("正在打开分享")
         } else if let errorMessage {
             ContentUnavailableView {
-                Label("无法打开分享", systemImage: "exclamationmark.triangle")
+                Label("分享打开失败", systemImage: "exclamationmark.triangle")
             } description: {
                 Text(errorMessage)
             } actions: {
                 if let link = DiskShareLink.parse(linkText), model.accountKey(for: link.provider) == nil {
-                    Button("登录\(link.provider.title)…") { model.presentLogin(for: link.provider) }
+                    Button("登录\(link.provider.title)") { model.presentLogin(for: link.provider) }
                 }
                 // 未登录或链接无效时，重试不会成功。
                 if DiskShareLink.parse(linkText) != nil {
@@ -257,7 +257,7 @@ private struct ShareBrowser: View {
                     Binding(get: { tree.isAllSelected }, set: { tree.setAllSelected($0) }),
                     Binding(get: { !tree.selection.isEmpty }, set: { tree.setAllSelected($0) }),
                 ], isOn: \.self)
-                    .toggleStyle(.checkbox)
+                    .toggleStyle(FileSelectionToggleStyle())
                     .disabled(tree.root.children?.isEmpty ?? true)
                 Spacer()
             }
@@ -279,7 +279,7 @@ private struct ShareBrowser: View {
         let root = tree.root
         if let children = root.children {
             if children.isEmpty {
-                ContentUnavailableView("分享中没有文件", systemImage: "folder")
+                ContentUnavailableView("分享目录为空", systemImage: "folder")
             } else {
                 List {
                     ForEach(children) { node in
@@ -289,7 +289,7 @@ private struct ShareBrowser: View {
             }
         } else if let error = root.loadError {
             ContentUnavailableView {
-                Label("无法读取分享", systemImage: "exclamationmark.triangle")
+                Label("分享读取失败", systemImage: "exclamationmark.triangle")
             } description: {
                 Text(error)
             } actions: {

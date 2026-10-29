@@ -59,7 +59,7 @@ private struct MultipleSelection: View {
                     Button(role: .destructive) {
                         onRemove(.trashingFiles)
                     } label: {
-                        Text("移除并删除文件…").frame(maxWidth: .infinity)
+                        Text("移除并删除文件").frame(maxWidth: .infinity)
                     }
                 }
             }
@@ -146,11 +146,11 @@ private struct JobDetail: View {
                                 if model.coordinator.verifyingLocalFiles.contains(file.id) {
                                     HStack {
                                         ProgressView().controlSize(.small)
-                                        Text("正在校验本地文件…").font(.caption)
+                                        Text("正在校验本地文件").font(.caption)
                                         Button("取消") { Task { await model.coordinator.cancelLocalVerification(fileID: file.id) } }
                                     }
                                 } else {
-                                    Button(file.integrityExpectation == nil ? "校验本地文件…" : "重新校验本地文件…") { onVerify(job.id, file) }
+                                    Button(file.integrityExpectation == nil ? "校验本地文件" : "重新校验本地文件") { onVerify(job.id, file) }
                                         .buttonStyle(.borderless)
                                         .disabled(!model.canOperate(on: job) || job.files.contains { model.coordinator.verifyingLocalFiles.contains($0.id) })
                                 }
@@ -172,7 +172,7 @@ private struct JobDetail: View {
                 Spacer(minLength: 0)
                 // 点按钮只移除任务；删除文件在按钮的菜单中，是不常用的破坏性操作。
                 Menu("移除") {
-                    Button("移除并删除文件…", role: .destructive) { onRemove(.trashingFiles) }
+                    Button("移除并删除文件", role: .destructive) { onRemove(.trashingFiles) }
                         .disabled(!model.canTrashFiles(of: [job]))
                 } primaryAction: {
                     onRemove(.keepingFiles)
@@ -195,8 +195,8 @@ private struct JobStatusText: View {
 
     var body: some View {
         Text(isRemoving
-             ? "正在移除…"
-             : job.files.contains(where: { model.coordinator.verifyingLocalFiles.contains($0.id) }) ? "正在校验本地文件…"
+             ? "正在移除"
+             : job.files.contains(where: { model.coordinator.verifyingLocalFiles.contains($0.id) }) ? "正在校验本地文件"
              : job.statusText(isRunning: activity.isRunning, cleansUp: model.settings.cleanupAfterDownload(for: job.provider)))
     }
 }
@@ -360,7 +360,7 @@ struct CompletedFileVerificationSheet: View {
             HStack {
                 if running {
                     ProgressView().controlSize(.small)
-                    Text("正在校验…").font(.callout)
+                    Text("正在校验").font(.callout)
                 }
                 Spacer()
                 Button(running ? "取消校验" : "关闭") {

@@ -15,6 +15,8 @@ struct MainView: View {
     @State private var direction: TransferDirectionFilter = .all
     @State private var selection: Set<TransferTaskID> = []
     @SceneStorage("isInspectorPresented") private var isInspectorPresented = false
+    @SceneStorage("transferInspectorWidth") private var inspectorWidth: Double = 320
+    @State private var workspaceWidth: CGFloat = 960
     @State private var searchText = ""
     @State private var searchFocusRequest = 0
     @State private var pendingRemoval: PendingTransferRemoval?
@@ -137,28 +139,48 @@ struct MainView: View {
     private func workspaceLayout(downloads: [Job], uploads: [UploadJob], items: [TransferListItem],
                                  scope: TransferSelection) -> some View {
         NavigationSplitView {
-            SidebarView(page: $workspace.page, providerFilter: $providerFilter,
-                        jobs: downloads, uploadJobs: uploads)
+            SidebarView(page: $workspace.page, providerFilter: providerFilter,
+                        onShowAll: {
+                            providerFilter = nil
+                            workspace.page = .transfers(currentCategory)
+                        }, jobs: downloads, uploadJobs: uploads)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
         } detail: {
             if workspace.isFiles {
                 filesContent
             } else {
-                // 固定详情宽度，隔离 SwiftUI inspector 与原生分栏的尺寸反馈循环。
+                // 显式宽度与独立拖动条避免 inspector 和原生分栏相互反馈尺寸。
                 HStack(spacing: 0) {
                     transferContent(items: items, scope: scope)
                     if isInspectorPresented {
-                        Divider()
+                        WidthResizeHandle(width: effectiveInspectorWidth, minimum: 280,
+                                          maximum: workspaceWidth / 2, fillsHeight: true)
+                            .frame(width: 8)
+                            .frame(maxHeight: .infinity)
                         TransferInspector(scope: scope, onDownloadRemove: requestDownloadRemoval,
                             onVerify: { jobID, file in localVerification = .init(jobID: jobID, file: file) })
-                            .frame(width: 320)
+                            .frame(width: effectiveInspectorWidth.wrappedValue)
                             .frame(maxHeight: .infinity)
                     }
                 }
             }
         }
-        // 保留最大侧栏下的工具栏空间；详情开启时同时容纳任务列表和固定详情栏。
+        // 详情开启时同时容纳任务列表和可调整的详情栏。
         .frame(minWidth: !workspace.isFiles && isInspectorPresented ? 960 : 820, minHeight: 400)
+        .background {
+            GeometryReader { geometry in
+                Color.clear
+                    .onChange(of: geometry.size.width, initial: true) { _, width in workspaceWidth = width }
+            }
+        }
+    }
+
+    /// 详情宽度按窗口宽度限至一半，缩放窗口时保留用户设置的偏好宽度。
+    private var effectiveInspectorWidth: Binding<CGFloat> {
+        Binding(
+            get: { min(max(CGFloat(inspectorWidth), 280), workspaceWidth / 2) },
+            set: { inspectorWidth = Double($0) }
+        )
     }
 
     private func workspaceEvents<Content: View>(_ content: Content, items: [TransferListItem],
@@ -188,6 +210,7 @@ struct MainView: View {
         }
         .onChange(of: workspace.page, initial: true) { old, page in
             if old != page, let provider = old?.provider { workspace.browser(for: provider).clearSelection() }
+            if let provider = page?.provider { providerFilter = provider }
             if case .transfers(let selected) = page { category = selected }
         }
         .focusedSceneValue(\.transferSelection, workspace.isFiles ? nil : scope)
@@ -226,7 +249,7 @@ struct MainView: View {
                 remove(pending)
             }
         } message: { pending in Text(pending.message) }
-        .alert("传输操作未完成", isPresented: Binding(
+        .alert("传输操作提示", isPresented: Binding(
             get: { operationError != nil }, set: { if !$0 { operationError = nil } }
         )) { Button("好") { operationError = nil } } message: { Text(operationError ?? "") }
         // 复验会改变任务分类；Sheet 归主窗口持有，不能随已完成列表中的行消失而取消。
@@ -242,7 +265,7 @@ struct MainView: View {
             get: { downloadRemoval.isDecisionPresented }, set: { downloadRemoval.isDecisionPresented = $0 }
         ), presenting: downloadRemoval.pending) { pending in
             if let manifest = pending.manifest {
-                Button("保存校验信息并移除…") {
+                Button("保存校验信息并移除") {
                     do {
                         let document = try IntegrityManifestDocument(manifest: manifest)
                         downloadRemoval.phase = .exporting(pending, document, presented: true)
@@ -255,7 +278,7 @@ struct MainView: View {
             }
             Button("取消", role: .cancel) { cancelDownloadRemoval() }
         } message: { pending in
-            Text(pending.preparationError ?? "“\(pending.request.job.title)”的部分校验信息无法自动保留。保存后可用于以后核对文件。")
+            Text(pending.preparationError ?? "“\(pending.request.job.title)”的校验信息需要单独保存。")
         }
         .onChange(of: downloadRemoval.isDecisionPresented) { _, presented in
             if !presented, case .awaitingDecision(_, presented: false) = downloadRemoval.phase { cancelDownloadRemoval() }
@@ -274,7 +297,7 @@ struct MainView: View {
                 cancelDownloadRemoval()
             }
         }, onCancellation: cancelDownloadRemoval)
-        .alert("有些文件没有移到废纸篓", isPresented: Binding(
+        .alert("请在 Finder 中处理剩余文件", isPresented: Binding(
             get: { !model.untrashedItems.isEmpty }, set: { if !$0 { model.untrashedItems = [] } }
         ), presenting: model.untrashedItems) { items in
             Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting(items) }
@@ -416,7 +439,7 @@ struct MainView: View {
                 .frame(width: 280).frame(maxWidth: .infinity).padding(.vertical, 8)
                 Banners()
             }
-            .edgeBar(.bottom) { StatusBar() }
+            .edgeBar(.bottom) { StatusBar(direction: direction, provider: providerFilter) }
             .navigationTitle(providerFilter.map { "\($0.title) · \(currentCategory.title)" } ?? currentCategory.title)
             .navigationSubtitle("\(items.count) 个任务")
             .focusedSceneValue(\.focusTaskSearch, { searchFocusRequest += 1 })
@@ -479,7 +502,7 @@ struct MainView: View {
         }
         guard !downloads.isEmpty || !uploads.isEmpty else { return }
         guard removal != .trashingFiles || uploads.isEmpty else {
-            operationError = "上传任务没有删除本地源文件的操作，请分别选择下载任务。"
+            operationError = "请选择下载任务后删除本地文件。"
             return
         }
         let cleanup = Dictionary(uniqueKeysWithValues: downloads.map {
@@ -564,7 +587,7 @@ struct MainView: View {
     /// 独立上传 actor 操作按当前范围路由，确认／错误状态由主窗口持有，菜单关闭不丢失。
     private func performUpload(_ request: UploadCommand) async {
         defer { uploadCommand = nil }
-        guard let coordinator = model.uploadCoordinator else { operationError = "上传服务尚未就绪。"; return }
+        guard let coordinator = model.uploadCoordinator else { operationError = "请稍后重试上传。"; return }
         var failures: [String] = []
         for requested in request.jobs {
             if Task.isCancelled { return }
@@ -716,14 +739,16 @@ private struct TransferInspector: View {
     }
 }
 
-/// 汇总两家全部任务；筛选和搜索不改变全局进度、文件数及速度。
+/// 按当前网盘和传输方向汇总任务，统计栏和明细使用同一范围。
 private struct StatusBar: View {
+    let direction: TransferDirectionFilter
+    let provider: Provider?
     @Environment(AppModel.self) private var model
     @State private var showsStatistics = false
 
     var body: some View {
-        let jobs = model.coordinator.jobs
-        let uploads = model.uploadJobs
+        let jobs = direction == .upload ? [] : model.coordinator.jobs.filter { provider == nil || $0.provider == provider }
+        let uploads = direction == .download ? [] : model.uploadJobs.filter { provider == nil || $0.account.provider == provider }
         let uploadedBytes = uploads.reduce(Int64(0)) { $0 + $1.completedBytes }
         let uploadTotalBytes = uploads.reduce(Int64(0)) { $0 + $1.totalBytes }
         let uploadSummary = "上传 \(uploadedBytes.byteCount) / \(uploadTotalBytes.byteCount)"
@@ -738,12 +763,14 @@ private struct StatusBar: View {
         let summary = preparing == 0 ? progress.summary : [progress.sizeSummary, progress.speedText].compactMap { $0 }.joined(separator: " · ")
         if !jobs.isEmpty || !uploads.isEmpty {
             HStack {
-                Label("全部传输", systemImage: "arrow.up.arrow.down")
+                Label(direction.title, systemImage: direction == .download ? "arrow.down" : direction == .upload ? "arrow.up" : "arrow.up.arrow.down")
                     .fixedSize()
-                Text([jobs.isEmpty ? nil : "下载 " + summary, uploads.isEmpty ? nil : uploadSummary].compactMap { $0 }.joined(separator: " · "))
+                Text([jobs.isEmpty ? nil : (direction == .all ? "下载 " : "") + summary,
+                      uploads.isEmpty ? nil : (direction == .all ? "上传 " : "") + "\(uploadedBytes.byteCount) / \(uploadTotalBytes.byteCount)"].compactMap { $0 }.joined(separator: " · "))
                     .truncationMode(.tail)
                 Spacer(minLength: 0)
-                Text(uploads.isEmpty ? "\(completedFiles)/\(totalFiles) 文件" : "上传 \(uploads.count) 批次")
+                Text([jobs.isEmpty ? nil : "\(completedFiles)/\(totalFiles) 文件",
+                      uploads.isEmpty ? nil : "上传 \(uploads.count) 批次"].compactMap { $0 }.joined(separator: " · "))
                     .fixedSize()
                 Button {
                     showsStatistics.toggle()
@@ -751,23 +778,25 @@ private struct StatusBar: View {
                     Image(systemName: "info.circle")
                 }
                 .buttonStyle(.plain)
-                .help("全部网盘传输统计")
-                .accessibilityLabel("全部网盘传输统计")
+                .help("\(direction.title)统计")
+                .accessibilityLabel("\(direction.title)统计")
                 .popover(isPresented: $showsStatistics) {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text("全部网盘传输").font(.headline)
+                        Text(direction.title).font(.headline)
                         if !uploads.isEmpty {
                             LabeledContent("上传已确认 / 总大小", value: uploadSummary)
                             LabeledContent("上传批次", value: "\(uploads.filter { $0.phase == .completed }.count) 完成 / \(uploads.count) 总计")
                         }
-                        ProgressView(value: progress.fractionCompleted)
-                        LabeledContent("已下载 / 已确定总大小", value: progress.sizeSummary)
-                        LabeledContent("总速度", value: progress.speedText ?? "—")
-                        LabeledContent("预计剩余时间", value: preparing == 0 ? progress.remainingTimeText ?? "—" : "等待文件准备完成")
-                        LabeledContent("已完成文件", value: "\(completedFiles) / \(totalFiles)")
-                        if preparing > 0 {
-                            Text("\(preparing) 个任务正在准备，总大小和文件数尚未确定。")
-                                .foregroundStyle(.secondary)
+                        if !jobs.isEmpty {
+                            ProgressView(value: progress.fractionCompleted)
+                            LabeledContent("已下载 / 已确定总大小", value: progress.sizeSummary)
+                            LabeledContent("总速度", value: progress.speedText ?? "—")
+                            LabeledContent("预计剩余时间", value: preparing == 0 ? progress.remainingTimeText ?? "—" : "等待文件准备完成")
+                            LabeledContent("已完成文件", value: "\(completedFiles) / \(totalFiles)")
+                            if preparing > 0 {
+                                Text("\(preparing) 个任务正在准备。")
+                                    .foregroundStyle(.secondary)
+                            }
                         }
                     }
                     .padding()

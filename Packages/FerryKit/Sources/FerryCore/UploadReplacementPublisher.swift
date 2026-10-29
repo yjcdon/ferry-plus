@@ -17,7 +17,7 @@ public enum UploadReplacementError: LocalizedError, Sendable, Equatable {
     case unconfirmed, conflict(String), contentMismatch
     public var errorDescription: String? {
         switch self {
-        case .unconfirmed: "覆盖操作结果未确认，保留检查点与全部对象"
+        case .unconfirmed: "覆盖结果待确认，请查询云端结果。"
         case .conflict(let reason): reason
         case .contentMismatch: "覆盖对象完整 SHA-256 不一致"
         }

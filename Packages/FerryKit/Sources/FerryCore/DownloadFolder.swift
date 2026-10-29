@@ -81,7 +81,7 @@ public enum DownloadFolderError: LocalizedError, Equatable {
     public var errorDescription: String? {
         switch self {
         case .inaccessible(let url):
-            "下载目录“\(url.path(percentEncoded: false))”不可访问。请在设置中重新选择这个目录，然后重试。"
+            "请在设置中重新选择下载目录“\(url.path(percentEncoded: false))”，然后重试。"
         }
     }
 }

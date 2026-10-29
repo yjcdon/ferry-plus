@@ -12,8 +12,8 @@ public enum UploadCoordinatorError: Error, LocalizedError, Sendable {
         case .missingSelections: "上传检查点缺少完整源选择，请重新添加任务"
         case .scanIssue(let message): "上传源扫描未完成：\(message)"
         case .missingParent(let path): "上传父目录尚未成功创建：\(path)"
-        case .unsafeReplacement: "当前网盘或项目类型不支持安全覆盖，原有内容未改动"
-        case .unconfirmedCommit: "远端提交结果仍未核对，已保留记录；不能重复提交或移除"
+        case .unsafeReplacement: "请改用“保留两份”或“跳过”。"
+        case .unconfirmedCommit: "上传结果待确认，请查询云端结果。"
         case .rejectedCommit(let message): "远端提交已拒绝：\(message)"
         case .persistence(let message): "上传检查点保存失败：\(message)"
         case .mismatch: "上传文件回读内容与原始 SHA-256 不一致"
@@ -706,7 +706,7 @@ public actor UploadCoordinator {
             file = try await store.loadFile(id: file.id, in: job)
             guard file.preparation != nil, file.remoteReference == nil else { throw error }
             file.sessionResultRecoveryRequired = true
-            file.error = "原上传会话不可用，云端产物仍待核对；未重新上传。"
+            file.error = "上传会话已过期，请查询云端结果。"
             try await saveFile(file)
             try Task.checkCancellation()
             try await recoverSessionResult(&file, parent: parent, environment: env)

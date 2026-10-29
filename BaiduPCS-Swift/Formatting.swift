@@ -65,11 +65,11 @@ extension Job {
     func statusText(isRunning: Bool, cleansUp: Bool) -> String {
         switch phase {
         case .transferring:
-            return isNetdisk ? "准备中 · 正在列出文件…" : "正在转存…"
+            return isNetdisk ? "准备中 · 正在列出文件" : "正在转存"
         case .downloading:
             if isPaused { return "已暂停" }
             if files.allSatisfy(\.isCompleted) {
-                return cleansUp && hasJobDirectory ? "正在清理网盘中的转存文件…" : "正在完成…"
+                return cleansUp && hasJobDirectory ? "正在清理网盘中的转存文件" : "正在完成"
             }
             return isRunning ? "正在下载" : "等待下载"
         case .completed:

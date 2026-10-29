@@ -70,7 +70,7 @@ public enum QuarkError: LocalizedError, Sendable, Equatable {
 
     public var errorDescription: String? {
         switch self {
-        case .invalidResponse: "夸克接口返回了无法识别的数据，请稍后重试。"
+        case .invalidResponse: "夸克服务响应异常，请稍后重试。"
         case .httpStatus(403): "夸克拒绝访问（HTTP 403），请在夸克官方页面确认该文件和账号的访问权限。"
         case .httpStatus(404): "夸克请求的资源不存在（HTTP 404），请在夸克官方页面确认文件或分享是否仍然可用。"
         case .httpStatus(429): "夸克请求过于频繁（HTTP 429），请降低并发数，稍后重试。"
@@ -79,9 +79,9 @@ public enum QuarkError: LocalizedError, Sendable, Equatable {
         case .serviceFailure(let code, let message): Self.serviceDescription(code: code, message: message)
         case .loginExpired: "夸克登录已失效，请在官方页面重新登录。"
         case .accountChanged: "返回的夸克账号与已保存账号不同，请重新登录。"
-        case .missingIdentity: "未取得夸克账号的稳定标识，登录信息尚未保存。"
-        case .missingCredential: "未取得完整的夸克会话凭据，请先完成官方网页登录。"
-        case .unsafeRedirect: "夸克请求跳转到了不支持的地址，已停止登录。"
+        case .missingIdentity: "登录确认失败，请重新登录。"
+        case .missingCredential: "请重新登录夸克网盘。"
+        case .unsafeRedirect: "登录地址异常，请重新登录。"
         case .invalidShareLink: "请输入有效的夸克网盘分享链接。"
         case .invalidSelection: "夸克文件选择或目录身份无效，请重新打开文件列表。"
         case .taskTimedOut(let id): "夸克转存仍在处理中（任务 \(id)），稍后可继续核对。"
@@ -90,7 +90,7 @@ public enum QuarkError: LocalizedError, Sendable, Equatable {
             else { "上一次夸克转存失败（任务 \(id) 已停止）。" }
         case .shareRequiresCode: "这个夸克分享需要提取码，请填写后重试。"
         case .invalidPasscode: "夸克分享提取码不正确，请检查后重试。"
-        case .shareUnavailable: "夸克分享已失效、被取消或无法访问。"
+        case .shareUnavailable: "请检查分享链接并重新打开。"
         }
     }
 

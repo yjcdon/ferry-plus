@@ -53,10 +53,10 @@ public enum UploadSourceError: Error, LocalizedError, Sendable {
         switch self {
         case .nonFileURL: "上传源必须是本地文件。"
         case .symbolicLink(let path): "不上传符号链接：\(path)"
-        case .unsupportedItem(let path): "不支持此文件类型：\(path)"
+        case .unsupportedItem(let path): "请选择普通文件或文件夹：\(path)"
         case .invalidChunkSize: "上传分块大小必须大于零。"
         case .changed(let path): "源文件已发生变化，需要重新准备上传：\(path)"
-        case .inaccessible(let path, let code): "无法读取上传源：\(path)（系统错误 \(code)）"
+        case .inaccessible(let path, let code): "源文件读取失败，请重新选择：\(path)（系统错误 \(code)）"
         case .staleBookmark: "上传文件授权已过期，请重新选择文件。"
         case .contentMismatch(let path): "源文件内容与上传基准不一致：\(path)"
         }

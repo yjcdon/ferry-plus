@@ -34,10 +34,10 @@ enum JobCategory: String, CaseIterable, Identifiable {
     /// 这个分类没有任务时的说明。
     var emptyTitle: String {
         switch self {
-        case .all: "没有任务"
-        case .active: "没有进行中的任务"
-        case .completed: "没有已完成的任务"
-        case .failed: "没有失败的任务"
+        case .all: "添加传输任务"
+        case .active: "等待任务开始"
+        case .completed: "完成的任务将显示在这里"
+        case .failed: "失败的任务将显示在这里"
         }
     }
 
@@ -61,10 +61,11 @@ enum JobCategory: String, CaseIterable, Identifiable {
     }
 }
 
-/// 两家文件入口和传输分类分组，文件导航不改变传输网盘筛选。
+/// 文件入口确定传输网盘范围，分组标题提供查看全部网盘传输的入口。
 struct SidebarView: View {
     @Binding var page: WorkspacePage?
-    @Binding var providerFilter: Provider?
+    let providerFilter: Provider?
+    let onShowAll: () -> Void
     let jobs: [Job]
     var uploadJobs: [UploadJob] = []
     var body: some View {
@@ -77,28 +78,35 @@ struct SidebarView: View {
                         ProviderIcon(provider: provider)
                     }
                         .tag(WorkspacePage.files(provider))
+                        .listRowBackground(Group {
+                            if page?.provider == nil, providerFilter == provider {
+                                RoundedRectangle(cornerRadius: 6).fill(Color.accentColor)
+                                    .padding(.horizontal, 10)
+                            }
+                        })
+                        .foregroundStyle(providerFilter == provider ? Color.white : Color.primary)
+                        .accessibilityAddTraits(providerFilter == provider ? .isSelected : [])
                 }
             }
-            Section("传输") {
+            Section {
                 ForEach(JobCategory.allCases) { category in
                     Label(category.title, systemImage: category.systemImage)
                         .badge(jobs.count(where: category.contains) + uploadJobs.count(where: category.contains))
                         .tag(WorkspacePage.transfers(category))
                 }
-            }
-        }
-        .edgeBar(.top) {
-            if page?.provider == nil {
-                Picker("网盘", selection: $providerFilter) {
-                    Text("全部网盘").tag(Optional<Provider>.none)
-                    ForEach(Provider.allCases) { provider in
-                        Text(provider.title).tag(Optional(provider))
+            } header: {
+                HStack(spacing: 4) {
+                    Text("传输")
+                        .lineLimit(1)
+                    Spacer(minLength: 0)
+                    if providerFilter != nil {
+                        Button("查看全部", action: onShowAll)
+                            .buttonStyle(.plain)
+                            .foregroundStyle(.tint)
+                            .help("查看全部网盘的传输")
                     }
                 }
-                .labelsHidden()
-                .pickerStyle(.menu)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
+                .textCase(nil)
             }
         }
         .edgeBar(.bottom) {
@@ -116,21 +124,21 @@ private struct AccountView: View {
 
     var body: some View {
         Menu {
-            Text("百度网盘 · \(model.account.map { $0.username.isEmpty ? "百度账号" : $0.username } ?? "未登录")")
+            Text("百度网盘 · \(model.account.map { $0.username.isEmpty ? "百度账号" : $0.username } ?? "待登录")")
             if model.account != nil {
                 if model.isLoginExpired {
                     Text("登录已失效")
-                    Button("重新登录…") { model.presentLogin() }
+                    Button("重新登录") { model.presentLogin() }
                 }
                 Button("退出登录") { isConfirmingLogOut = model.requestLogOut() }
             } else {
-                Button("登录…") { model.presentLogin() }
+                Button("登录") { model.presentLogin() }
             }
             Divider()
-            Text("夸克网盘 · \(model.quark.summary?.name ?? "未登录")")
+            Text("夸克网盘 · \(model.quark.summary?.name ?? "待登录")")
             QuarkAccountControls()
             Divider()
-            SettingsLink { Text("设置…") }
+            SettingsLink { Text("设置") }
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "person.crop.circle").font(.title2)
@@ -150,7 +158,7 @@ private struct AccountView: View {
     }
 
     private var accountStatus: String {
-        let baidu = model.account == nil ? "未登录" : model.isLoginExpired ? "登录已失效" : "已登录"
+        let baidu = model.account == nil ? "待登录" : model.isLoginExpired ? "登录已失效" : "已登录"
         let quark = model.quark.state.title
         return "百度" + baidu + " · 夸克" + quark
     }

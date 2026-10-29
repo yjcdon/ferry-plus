@@ -75,11 +75,11 @@ public enum LocalFileIntegrityError: Error, LocalizedError, Sendable {
     case invalidFile, changed, unavailable, alreadyRunning, basisConflict, mismatch
     public var errorDescription: String? {
         switch self {
-        case .invalidFile: "请选择已完成下载的普通本地文件，不能校验目录或符号链接。"
+        case .invalidFile: "请选择已下载完成的文件。"
         case .changed: "本地文件大小或读取期间的内容发生变化，请核对后重新校验。"
         case .unavailable: "仅支持全部文件均已下载的任务；任务已变化或正在移除。"
         case .alreadyRunning: "此任务正在校验本地文件，请先等待或取消。"
-        case .basisConflict: "指定摘要与已有可信校验依据冲突，不能覆盖原始依据。"
+        case .basisConflict: "摘要存在差异，请核对后重试。"
         case .mismatch: "本地文件内容与校验依据不一致。"
         }
     }

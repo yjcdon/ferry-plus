@@ -31,7 +31,7 @@ nonisolated struct IntegrityManifestDocument: FileDocument {
                 let part = try handle.read(upToCount: min(1_048_576, remaining)) ?? Data()
                 if part.isEmpty { break }
                 data.append(part)
-                if data.count > IntegrityManifest.maximumBytes { throw UploadRecordError.invalid("校验清单不能超过 4 MiB") }
+                if data.count > IntegrityManifest.maximumBytes { throw UploadRecordError.invalid("请选择 4 MiB 以内的校验清单") }
             }
             try Task.checkCancellation()
             return try IntegrityManifest.decode(data)

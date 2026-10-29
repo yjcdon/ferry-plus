@@ -99,7 +99,7 @@ import Testing
         let second = fixture.makeCoordinator(folderAccess: access)
         await second.start()
         #expect(second.job(job.id)?.phase == .failed(.download))
-        #expect(second.job(job.id)?.error?.contains("不可访问") == true)
+        #expect(second.job(job.id)?.error?.contains("重新选择下载目录") == true)
 
         await second.retry(job.id)
         #expect(second.job(job.id)?.phase == .failed(.download))
@@ -118,7 +118,7 @@ import Testing
 
         let job = coordinator.addJob(session: FakeNetdisk.session, entries: fixture.netdisk.rootEntries())
         try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
-        #expect(coordinator.job(job.id)?.error?.contains("不可访问") == true)
+        #expect(coordinator.job(job.id)?.error?.contains("重新选择下载目录") == true)
         #expect(fixture.netdisk.operations.isEmpty)
     }
 

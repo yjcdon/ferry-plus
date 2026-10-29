@@ -30,7 +30,7 @@ struct DownloadFolderPicker: View {
                 FolderLabel(url: folder.url).tag(Destination.chosen(folder))
             }
             Divider()
-            Text("其他…").tag(Destination.other)
+            Text("其他").tag(Destination.other)
         }
         .pickerStyle(.menu)
         .fixedSize()
@@ -67,7 +67,7 @@ struct DownloadFolderPicker: View {
                 chosenFolders.append(folder)
                 selection = folder
             } catch {
-                self.error = "无法取得“\(url.lastPathComponent)”的访问权限：\(error.localizedDescription)"
+                self.error = "请重新选择“\(url.lastPathComponent)”并允许访问：\(error.localizedDescription)"
             }
         }
     }

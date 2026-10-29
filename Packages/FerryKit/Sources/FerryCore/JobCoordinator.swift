@@ -53,7 +53,7 @@ public final class JobCoordinator {
                     tasks[job.id]?.cancel()
                     update(job.id) {
                         $0.phase = .failed(.transfer)
-                        $0.error = "账号会话已变化，请在原账号下重试，已记录的转存不会重复提交。"
+                        $0.error = "账号已切换，请登录原账号后重试。"
                     }
                 }
                 save()
@@ -312,10 +312,10 @@ public final class JobCoordinator {
             loaded = []
             isLoaded = false
             if let backup = store.moveAsideUnreadableFile() {
-                loadWarning = "无法读取任务列表，原文件已备份为“\(backup.lastPathComponent)”。之前的下载进度保留在磁盘上，这次启动不继续也不删除它们。"
+                loadWarning = "无法读取任务列表，原文件已备份为“\(backup.lastPathComponent)”。下载文件仍保留在本地。"
             } else {
                 canSave = false
-                loadWarning = "无法读取任务列表。这次启动不修改任务列表文件，之前的下载进度保留在磁盘上。"
+                loadWarning = "无法读取任务列表。原记录和下载文件仍保留在本地。"
             }
         }
         for index in loaded.indices where loaded[index].phase == .transferring {
@@ -683,7 +683,7 @@ public final class JobCoordinator {
         var entries: [IntegrityManifestEntry] = []
         for file in job.files where file.integrityExpectation != nil {
             guard try archivedIntegrityRecord(file, job: job) == nil, let basis = file.integrityExpectation else { continue }
-            guard entries.count < IntegrityManifest.maximumEntries else { throw UploadRecordError.invalid("此任务的校验清单超过10000项，请保留任务或明确放弃无法归档的依据。") }
+            guard entries.count < IntegrityManifest.maximumEntries else { throw UploadRecordError.invalid("校验清单超过 10000 项，请保留任务记录。") }
             entries.append(try IntegrityManifestEntry(relativePath: file.relativePath, size: file.size, algorithm: basis.algorithm, digest: basis.digest))
         }
         guard !entries.isEmpty else { return nil }
@@ -724,7 +724,7 @@ public final class JobCoordinator {
             // 明确放弃只针对不能归档的依据；已知的已验证记录仍然保存。
         } else if let current = try removalIntegrityManifest(job.id) {
             guard case .exportedManifest(let exported) = disposition else {
-                throw UploadRecordError.invalid("此任务还有不能自动关联的校验依据。请先导出校验清单，或明确放弃这些依据后再移除。")
+                throw UploadRecordError.invalid("请先保存校验信息，或选择直接移除。")
             }
             // 导出集可以包含期间已完成而可自动归档的项目，但不得漏掉或改写当前仍需保留的依据。
             let saved = Dictionary(uniqueKeysWithValues: exported.entries.map { (LocalPath.key($0.relativePath), $0) })
@@ -1592,21 +1592,21 @@ enum TransferCheckError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .unconfirmedTransfer:
-            "转存结果尚未确认，已保留目录和回执。请核对原转存结果，不会自动重复提交或删除目录。"
+            "转存结果待确认，请刷新后重试。"
         case .unconfirmedManifest(let reason):
-            "旧任务没有转存文件清单，暂时无法确认完整结果，已保留目录和回执，不会重复提交或自动清理。请恢复原分享后重试核对。原因：\(reason)"
+            "请恢复原分享后重试。原因：\(reason)"
         case .incompleteTransfer(let path):
-            "转存结果不完整或文件大小不一致（\(path)），已保留目录和回执。请稍后重试核对，不会重复转存或自动清理。"
+            "文件“\(path)”转存结果异常，请稍后重试。"
         case .noFiles:
             "转存后网盘中没有找到文件，可能转存尚未完成，请重试。"
         case .missingJobDirectory:
-            "任务记录中没有有效的任务子目录，无法转存。"
+            "请重新添加分享下载任务。"
         case .outsideJobDirectory(let path):
-            "转存后的文件“\(path)”不在任务子目录中，无法确定保存位置。"
+            "文件“\(path)”的转存位置异常，请重新添加任务。"
         case .outsideCheckedEntry(let path):
-            "列出的文件“\(path)”不在勾选的目录中，无法确定保存位置。"
+            "文件“\(path)”的目录位置异常，请重新选择。"
         case .unsafePath(let path):
-            "文件路径“\(path)”不能用作本地文件名，下载已停止。"
+            "文件名格式异常：“\(path)”，请重命名后重新下载。"
         }
     }
 }
@@ -1620,9 +1620,9 @@ enum CoordinatorError: LocalizedError, PermanentDownloadSourceError {
 
     var errorDescription: String? {
         switch self {
-        case .notLoggedIn: "该任务的网盘尚未登录。"
+        case .notLoggedIn: "请登录任务所属的网盘。"
         case .otherAccount: "这个任务是用另一个网盘账号创建的。请登录那个账号后再操作。"
-        case .unknownAccount: "任务中没有记录网盘账号，不能确定文件在哪个账号的网盘中。请重新添加这个任务。"
+        case .unknownAccount: "请重新添加任务并选择网盘账号。"
         }
     }
 }

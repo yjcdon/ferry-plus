@@ -52,17 +52,17 @@ public enum BaiduError: LocalizedError, Equatable, Sendable {
     public var errorDescription: String? {
         switch self {
         case .missingBDUSS:
-            "Cookie 中缺少 BDUSS，无法登录。请在浏览器登录 pan.baidu.com，在开发者工具的“网络”面板中复制网盘主页第一条请求的 Cookie 请求头。"
+            "请重新复制百度网盘主页的完整 Cookie 后登录。"
         case .missingSTOKEN:
-            "Cookie 中缺少 STOKEN，无法转存。请在浏览器登录 pan.baidu.com，在开发者工具的“网络”面板中复制网盘主页第一条请求的 Cookie 请求头。passport.baidu.com 的 STOKEN 不能用。"
+            "请重新复制百度网盘主页的完整 Cookie 后登录。"
         case .loginExpired:
             "登录已失效，请重新复制网盘的 Cookie 登录。"
         case .loginStateMissing:
-            "分享页中没有登录信息。Cookie 可能缺少网盘的 STOKEN 或已过期，请重新复制网盘主页的 Cookie。"
+            "请重新登录百度网盘后打开分享。"
         case .securityVerification:
             "百度要求账号安全验证，请先在浏览器中登录网盘完成验证。"
         case .invalidShareLink:
-            "无法识别分享链接。支持 https://pan.baidu.com/s/1… 和 https://pan.baidu.com/share/init?surl=… 两种格式。"
+            "请输入百度网盘分享链接。"
         case .invalidPasswordFormat:
             "提取码应为 4 位字母或数字。"
         case .passwordRequired:
@@ -98,17 +98,17 @@ public enum BaiduError: LocalizedError, Equatable, Sendable {
         case .invalidFileName:
             "文件名不合法。"
         case .invalidNameOrAccessDenied:
-            "文件名不合法，或无权访问这个文件。"
+            "请检查文件名称和访问权限。"
         case .accessDenied:
             "无权访问这个文件。"
         case .unauthorized:
             "百度拒绝了请求（user is not authorized），请稍后再试。"
         case .noDownloadLink:
-            "没有取得下载链接。"
+            "下载链接获取失败，请重试。"
         case .tooManyItems:
             "一次操作的文件太多。"
         case .tryLater:
-            "百度暂时无法处理请求，请稍后再试。"
+            "百度服务繁忙，请稍后再试。"
         case let .server(code, message):
             if let message, !message.isEmpty {
                 "百度返回错误（错误码 \(code)）：\(message)"
@@ -118,7 +118,7 @@ public enum BaiduError: LocalizedError, Equatable, Sendable {
         case let .httpStatus(status):
             "服务器返回 HTTP \(status)。"
         case .invalidResponse:
-            "百度返回了无法识别的数据，接口可能已变化。"
+            "百度服务响应异常，请稍后重试。"
         case let .network(message):
             "网络错误：\(message)"
         case let .transport(code):

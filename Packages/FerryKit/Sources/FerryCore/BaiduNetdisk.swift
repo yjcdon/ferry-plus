@@ -59,9 +59,18 @@ public actor BaiduNetdisk: Netdisk {
         try await client.delete(paths: [path])
     }
 
+    /// 对账号内准确条目改名，冲突时不覆盖；回读父目录确认相同远端身份。
+    public func rename(entry: RemoteEntry, parent: RemoteReference, newName: String, account requestingAccount: AccountKey) async throws -> RemoteEntry {
+        try await prepareRename(entry: entry, parent: parent, newName: newName, requestingAccount: requestingAccount)
+        if newName == entry.name { return entry }
+        guard case .baidu(let path, _) = entry.reference else { throw CoordinatorError.otherAccount }
+        try await client.renameWithoutReplacing(path: path, newName: newName)
+        return try await confirmRename(entry: entry, parent: parent, newName: newName)
+    }
+
     /// 仅复用已核对 path 与 fsID 的账号对象；PCS 删除将文件或文件夹移入百度回收站。
     public func moveToTrash(entry: RemoteEntry, parent: RemoteReference, account requestingAccount: AccountKey) async throws {
-        try await checkTrashSelection(entry: entry, parent: parent, requestingAccount: requestingAccount)
+        try await checkMutationSelection(entry: entry, parent: parent, requestingAccount: requestingAccount)
         guard case .baidu(let path, _) = entry.reference else { throw CoordinatorError.otherAccount }
         try await client.delete(paths: [path])
         try await confirmTrashRemoval(entry: entry, parent: parent)

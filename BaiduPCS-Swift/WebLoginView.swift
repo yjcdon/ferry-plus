@@ -25,7 +25,7 @@ struct WebLoginView: View {
                 }
                 if let session, let loadError = session.loadError {
                     ContentUnavailableView {
-                        Label("无法加载登录页", systemImage: "wifi.exclamationmark")
+                        Label("登录页加载失败", systemImage: "wifi.exclamationmark")
                     } description: {
                         Text(loadError)
                     } actions: {
@@ -43,8 +43,8 @@ struct WebLoginView: View {
                         Button("重试", action: retry)
                     }
                 } else if session?.isMissingNetdiskSTOKEN == true {
-                    Banner(message: "已登录百度账号，但没有取得网盘的 STOKEN，无法转存。请改用粘贴 Cookie 登录。") {
-                        Button("粘贴 Cookie 登录…", action: useCookieLogin)
+                    Banner(message: "请使用 Cookie 登录以完成百度网盘登录。") {
+                        Button("粘贴 Cookie 登录", action: useCookieLogin)
                     }
                 }
             }
@@ -58,10 +58,10 @@ struct WebLoginView: View {
                     .disabled(session == nil || loginTask != nil)
                 if loginTask != nil {
                     ProgressView().controlSize(.small)
-                    Text("正在校验…").foregroundStyle(.secondary)
+                    Text("正在校验").foregroundStyle(.secondary)
                 } else if session?.isLoading == true {
                     ProgressView().controlSize(.small)
-                    Text("正在加载…").foregroundStyle(.secondary)
+                    Text("正在加载").foregroundStyle(.secondary)
                 }
                 Spacer()
                 Button("取消", role: .cancel) { dismiss() }

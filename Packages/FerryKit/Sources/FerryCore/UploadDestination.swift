@@ -94,7 +94,7 @@ public enum UploadDestinationError: Error, LocalizedError, Sendable {
         case .requiresChunkSize(let size): "请按服务端要求重新计算分块指纹（每片 \(size) 字节）。"
         case .sourceMismatch: "待发送内容与上传原始基准不一致。"
         case .invalidReceipt: "上传分片回执与原会话或源内容不一致。"
-        case .remoteResultUnconfirmed: "服务端上传结果尚未核对到准确文件，请保留记录并查询。"
+        case .remoteResultUnconfirmed: "上传结果待确认，请查询云端结果。"
         }
     }
 }

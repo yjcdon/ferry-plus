@@ -152,6 +152,20 @@ public actor QuarkClient {
             fid: fid, size: item.size, md5: item.md5, updatedAt: item.updated_at.map { Date(timeIntervalSince1970: $0 / 1000) })
     }
 
+    /// 使用官方文件 ID 改名；空 data 的成功响应有效，同名冲突由服务端拒绝。
+    public func rename(fid: String, newName: String) async throws {
+        guard !fid.isEmpty, fid != "0", !newName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              newName != ".", newName != "..", !newName.contains("/"), !newName.contains("\\"),
+              !newName.unicodeScalars.contains(where: CharacterSet.controlCharacters.contains) else {
+            throw QuarkError.invalidSelection
+        }
+        let body = try JSONSerialization.data(withJSONObject: ["fid": fid, "file_name": newName])
+        let response: Envelope<DeleteData> = try await json(host: "drive-pc.quark.cn", path: "/1/clouddrive/file/rename",
+            query: Self.commonQuery, body: body)
+        guard response.status == 200, response.code?.text == "0" else { throw response.error }
+        if let taskID = response.data?.task_id, !taskID.isEmpty { _ = try await waitForTask(id: taskID) }
+    }
+
     /// 只删除调用方明确提供的 fid，使用移动到网盘回收站的 action_type 1。
     public func delete(fids: [String]) async throws {
         guard !fids.isEmpty, fids.allSatisfy({ !$0.isEmpty && $0 != "0" }) else { throw QuarkError.invalidSelection }

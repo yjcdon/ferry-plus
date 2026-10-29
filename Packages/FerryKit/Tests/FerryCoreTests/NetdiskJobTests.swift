@@ -20,6 +20,23 @@ import Testing
                             isDirectory: directory, size: size)
     }
 
+    @Test func renameChecksNamesWithoutRejectingOrdinaryUnicode() {
+        for provider in Provider.allCases {
+            for name in ["", "   ", ".", "..", "a/b", "a\\b", "a\nb", "a\0b"] {
+                #expect(NetdiskRenameError.validationMessage(name, provider: provider) != nil)
+            }
+            for name in ["学习资料 (第二版).pdf", "报告_2026-10-28.txt", "[归档]文件夹"] {
+                #expect(NetdiskRenameError.validationMessage(name, provider: provider) == nil)
+            }
+        }
+        for character in ":*?\"'<>|" {
+            #expect(NetdiskRenameError.validationMessage("a\(character)b", provider: .baidu) == "包含非法字符")
+        }
+        for character in ":*?\"'<>|" {
+            #expect(NetdiskRenameError.validationMessage("a\(character)b", provider: .quark) == "包含非法字符")
+        }
+    }
+
     @Test func downloadsCheckedEntriesWithoutTheirParentDirectories() async throws {
         let fixture = Fixture(disk: disk)
         let coordinator = fixture.makeCoordinator(settings: cleanup)

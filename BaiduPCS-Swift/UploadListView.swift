@@ -221,7 +221,7 @@ struct UploadFilesView: View {
             guard let request = location.request else { return }
             await openCloudDirectory(request)
         }
-        .alert("无法定位文件", isPresented: Binding(
+        .alert("文件定位失败", isPresented: Binding(
             get: { location.error != nil }, set: { if !$0 { location.error = nil } }
         )) { Button("好") { location.error = nil } } message: { Text(location.error ?? "") }
         .fileImporter(isPresented: $relocation.isPickerPresented, allowedContentTypes: [.item],
@@ -238,7 +238,7 @@ struct UploadFilesView: View {
             guard let picker, relocation.picker?.id == picker.id else { return }
             relocation.picker = nil; relocation.isPickerPresented = false
         })
-        .alert("无法重新定位源文件", isPresented: Binding(
+        .alert("源文件定位失败", isPresented: Binding(
             get: { relocation.error != nil }, set: { if !$0 { relocation.error = nil } }
         )) { Button("好") { relocation.error = nil } } message: { Text(relocation.error ?? "") }
         .onChange(of: job?.fileIDs.count) {
@@ -254,9 +254,9 @@ struct UploadFilesView: View {
         if isLoading { ProgressView("加载中") }
         else if let error {
             ContentUnavailableView {
-                Label("无法读取明细", systemImage: "exclamationmark.triangle")
+                Label("明细读取失败", systemImage: "exclamationmark.triangle")
             } description: { Text(error) } actions: { Button("重试") { generation += 1 } }
-        } else if files.isEmpty { ContentUnavailableView("没有文件明细", systemImage: "doc") }
+        } else if files.isEmpty { ContentUnavailableView("文件明细将显示在这里", systemImage: "doc") }
         else {
             List(files) { file in
                 VStack(alignment: .leading, spacing: 5) {
@@ -283,22 +283,24 @@ struct UploadFilesView: View {
                         } label: { Label("定位", systemImage: "location") }
                             .menuStyle(.borderlessButton).fixedSize().help("定位文件")
                     }
-                    Text(integrityDescription(file)).font(.caption).foregroundStyle(.secondary)
+                    if !integrityDescription(file).isEmpty {
+                        Text(integrityDescription(file)).font(.caption).foregroundStyle(.secondary)
+                    }
                     if let replacement = file.replacement, replacement.snapshotObject != nil {
                         Text("已保留独立旧版本备份，可在云端所在目录下载恢复。")
                             .font(.caption).foregroundStyle(.secondary).help(replacement.snapshotName)
                     }
                     if canRelocate(file) {
                         HStack {
-                            Button("重新定位源文件…") {
+                            Button("重新定位源文件") {
                                 relocation.picker = .init(fileID: file.id); relocation.isPickerPresented = true
                             }.controlSize(.small).disabled(relocation.request != nil)
                             if relocation.request?.fileID == file.id {
                                 ProgressView().controlSize(.small)
-                                Text("正在检查文件…").font(.caption).foregroundStyle(.secondary)
+                                Text("正在检查文件").font(.caption).foregroundStyle(.secondary)
                             }
                         }
-                        Text("文件已移动或无法访问时，请重新选择相同的文件以继续上传。")
+                        Text("重新选择源文件以继续上传。")
                             .font(.caption).foregroundStyle(.secondary)
                     } else if file.phase == .failed, file.remoteReference == nil, !file.isDirectory,
                               file.expectation == nil {
@@ -388,8 +390,8 @@ struct UploadFilesView: View {
 
     private func integrityDescription(_ file: UploadFile) -> String {
         if file.isDirectory { return "文件夹" }
-        if file.integrityRecordID != nil { return integrityDescriptions[file.id] ?? "正在检查…" }
-        return file.phase == .completed ? "已完成，无法确认文件内容" : "暂无校验信息"
+        if file.integrityRecordID != nil { return integrityDescriptions[file.id] ?? "正在检查" }
+        return file.phase == .completed ? "已上传" : ""
     }
 
     /// 只有明确不存在的文件才表示已清理；损坏 JSON、未知版本与权限错误必须继续显示错误。
@@ -402,7 +404,7 @@ struct UploadFilesView: View {
         guard page == request else { return }
         isLoading = true; error = nil; files = []; integrityDescriptions = [:]
         guard let coordinator = model.uploadCoordinator, let sourceJob = job else {
-            isLoading = false; error = "上传任务或服务尚不可用。"
+            isLoading = false; error = "上传任务读取失败，请重新打开。"
             return
         }
         do {
@@ -424,12 +426,12 @@ struct UploadFilesView: View {
                     descriptions[file.id] = switch record.status {
                     case .verified: "文件内容一致"
                     case .mismatch: "内容校验失败"
-                    case .pending: "校验尚未完成"
-                    case .unavailable: "未验证源文件内容"
+                    case .pending: "等待校验"
+                    case .unavailable: ""
                     }
                 } catch {
                     guard Self.isMissingRecord(error) else { throw error }
-                    descriptions[file.id] = "校验信息已清理"
+                    descriptions[file.id] = ""
                 }
             }
             try Task.checkCancellation()

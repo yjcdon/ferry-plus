@@ -73,7 +73,7 @@ private struct FerryCommands: Commands {
                 .disabled(focusTaskSearch == nil)
         }
         CommandGroup(replacing: .newItem) {
-            Button("添加链接…") {
+            Button("添加链接") {
                 openWindow(id: ContentView.windowID)
                 model.presentAddLink()
             }
@@ -82,7 +82,7 @@ private struct FerryCommands: Commands {
                 openWindow(id: ContentView.windowID)
                 model.requestWorkspace(.browse(nil))
             }
-            Button("上传文件…") {
+            Button("上传文件") {
                 openWindow(id: ContentView.windowID)
                 model.requestWorkspace(.upload([]))
             }
@@ -129,9 +129,9 @@ private struct AccountCommandsView: View {
     @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Text("百度网盘 · \(model.account.map { $0.username.isEmpty ? "百度账号" : $0.username } ?? "未登录")")
+        Text("百度网盘 · \(model.account.map { $0.username.isEmpty ? "百度账号" : $0.username } ?? "待登录")")
         if model.account == nil || model.isLoginExpired {
-            Button(model.isLoginExpired ? "重新登录百度网盘…" : "登录百度网盘…") {
+            Button(model.isLoginExpired ? "重新登录百度网盘" : "登录百度网盘") {
                 openWindow(id: ContentView.windowID)
                 model.presentLogin()
             }
@@ -145,7 +145,7 @@ private struct AccountCommandsView: View {
             }
         }
         Divider()
-        Text("夸克网盘 · \(model.quark.summary?.name ?? "未登录")")
+        Text("夸克网盘 · \(model.quark.summary?.name ?? "待登录")")
         QuarkAccountControls()
     }
 }

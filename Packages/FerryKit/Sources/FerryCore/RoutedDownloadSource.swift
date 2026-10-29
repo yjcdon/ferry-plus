@@ -23,7 +23,7 @@ public final class RoutedDownloadSource: DownloadSource {
     public func resolve(_ request: DownloadRequest) async throws -> ResolvedURL {
         let context: DownloadContext
         do { context = try JSONDecoder().decode(DownloadContext.self, from: request.context) }
-        catch { throw PermanentLinkError(description: "无法识别下载记录的网盘和账号，请重新添加任务。") }
+        catch { throw PermanentLinkError(description: "请重新添加任务并选择网盘账号。") }
         guard context.version == 1, context.reference.provider == context.account.provider else {
             throw PermanentLinkError(description: "下载记录来源不一致。")
         }
@@ -34,7 +34,7 @@ public final class RoutedDownloadSource: DownloadSource {
             state.attempts[request.id] = min(attempt + 1, 16)
             return (state.sessions[context.account.provider], attempt)
         }
-        guard let session else { throw PermanentLinkError(description: "\(context.account.provider.title)尚未登录。") }
+        guard let session else { throw PermanentLinkError(description: "请登录\(context.account.provider.title)。") }
         guard session.key == context.account else { throw PermanentLinkError(description: "任务属于另一个\(context.account.provider.title)账号。") }
         let resolved: ResolvedURL
         do {

@@ -43,7 +43,7 @@ struct CredentialTests {
 
     @Test func rejectsMissingSTOKEN() {
         #expect(throws: BaiduError.missingSTOKEN) { try Credential.parse("BDUSS=b") }
-        #expect(BaiduError.missingSTOKEN.errorDescription?.contains("pan.baidu.com") == true)
+        #expect(BaiduError.missingSTOKEN.errorDescription?.contains("完整 Cookie 后登录") == true)
     }
 
     @Test func expiredSetCookieDeletesCookie() {

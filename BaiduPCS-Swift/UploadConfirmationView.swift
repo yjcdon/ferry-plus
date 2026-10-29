@@ -185,8 +185,9 @@ struct UploadConfirmationView: View {
                 Picker("同名文件", selection: $policy) {
                     Text("保留两份").tag(UploadConflictPolicy.keepBoth)
                     Text("跳过").tag(UploadConflictPolicy.skip)
-                    Text(target.account.provider == .baidu ? "安全覆盖（保留旧版本）" : "覆盖（暂不可用）")
-                        .tag(UploadConflictPolicy.replace).disabled(target.account.provider != .baidu)
+                    if target.account.provider == .baidu {
+                        Text("覆盖（保留旧版本）").tag(UploadConflictPolicy.replace)
+                    }
                 }
                 .labelsHidden().pickerStyle(.menu).fixedSize()
                 .disabled(isSubmitting || !isContextCurrent)
@@ -201,7 +202,7 @@ struct UploadConfirmationView: View {
 
     @ViewBuilder private var preflightContent: some View {
         if isCheckingPreflight {
-            ProgressView("正在检查文件及目标容量…").controlSize(.small)
+            ProgressView("正在检查文件及目标容量").controlSize(.small)
         } else if let preflightError {
             errorLabel(preflightError)
             Button("重新检查") { preflightGeneration += 1 }
@@ -216,7 +217,7 @@ struct UploadConfirmationView: View {
                     errorLabel("目标剩余容量不足，请清理空间或减少本次上传内容。")
                 }
                 if result.summary.issueCount > 0 {
-                    errorLabel("所选文件中有 \(result.summary.issueCount) 项无法上传，请处理后重新检查。")
+                    errorLabel("所选文件中有 \(result.summary.issueCount) 项需要处理，请调整后重新检查。")
                     ForEach(Array(result.summary.issues.enumerated()), id: \.offset) { _, message in
                         errorLabel(message)
                     }
@@ -322,7 +323,7 @@ struct UploadConfirmationView: View {
     private func chooseFiles() {
         let files = $files, error = $selectionError
         guard let window = panelPresenter.parentWindow else {
-            error.wrappedValue = "无法取得上传窗口，请关闭后重新打开。"
+            error.wrappedValue = "请重新打开上传窗口。"
             return
         }
         panelPresenter.present(in: window) { urls in Self.appendFiles(urls, files: files, error: error) }

@@ -15,16 +15,16 @@ struct TransferListView: View {
 
     var body: some View {
         if items.isEmpty {
-            if !searchText.isEmpty { ContentUnavailableView.search(text: searchText) }
+            if !searchText.isEmpty { ContentUnavailableView("试试其他关键词", systemImage: "magnifyingglass") }
             else if model.coordinator.jobs.isEmpty, model.uploadJobs.isEmpty, model.account == nil, model.quark.account == nil {
                 ContentUnavailableView {
-                    Label("没有任务", systemImage: "tray.and.arrow.down")
+                    Label("添加传输任务", systemImage: "tray.and.arrow.down")
                 } actions: {
                     if let provider = scope.providerFilter {
-                        Button("登录\(provider.title)…") { model.presentLogin(for: provider) }
+                        Button("登录\(provider.title)") { model.presentLogin(for: provider) }
                     } else {
-                        Button("登录百度网盘…") { model.presentLogin(for: .baidu) }
-                        Button("登录夸克网盘…") { model.presentLogin(for: .quark) }
+                        Button("登录百度网盘") { model.presentLogin(for: .baidu) }
+                        Button("登录夸克网盘") { model.presentLogin(for: .quark) }
                     }
                 }
             } else { ContentUnavailableView(category.emptyTitle, systemImage: category.systemImage) }
@@ -182,16 +182,16 @@ struct TransferActionsMenu: View {
         }
         if showsUnavailable || !scope.selectedItems.isEmpty {
             Divider()
-            Button("查看详情…") { scope.onInspect(scope.selectedItems.map(\.id)) }
+            Button("查看详情") { scope.onInspect(scope.selectedItems.map(\.id)) }
                 .disabled(scope.selectedItems.isEmpty)
-            Button("移除记录…", role: .destructive) { scope.onRemove(scope.selectedItems.map(\.id), .keepingFiles) }
+            Button("移除记录", role: .destructive) { scope.onRemove(scope.selectedItems.map(\.id), .keepingFiles) }
                 .disabled(scope.isBusy || !scope.selectedItems.contains(where: canRemove))
             let downloads = scope.selectedItems.compactMap { item -> Job? in
                 if case .download(let job) = item { return job }; return nil
             }
             // 含上传的混合选择不展示本地删除，避免将其误解为删除上传原文件。
             if !downloads.isEmpty && downloads.count == scope.selectedItems.count && model.canTrashFiles(of: downloads) {
-                Button("移除并删除下载文件…", role: .destructive) { scope.onRemove(scope.selectedItems.map(\.id), .trashingFiles) }
+                Button("移除并删除下载文件", role: .destructive) { scope.onRemove(scope.selectedItems.map(\.id), .trashingFiles) }
                     .disabled(scope.isBusy)
             }
         }
@@ -383,8 +383,8 @@ struct JobStatusLine: View {
                          accessibilityDescription: job.provider.title + (job.isNetdisk ? "，账号内文件" : "，分享链接"))
                 .help(job.provider.title + (job.isNetdisk ? " · 账号内文件" : " · 分享链接"))
             Text(isRemoving
-                 ? "正在移除…"
-                 : job.files.contains(where: { model.coordinator.verifyingLocalFiles.contains($0.id) }) ? "正在校验本地文件…"
+                 ? "正在移除"
+                 : job.files.contains(where: { model.coordinator.verifyingLocalFiles.contains($0.id) }) ? "正在校验本地文件"
                  : job.statusText(isRunning: activity.isRunning, cleansUp: model.settings.cleanupAfterDownload(for: job.provider)))
             if !job.files.isEmpty {
                 Text(job.phase == .downloading && !job.isPaused ? activity.progress.summary : activity.progress.sizeSummary)
@@ -412,7 +412,7 @@ struct JobNotes: View {
             Text("这个任务属于\(job.provider.title)账号“\(job.accountName ?? owner.accountID)”（\(owner.accountID)）。登录原账号后可以继续。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            Button("登录任务所属的\(job.provider.title)账号…") { model.presentLogin(for: job.provider) }
+            Button("登录任务所属的\(job.provider.title)账号") { model.presentLogin(for: job.provider) }
                 .font(.caption)
         }
         if let warning = job.warning {

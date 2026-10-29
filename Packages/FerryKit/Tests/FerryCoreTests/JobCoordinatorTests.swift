@@ -1456,7 +1456,7 @@ import os
         await coordinator.retry(job.id)
         try await coordinator.waitForPhase(.failed(.transfer), of: job.id)
         let failed = try #require(coordinator.job(job.id))
-        #expect(failed.error?.contains("旧任务没有转存文件清单") == true)
+        #expect(failed.error?.contains("请恢复原分享后重试") == true)
         #expect(failed.transferProgress?.completed == true)
         #expect(failed.transferManifest == nil)
         #expect(failed.files.isEmpty)

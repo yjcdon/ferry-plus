@@ -23,7 +23,7 @@ public struct IntegrityManifest: Codable, Sendable {
 
     /// 导入边界先限制输入体积，再解析；未知格式与错误路径明确报错，不执行清单中的路径。
     public static func decode(_ data: Data) throws -> IntegrityManifest {
-        guard data.count <= maximumBytes else { throw UploadRecordError.invalid("校验清单不能超过 4 MiB") }
+        guard data.count <= maximumBytes else { throw UploadRecordError.invalid("请选择 4 MiB 以内的校验清单") }
         return try JSONDecoder().decode(Self.self, from: data)
     }
 
@@ -31,7 +31,7 @@ public struct IntegrityManifest: Codable, Sendable {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let data = try encoder.encode(self)
-        guard data.count <= Self.maximumBytes else { throw UploadRecordError.invalid("校验清单不能超过 4 MiB") }
+        guard data.count <= Self.maximumBytes else { throw UploadRecordError.invalid("请选择 4 MiB 以内的校验清单") }
         return data
     }
 

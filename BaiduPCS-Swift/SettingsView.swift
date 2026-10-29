@@ -70,7 +70,7 @@ private struct TransferSettingsView: View {
                         FolderLabel(url: model.downloadDirectory).tag(DirectoryChoice.chosen)
                     }
                     Divider()
-                    Text("其他…").tag(DirectoryChoice.other)
+                    Text("其他").tag(DirectoryChoice.other)
                 }
                 .help(model.downloadDirectory.path(percentEncoded: false))
                 if let problem = model.downloadDirectoryProblem {
@@ -350,7 +350,7 @@ private struct AccountSettingsView: View {
         Form {
             Section {
                 if let account = model.account {
-                    LabeledContent("用户名", value: account.username.isEmpty ? "未知" : account.username)
+                    LabeledContent("用户名", value: account.username.isEmpty ? "—" : account.username)
                     LabeledContent("状态") {
                         if model.isLoginExpired {
                             Label("登录已失效", systemImage: "exclamationmark.triangle.fill")
@@ -362,15 +362,15 @@ private struct AccountSettingsView: View {
                     HStack {
                         Spacer()
                         if model.isLoginExpired {
-                            Button("重新登录…", action: showLogin)
+                            Button("重新登录", action: showLogin)
                         }
                         Button("退出登录") { isConfirmingLogOut = model.requestLogOut() }
                     }
                 } else {
-                    LabeledContent("状态", value: "未登录")
+                    LabeledContent("状态", value: "待登录")
                     HStack {
                         Spacer()
-                        Button("登录…", action: showLogin)
+                        Button("登录", action: showLogin)
                     }
                 }
             } header: {
@@ -397,10 +397,10 @@ private struct AccountSettingsView: View {
                 HStack {
                     Spacer()
                     if model.quark.account == nil {
-                        Button("登录…") { openWindow(id: QuarkLoginView.windowID) }
+                        Button("登录") { openWindow(id: QuarkLoginView.windowID) }
                     } else {
                         if case .expired = model.quark.state {
-                            Button("重新登录…") { openWindow(id: QuarkLoginView.windowID) }
+                            Button("重新登录") { openWindow(id: QuarkLoginView.windowID) }
                         } else if case .problem = model.quark.state {
                             Button("重试") { Task { await model.quark.revalidate() } }
                         }

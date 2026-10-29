@@ -282,9 +282,17 @@ public actor QuarkNetdisk: Netdisk {
         try await client.delete(fids: [Self.fid(directory.reference)])
     }
 
+    /// 对账号内准确条目改名，冲突时不覆盖；回读父目录确认相同远端身份。
+    public func rename(entry: RemoteEntry, parent: RemoteReference, newName: String, account requestingAccount: AccountKey) async throws -> RemoteEntry {
+        try await prepareRename(entry: entry, parent: parent, newName: newName, requestingAccount: requestingAccount)
+        if newName == entry.name { return entry }
+        try await client.rename(fid: Self.fid(entry.reference), newName: newName)
+        return try await confirmRename(entry: entry, parent: parent, newName: newName)
+    }
+
     /// 使用准确 fid 与 action_type 1，客户端等待已有服务端任务；之后核对原目录移除结果。
     public func moveToTrash(entry: RemoteEntry, parent: RemoteReference, account requestingAccount: AccountKey) async throws {
-        try await checkTrashSelection(entry: entry, parent: parent, requestingAccount: requestingAccount)
+        try await checkMutationSelection(entry: entry, parent: parent, requestingAccount: requestingAccount)
         try await client.delete(fids: [Self.fid(entry.reference)])
         try await confirmTrashRemoval(entry: entry, parent: parent)
     }

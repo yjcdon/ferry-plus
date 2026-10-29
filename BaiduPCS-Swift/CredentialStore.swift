@@ -113,7 +113,7 @@ struct KeychainItem {
     private func check(_ status: OSStatus, operation: String) throws {
         guard status == errSecSuccess else {
             throw NSError(domain: NSOSStatusErrorDomain, code: Int(status),
-                          userInfo: [NSLocalizedDescriptionKey: "无法\(operation)钥匙串中的\(name)（\(status)）。"])
+                          userInfo: [NSLocalizedDescriptionKey: "钥匙串\(operation)失败：\(name)（\(status)）。"])
         }
     }
 }

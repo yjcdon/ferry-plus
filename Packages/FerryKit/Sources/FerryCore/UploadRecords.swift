@@ -460,7 +460,7 @@ public enum UploadRecordError: Error, LocalizedError, Sendable {
     public var errorDescription: String? {
         switch self {
         case .invalid(let reason): reason
-        case .unsupportedVersion(let version): "不支持的上传或校验记录格式版本：\(version)"
+        case .unsupportedVersion(let version): "请更新 App 后读取记录，记录版本：\(version)"
         }
     }
 }

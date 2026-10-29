@@ -21,7 +21,7 @@ struct QuarkLoginView: View {
                 }
                 if let loadError = session?.loadError {
                     ContentUnavailableView {
-                        Label("无法加载夸克登录页", systemImage: "wifi.exclamationmark")
+                        Label("夸克登录页加载失败", systemImage: "wifi.exclamationmark")
                     } description: {
                         Text(loadError)
                     } actions: {
@@ -43,10 +43,10 @@ struct QuarkLoginView: View {
                     .disabled(loginTask != nil)
                 if loginTask != nil {
                     ProgressView().controlSize(.small)
-                    Text("正在校验账号并保存登录…").foregroundStyle(.secondary)
+                    Text("正在校验账号并保存登录").foregroundStyle(.secondary)
                 } else if session?.isLoading == true {
                     ProgressView().controlSize(.small)
-                    Text("正在加载官方页面…").foregroundStyle(.secondary)
+                    Text("正在加载官方页面").foregroundStyle(.secondary)
                 }
                 Spacer()
                 Text("夸克官方页面").font(.caption).foregroundStyle(.secondary)
@@ -117,10 +117,10 @@ struct QuarkAccountControls: View {
         if let problem = model.quark.problem { Text(problem).foregroundStyle(.orange) }
         if let errorMessage { Text(errorMessage).foregroundStyle(.red) }
         if model.quark.account == nil {
-            Button("登录…") { openWindow(id: QuarkLoginView.windowID) }
+            Button("登录") { openWindow(id: QuarkLoginView.windowID) }
         } else {
             if case .expired = model.quark.state {
-                Button("重新登录…") { openWindow(id: QuarkLoginView.windowID) }
+                Button("重新登录") { openWindow(id: QuarkLoginView.windowID) }
             }
             if case .problem = model.quark.state {
                 Button("重试") { Task { await model.quark.revalidate() } }
