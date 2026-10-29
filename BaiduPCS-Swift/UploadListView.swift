@@ -293,24 +293,11 @@ struct UploadInspector: View {
                         HStack {
                             Text(file.phase.displayName).font(.caption).foregroundStyle(.secondary)
                             Spacer()
-                        Menu {
-                            Button("打开云端所在目录", systemImage: "cloud") {
-                                location.request = .init(fileID: file.id, focus: file.isDirectory ? nil : file.remoteReference)
-                            }
-                                .disabled(file.remoteReference == nil || location.request != nil)
-                            Button("在 Finder 中显示源文件", systemImage: "folder") { revealSource(file) }
-                            if let replacement = file.replacement, let snapshot = replacement.snapshotObject {
-                                Button("打开旧版本备份", systemImage: "clock.arrow.circlepath") {
-                                    location.request = .init(fileID: file.id, focus: snapshot, directory: replacement.parent)
-                                }.disabled(location.request != nil)
-                                Button("复制旧版本备份名称", systemImage: "doc.on.doc") {
-                                    NSPasteboard.general.clearContents()
-                                    NSPasteboard.general.setString(replacement.snapshotName, forType: .string)
-                                }
-                            }
-                        } label: { Label("定位", systemImage: "location") }
-                            .menuStyle(.borderlessButton).fixedSize().help("定位文件")
-                            .accessibilityLabel("定位 \(file.relativePath)")
+                            Menu {
+                                fileLocationActions(for: file)
+                            } label: { Label("定位", systemImage: "location") }
+                                .menuStyle(.borderlessButton).fixedSize().help("定位文件")
+                                .accessibilityLabel("定位 \(file.relativePath)")
                         }
                     }
                     if !integrityDescription(file).isEmpty {
@@ -349,6 +336,7 @@ struct UploadInspector: View {
                 }
                 .padding(.vertical, 3)
                 .accessibilityElement(children: .contain)
+                .accessibilityActions { fileLocationActions(for: file) }
             }
             .overlay(alignment: .topTrailing) {
                 if isLoading { ProgressView().controlSize(.small).padding(8).accessibilityLabel("正在刷新明细") }
@@ -363,6 +351,24 @@ struct UploadInspector: View {
                     .padding(8)
                     .background(Color(nsColor: .windowBackgroundColor))
                 }
+            }
+        }
+    }
+
+    /// 定位菜单与辅助技术使用同一动作和能力条件，目标始终来自该文件记录。
+    @ViewBuilder private func fileLocationActions(for file: UploadFile) -> some View {
+        Button("打开云端所在目录", systemImage: "cloud") {
+            location.request = .init(fileID: file.id, focus: file.isDirectory ? nil : file.remoteReference)
+        }
+        .disabled(file.remoteReference == nil || location.request != nil)
+        Button("在 Finder 中显示源文件", systemImage: "folder") { revealSource(file) }
+        if let replacement = file.replacement, let snapshot = replacement.snapshotObject {
+            Button("打开旧版本备份", systemImage: "clock.arrow.circlepath") {
+                location.request = .init(fileID: file.id, focus: snapshot, directory: replacement.parent)
+            }.disabled(location.request != nil)
+            Button("复制旧版本备份名称", systemImage: "doc.on.doc") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(replacement.snapshotName, forType: .string)
             }
         }
     }
