@@ -285,6 +285,13 @@ struct MainView: View {
                              })
                 .id(workspace.browser.provider)
         }
+        .task(id: workspace.lastAddedTransfer) {
+            guard let added = workspace.lastAddedTransfer else { return }
+            do { try await Task.sleep(for: .seconds(10)) }
+            catch { return }
+            if workspace.lastAddedTransfer == added { workspace.lastAddedTransfer = nil }
+        }
+        .onDisappear { workspace.lastAddedTransfer = nil }
     }
 
     /// 来自列表的目标一次冻结；展开和刷新不能改写已经显示的确认。
