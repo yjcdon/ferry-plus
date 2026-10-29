@@ -115,7 +115,6 @@ struct NetdiskFilesView: View {
                     .onChange(of: proxy.size.width) { _, width in contentWidth = width }
             }.allowsHitTesting(false)
         }
-        .navigationTitle(browser.provider.title)
         .toolbar { toolbar }
         .task(id: loadID) { await browser.load(model: model) }
         .task(id: operationFeedback?.id) {

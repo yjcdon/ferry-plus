@@ -47,6 +47,9 @@ struct MainView: View {
         let jobs: [UploadJob]
     }
     private var currentCategory: JobCategory { category ?? .all }
+    private var windowTitle: String {
+        workspace.page?.provider?.title ?? providerFilter.map { "\($0.title) · \(currentCategory.title)" } ?? currentCategory.title
+    }
     private var query: String { searchText.trimmingCharacters(in: .whitespacesAndNewlines) }
     /// 侧边栏各分类的数字也应用方向、来源和搜索，但不预先套用当前分类。
     private var filteredDownloads: [Job] {
@@ -145,6 +148,10 @@ struct MainView: View {
                     .buttonStyle(.plain)
                     .help(columnVisibility == .detailOnly ? "显示侧边栏" : "隐藏侧边栏")
                     .accessibilityLabel(columnVisibility == .detailOnly ? "显示侧边栏" : "隐藏侧边栏")
+            }.solidToolbarBackground()
+            ToolbarItem(id: "workspace.title", placement: .navigation) {
+                WindowTitleDragView(title: windowTitle, subtitle: workspace.isFiles ? nil : "\(items.count) 个任务")
+                    .frame(width: min(180, max(120, workspaceWidth / 5)), height: 32)
             }.solidToolbarBackground()
         }
         .background(Color(nsColor: .windowBackgroundColor))
@@ -399,8 +406,6 @@ struct MainView: View {
                 Banners()
             }
             .edgeBar(.bottom) { StatusBar(direction: direction, items: items) }
-            .navigationTitle(providerFilter.map { "\($0.title) · \(currentCategory.title)" } ?? currentCategory.title)
-            .navigationSubtitle("\(items.count) 个任务")
             .focusedSceneValue(\.focusTaskSearch, { searchFocusRequest += 1 })
     }
 
@@ -449,6 +454,7 @@ struct MainView: View {
             Label(showsInspector ? "隐藏详情" : "显示详情", systemImage: "sidebar.trailing")
         }
         .help(showsInspector ? "隐藏详情" : "显示详情")
+        .accessibilityLabel(showsInspector ? "隐藏详情" : "显示详情")
     }
 
     /// 即使菜单携带旧快照，执行入口也只接收当前仍可见的同方向身份。

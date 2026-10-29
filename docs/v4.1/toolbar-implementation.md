@@ -8,6 +8,7 @@
 - macOS 14 保留等价标准工具栏命令；实色窗口背景承担分组层级。
 - 文件命令组、传输操作组及独立搜索复用 `toolbarControlSurface`：32 点高的系统实色胶囊衬底与 0.5 点语义描边，组内保持原按钮与命令。原生共享材质继续隐藏，分组、宽窄收纳和搜索焦点沿用原流程。
 - 窗口沿用 AppKit 原生标题栏及空白背景拖动，实色配置明确开启窗口可移动属性；衬底描边只绘制外观，鼠标事件交给原按钮和搜索。使用最低支持系统已有的 [isMovableByWindowBackground](https://developer.apple.com/documentation/appkit/nswindow/ismovablebywindowbackground) 属性。
+- 主窗口共用一个原生标题文字区域，单次按下直接调用 `NSWindow.performDrag(with:)`，双击继续交给原生响应链；标题区域独立于按钮与搜索。文件页和传输页共用该标题，窗口菜单标题随当前页面同步。诊断用的事件监听与位移日志已清理；实际位移仍需实机验收记录。
 
 API 已核对本机 macOS 26.5 SDK 的 SwiftUI 接口，sharedBackgroundVisibility 受 macOS 26 可用性判断保护。官方说明：[sharedBackgroundVisibility](https://developer.apple.com/documentation/swiftui/toolbarcontent/sharedbackgroundvisibility(_:))。
 
