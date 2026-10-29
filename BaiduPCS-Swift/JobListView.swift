@@ -34,11 +34,13 @@ struct TransferListView: View {
                     Group {
                         switch item {
                         case .download(let job):
-                            JobRow(job: job, onAction: { job, action in
+                            JobRow(job: job, showsProvider: scope.providerFilter == nil, onAction: { job, action in
                                 scope.onAction(TransferAction(action), [.init(direction: .download, id: job.id)])
                             })
                         case .upload(let job):
-                            UploadRow(job: job, onLocateDuplicate: onLocateUpload,
+                            UploadRow(job: job, showsProvider: scope.providerFilter == nil,
+                                      onAction: { scope.onAction($0, [item.id]) },
+                                      onLocateDuplicate: onLocateUpload,
                                       onResumeDuplicate: { scope.onAction(.resume, [item.id]) },
                                       onInspect: { scope.onInspect([item.id]) })
                         }
@@ -63,9 +65,9 @@ struct TransferListView: View {
 /// 原生 List 会缓存行高；只有内容结构变化时重建展示行，选中与命令仍使用稳定任务身份。
 fileprivate struct TransferRowLayoutID: Hashable {
     let task: TransferTaskID
-    var hasVerification = false
-    var hasMetrics = false
+    var hasProgress = false
     var hasDuplicate = false
+    var hasPartialFailure = false
     var error: String?
 }
 
@@ -81,10 +83,10 @@ enum TransferListItem: Identifiable {
     }
     fileprivate var rowLayoutID: TransferRowLayoutID {
         switch self {
-        case .download: .init(task: id)
+        case .download(let job): .init(task: id, hasProgress: job.phase != .completed, error: job.error)
         case .upload(let job):
-            .init(task: id, hasVerification: job.verificationProgress != nil,
-                  hasMetrics: job.stageMetrics != nil, hasDuplicate: job.duplicateOfJobID != nil, error: job.error)
+            .init(task: id, hasProgress: !job.phase.isTerminal, hasDuplicate: job.duplicateOfJobID != nil,
+                  hasPartialFailure: job.hasPartialFailure, error: job.error)
         }
     }
     var createdAt: Date {
@@ -132,6 +134,17 @@ enum TransferAction: CaseIterable {
     }
     var downloadAction: JobAction? {
         switch self { case .pause: .pause; case .resume: .resume; case .retry: .retry; case .reveal: .reveal; default: nil }
+    }
+    var systemImage: String {
+        switch self {
+        case .pause: "pause.fill"
+        case .resume: "play.fill"
+        case .retry, .reconcile: "arrow.clockwise"
+        case .prioritize: "arrow.up.to.line"
+        case .cancel: "xmark"
+        case .reveal: "magnifyingglass"
+        case .copyError: "doc.on.doc"
+        }
     }
     var uploadAction: UploadAction? {
         switch self {
@@ -222,35 +235,92 @@ struct TransferActionsMenu: View {
 /// 一个任务：图标、标题、进度条、状态，以及行尾的主要操作。
 struct JobRow: View {
     let job: Job
+    var showsProvider = true
     let onAction: (Job, JobAction) -> Void
     @Environment(AppModel.self) private var model
 
     var body: some View {
         let activity = model.coordinator.activity(of: job.id)
         let isRemoving = model.coordinator.removingJobs.contains(job.id)
-        HStack(spacing: 12) {
-            Image(systemName: job.systemImage)
-                .font(.title2)
-                .foregroundStyle(.secondary)
-                .frame(width: 28)
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 4) {
-                Text(job.title)
-                    .font(.headline)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                JobProgressBar(job: job, activity: activity, isRemoving: isRemoving)
-                JobStatusLine(job: job, activity: activity, isRemoving: isRemoving)
-                JobNotes(job: job)
-            }
+        TransferRowContent(title: job.title, systemImage: job.systemImage,
+                           provider: showsProvider ? job.provider : nil,
+                           summary: summary(activity: activity, isRemoving: isRemoving)) {
+            JobProgressBar(job: job, activity: activity, isRemoving: isRemoving)
+        } actions: {
             if let action = job.primaryAction {
                 JobActionButton(job: job, action: action, onAction: onAction)
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
                     .imageScale(.large)
             }
+        } supplement: {
+            if let error = job.error {
+                Text(error).font(.caption).foregroundStyle(.red).lineLimit(2).help(error)
+            }
+            if let owner = job.accountKey, model.accountKey(for: job.provider) != owner {
+                Button("登录任务所属账号") { model.presentLogin(for: job.provider) }
+                    .font(.caption).buttonStyle(.borderless)
+            }
+            if let warning = job.warning {
+                Text(warning == "没有删除网盘中的转存文件：没有全部文件的可信内容校验结果，已保留转存文件" ? "转存文件已保留" : warning)
+                    .font(.caption).foregroundStyle(.orange).lineLimit(1).help(warning)
+            }
         }
-        .padding(.vertical, 4)
+    }
+
+    /// 主列表只表达当前结果、有效字节进度和速度；详细路径及剩余时间留在详情。
+    private func summary(activity: JobActivity, isRemoving: Bool) -> String {
+        let status: String
+        if isRemoving { status = "正在移除" }
+        else if job.files.contains(where: { model.coordinator.verifyingLocalFiles.contains($0.id) }) {
+            status = "正在完成"
+        } else {
+            status = job.statusText(isRunning: activity.isRunning, cleansUp: model.settings.cleanupAfterDownload(for: job.provider))
+        }
+        var parts = [status]
+        if !job.files.isEmpty {
+            parts.append(job.phase == .completed ? activity.progress.totalBytes.byteCount : activity.progress.sizeSummary)
+        }
+        if job.phase == .downloading, !job.isPaused, activity.isRunning,
+           let speed = activity.progress.speedText { parts.append(speed) }
+        return parts.joined(separator: " · ")
+    }
+}
+
+/// 上传和下载共用的信息层级；业务状态及可执行动作由调用方提供。
+struct TransferRowContent<Progress: View, Actions: View, Supplement: View>: View {
+    let title: String
+    let systemImage: String
+    let provider: Provider?
+    let summary: String
+    @ViewBuilder let progress: () -> Progress
+    @ViewBuilder let actions: () -> Actions
+    @ViewBuilder let supplement: () -> Supplement
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.title2).foregroundStyle(.secondary).frame(width: 28, height: 28)
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 8) {
+                    Text(title).font(.headline).lineLimit(1).truncationMode(.middle).help(title)
+                    Spacer(minLength: 8)
+                    actions()
+                }
+                progress()
+                HStack(spacing: 6) {
+                    if let provider {
+                        ProviderIcon(provider: provider, size: 14, accessibilityDescription: provider.title)
+                            .help(provider.title)
+                    }
+                    Text(summary).lineLimit(1).truncationMode(.tail).help(summary)
+                }
+                .font(.caption).foregroundStyle(.secondary).monospacedDigit()
+                supplement()
+            }
+        }
+        .padding(.vertical, 5)
     }
 }
 

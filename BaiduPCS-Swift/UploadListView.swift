@@ -10,9 +10,7 @@ extension UploadPhase {
         case .preparing: "正在准备"
         case .queued: "等待上传"
         case .uploading: "正在上传"
-        case .committing: "正在核对合并结果"
-        case .verifying: "正在校验云端内容"
-        case .publishing: "正在发布文件"
+        case .committing, .verifying, .publishing: "正在完成"
         case .completed: "已完成"
         case .skipped: "已跳过"
         case .failed: "上传失败"
@@ -52,74 +50,72 @@ enum UploadAction {
 
 struct UploadRow: View {
     let job: UploadJob
+    var showsProvider = true
+    let onAction: (TransferAction) -> Void
     let onLocateDuplicate: (UUID) -> Void
     let onResumeDuplicate: () -> Void
     let onInspect: () -> Void
+    @Environment(AppModel.self) private var model
+
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "arrow.up.doc").font(.title2).foregroundStyle(.secondary).frame(width: 28)
-            VStack(alignment: .leading, spacing: 5) {
-                HStack {
-                    Text(job.title).font(.headline).lineLimit(1).truncationMode(.middle)
-                    Spacer()
-                    Text(job.batchStatusText)
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                if let verification = job.verificationProgress {
-                    ProgressView(value: Double(verification.verifiedBytes), total: Double(max(1, verification.totalBytes)))
-                    HStack {
-                        Text("检查文件 · \(verification.relativePath)").lineLimit(1).truncationMode(.middle)
-                        Spacer(minLength: 0)
-                        Text("\(verification.verifiedBytes.byteCount) / \(verification.totalBytes.byteCount)")
-                    }.font(.caption).foregroundStyle(.secondary)
+        TransferRowContent(title: job.title, systemImage: "arrow.up.doc",
+                           provider: showsProvider ? job.account.provider : nil,
+                           summary: summary) {
+            if !job.phase.isTerminal {
+                if isFinishing && !job.isPaused {
+                    ProgressView().progressViewStyle(.linear)
                 } else {
                     ProgressView(value: Double(job.completedBytes), total: Double(max(1, job.totalBytes)))
-                }
-                HStack(spacing: 12) {
-                    Text("\(job.account.provider.title) · \(job.accountName)")
-                    Text("\(job.completedBytes.byteCount) / \(job.totalBytes.byteCount)")
-                    Spacer(minLength: 0)
-                }
-                .font(.caption).foregroundStyle(.secondary)
-                HStack {
-                    Text("完成 \(job.completedCount) · 失败 \(job.failedCount) · 跳过 \(job.skippedCount)")
-                    Spacer(minLength: 0)
-                    if let metrics = job.stageMetrics {
-                        Text(stageDescription(metrics)).lineLimit(1)
-                            .help("当前文件：\(metrics.relativePath)。均速按本轮新增确认字节与经过时间计算。")
-                    }
-                }.font(.caption).foregroundStyle(.secondary)
-                if let originalID = job.duplicateOfJobID {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Label("已有相同内容的上传，当前任务已暂停", systemImage: "doc.on.doc")
-                        HStack(spacing: 10) {
-                            Button("查看原任务") { onLocateDuplicate(originalID) }
-                            Button("仍然上传", action: onResumeDuplicate)
-                        }
-                    }
-                    .font(.caption)
-                    .buttonStyle(.borderless)
-                }
-                if let error = job.error {
-                    Label(error, systemImage: "exclamationmark.triangle")
-                        .font(.caption).foregroundStyle(.red).lineLimit(2).textSelection(.enabled)
+                        .tint(job.isPaused ? .gray : nil)
                 }
             }
-            .fixedSize(horizontal: false, vertical: true)
-            Button("明细", action: onInspect)
-                .buttonStyle(.borderless)
+        } actions: {
+            if let action = primaryAction {
+                Button { onAction(action) } label: { Label(action.title, systemImage: action.systemImage) }
+                    .labelStyle(.iconOnly).buttonStyle(.borderless).imageScale(.large)
+                    .help(action.title).disabled(!action.allows(.upload(job), model: model))
+            } else {
+                Button("查看详情", systemImage: "info.circle", action: onInspect)
+                    .labelStyle(.iconOnly).buttonStyle(.borderless).imageScale(.large).help("查看详情")
+            }
+        } supplement: {
+            if let originalID = job.duplicateOfJobID {
+                HStack(spacing: 10) {
+                    Text("已有相同内容的上传").foregroundStyle(.secondary)
+                    Button("查看原任务") { onLocateDuplicate(originalID) }
+                    Button("仍然上传", action: onResumeDuplicate)
+                }
+                .font(.caption).buttonStyle(.borderless)
+            }
+            if job.hasPartialFailure {
+                Button("\(job.failedCount) 项失败，查看详情", action: onInspect)
+                    .font(.caption).buttonStyle(.borderless)
+            } else if let error = job.error {
+                Text(error).font(.caption).foregroundStyle(.red).lineLimit(2).help(error)
+            }
         }
-        .padding(.vertical, 5)
-    }
-    /// 显示当前文件本轮的有效均速及估算，不把重试流量当成上传完成速度。
-    private func stageDescription(_ metrics: UploadStageMetrics) -> String {
-        let phase = metrics.phase == .verifying ? "回读均速" : "上传均速"
-        let rate = Int64(metrics.averageBytesPerSecond.rounded()).byteCount
-        let remaining = Duration.seconds(metrics.estimatedRemainingSeconds).formatted(
-            .units(allowed: [.hours, .minutes, .seconds], width: .abbreviated, maximumUnitCount: 2))
-        return "\(phase) \(rate)/s · 预计 \(remaining)"
     }
 
+    private var isFinishing: Bool { [.committing, .verifying, .publishing].contains(job.phase) }
+
+    /// 主操作沿用现有能力；需要核对结果的任务仍可从菜单与详情进入专用动作。
+    private var primaryAction: TransferAction? {
+        if UploadAction.resume.allows(job) { return .resume }
+        if UploadAction.retry.allows(job) { return .retry }
+        if UploadAction.pause.allows(job) { return .pause }
+        return nil
+    }
+
+    /// 发送速度只出现在真实上传阶段，收尾展示批次进度并由真实阶段决定完成。
+    private var summary: String {
+        var parts = [job.batchStatusText]
+        parts.append(job.phase == .completed ? job.totalBytes.byteCount : "\(job.completedBytes.byteCount) / \(job.totalBytes.byteCount)")
+        if job.phase == .uploading, !job.isPaused, let metrics = job.stageMetrics,
+           metrics.phase == .uploading, metrics.averageBytesPerSecond > 0 {
+            parts.append("\(Int64(metrics.averageBytesPerSecond.rounded()).byteCount)/s")
+        }
+        return parts.joined(separator: " · ")
+    }
 }
 
 /// 每页最多 100 项；响应代次校验与 .task 取消共同阻止翻页后的迟到内容覆盖。
