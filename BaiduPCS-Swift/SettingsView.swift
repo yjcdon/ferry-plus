@@ -85,9 +85,13 @@ private struct TransferSettingsView: View {
                 Stepper(value: $model.settings.maxConcurrentFiles, in: model.settings.allowedConcurrentFiles) {
                     LabeledContent("同时下载文件数", value: "\(model.settings.maxConcurrentFiles)")
                 }
+                .accessibilityLabel("同时下载文件数")
+                .accessibilityValue(Text("\(model.settings.maxConcurrentFiles)"))
                 Stepper(value: $model.settings.maxConcurrentUploads, in: FerrySettings.concurrentUploadsRange) {
                     LabeledContent("同时上传任务数", value: "\(model.settings.maxConcurrentUploads)")
                 }
+                .accessibilityLabel("同时上传任务数")
+                .accessibilityValue(Text("\(model.settings.maxConcurrentUploads)"))
             }
 
             Section {
@@ -103,6 +107,8 @@ private struct TransferSettingsView: View {
                     Stepper(value: $model.settings.uploadPartsPerFile, in: FerrySettings.uploadPartsRange) {
                         LabeledContent("每个上传文件的并发分片", value: "\(model.settings.uploadPartsPerFile)")
                     }
+                    .accessibilityLabel("每个上传文件的并发分片")
+                    .accessibilityValue(Text("\(model.settings.uploadPartsPerFile)"))
                     Text("适用于百度和夸克。增加分片并发可提高上传速度，也会增加内存使用。")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -208,6 +214,8 @@ private struct NetdiskSettingsView: View {
                     Stepper(value: $model.settings.connectionsPerFile, in: model.settings.allowedConnections) {
                         LabeledContent("每个文件的连接数", value: "\(model.settings.connectionsPerFile)")
                     }
+                    .accessibilityLabel("百度网盘每个文件的连接数")
+                    .accessibilityValue(Text("\(model.settings.connectionsPerFile)"))
                     concurrencyFooter
                         .font(.callout)
                 }
@@ -226,6 +234,8 @@ private struct NetdiskSettingsView: View {
                     Stepper(value: $model.settings.quarkConnectionsPerFile, in: model.settings.allowedConnections) {
                         LabeledContent("每个文件的连接数", value: "\(model.settings.quarkConnectionsPerFile)")
                     }
+                    .accessibilityLabel("夸克网盘每个文件的连接数")
+                    .accessibilityValue(Text("\(model.settings.quarkConnectionsPerFile)"))
                 }
             } header: {
                 Text("夸克网盘")
