@@ -103,6 +103,7 @@ struct MainView: View {
                             workspace.page = .transfers(currentCategory)
                         }, jobs: downloads, uploadJobs: uploads)
                 .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
+                .toolbar(removing: .sidebarToggle)
         } detail: {
             if workspace.isFiles {
                 filesContent
