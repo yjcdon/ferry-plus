@@ -75,6 +75,7 @@ struct NetdiskFilesView: View {
     }
     private var searchWidth: CGFloat { min(220, max(TaskSearchField.minimumWidth, contentWidth - 560)) }
     private var usesCompactToolbar: Bool { contentWidth < 700 }
+    private var usesMinimalToolbar: Bool { contentWidth < 520 }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -232,21 +233,25 @@ struct NetdiskFilesView: View {
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
         ToolbarItemGroup(placement: .primaryAction) {
-            Button {
-                if let context = browser.context { onUpload(context, []) }
-            } label: { Label("上传", systemImage: "arrow.up.doc") }
-                .disabled(!canOperate).help("上传到当前目录")
-            Button {
-                if let context = browser.context { onDownload(context, browser.selectedEntries) }
-            } label: { Label("下载", systemImage: "arrow.down.to.line") }
-                .disabled(!canOperate || browser.selectedEntries.isEmpty).help("下载勾选项目")
-            if usesCompactToolbar {
-                Menu("操作") { directoryActions }
-                    .menuStyle(.borderlessButton).fixedSize()
-                    .help("新建文件夹、移到回收站和刷新")
-                    .accessibilityLabel("文件操作")
+            if usesMinimalToolbar {
+                Menu("操作") {
+                    transferActions
+                    Divider()
+                    directoryActions
+                }
+                .menuStyle(.borderlessButton).fixedSize()
+                .help("上传、下载和目录操作")
+                .accessibilityLabel("文件操作")
             } else {
-                directoryActions
+                transferActions
+                if usesCompactToolbar {
+                    Menu("操作") { directoryActions }
+                        .menuStyle(.borderlessButton).fixedSize()
+                        .help("新建文件夹、移到回收站和刷新")
+                        .accessibilityLabel("文件操作")
+                } else {
+                    directoryActions
+                }
             }
         }
         .solidToolbarBackground()
@@ -258,6 +263,18 @@ struct NetdiskFilesView: View {
                 .frame(width: searchWidth)
         }
         .solidToolbarBackground()
+    }
+
+    /// 上传和下载在常规工具栏与最窄窗口菜单间共用当前目录、选择及启用条件。
+    @ViewBuilder private var transferActions: some View {
+        Button {
+            if let context = browser.context { onUpload(context, []) }
+        } label: { Label("上传", systemImage: "arrow.up.doc") }
+            .disabled(!canOperate).help("上传到当前目录")
+        Button {
+            if let context = browser.context { onDownload(context, browser.selectedEntries) }
+        } label: { Label("下载", systemImage: "arrow.down.to.line") }
+            .disabled(!canOperate || browser.selectedEntries.isEmpty).help("下载勾选项目")
     }
 
     /// 次要目录操作在宽窗平铺、窄窗收入菜单，共用同一目标和启用条件。
