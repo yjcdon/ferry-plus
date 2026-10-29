@@ -408,7 +408,6 @@ final class AppModel {
         self.account = account
         replaceClient(client)
         self.credential = credential
-        self.account = account
         isLoginExpired = false
     }
 
@@ -870,15 +869,6 @@ final class AppModel {
         requestNotificationAuthorization()
     }
 
-    /// 用户确认原始摘要后按准确账号和远端对象创建下载，校验错误在加入队列前报告。
-    func addNetdiskJob(entries: [RemoteEntry], account: AccountKey, downloadFolder: DownloadFolder? = nil,
-                       integrityBindings: [DownloadIntegrityBinding]) throws {
-        guard accountKey(for: account.provider) == account else { throw UploadDestinationError.otherAccount }
-        lastAddedJobID = try coordinator.addNetdiskJob(entries: entries, account: account,
-            downloadFolder: downloadFolder, integrityBindings: integrityBindings).id
-        requestNotificationAuthorization()
-    }
-
     /// 启动恢复完成前和移除期间，任务不接受操作。
     func canOperate(on job: Job) -> Bool {
         coordinator.isStarted && coordinator.restorationProblem == nil && !coordinator.removingJobs.contains(job.id)
@@ -897,16 +887,6 @@ final class AppModel {
         jobs.filter { $0.allows(action) && canOperate(on: $0) }
     }
 
-    /// 其中下载中且未暂停、可以暂停的任务。
-    func pausableJobs(in jobs: [Job]) -> [Job] {
-        self.jobs(in: jobs, allowing: .pause)
-    }
-
-    /// 其中已暂停、可以继续的任务。
-    func resumableJobs(in jobs: [Job]) -> [Job] {
-        self.jobs(in: jobs, allowing: .resume)
-    }
-
     /// 调用方先用 `jobs(in:allowing:)` 筛选任务。
     func perform(_ action: JobAction, on jobs: [Job]) {
         switch action {
@@ -915,14 +895,6 @@ final class AppModel {
         case .retry: jobs.forEach(retry)
         case .reveal: NSWorkspace.shared.activateFileViewerSelecting(jobs.flatMap(\.revealURLs))
         }
-    }
-
-    func pauseAll(_ jobs: [Job]) {
-        pausableJobs(in: jobs).forEach(pause)
-    }
-
-    func resumeAll(_ jobs: [Job]) {
-        resumableJobs(in: jobs).forEach(resume)
     }
 
     func retry(_ job: Job) {

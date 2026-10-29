@@ -263,11 +263,12 @@ final class DirectoryBrowserState {
             guard requestID == id, currentDirectory == directory, session == identity else { return }
             let selected = Set((previous?.selectedEntries ?? []).map(\.reference))
             tree = next
-            for node in allNodes(next.root) where node.entry.map({ selected.contains($0.reference) }) == true {
+            let nodes = allNodes(next.root)
+            for node in nodes where node.entry.map({ selected.contains($0.reference) }) == true {
                 next.setSelected(node, true)
             }
             if selectsFocusedEntry, let focus = focusedReference,
-               let node = allNodes(next.root).first(where: { $0.entry?.reference == focus }) {
+               let node = nodes.first(where: { $0.entry?.reference == focus }) {
                 next.setSelected(node, true)
             }
             pruneInvisibleSelection(); saveLocation()
