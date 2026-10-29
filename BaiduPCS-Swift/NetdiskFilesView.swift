@@ -158,11 +158,11 @@ struct NetdiskFilesView: View {
                             HStack(spacing: 8) {
                                 Image(systemName: target.entry.isDirectory ? "folder" : "doc")
                                     .foregroundStyle(target.entry.isDirectory ? Color.accentColor : Color.secondary)
-                                Text(target.entry.name).lineLimit(1).truncationMode(.middle)
+                                Text(target.entry.name).lineLimit(1).truncationMode(.middle).help(target.entry.name)
                             }.frame(maxWidth: .infinity, alignment: .leading)
                         }
                     }.padding()
-                }.frame(minHeight: 60, idealHeight: min(CGFloat(request.targets.count) * 28 + 32, 180), maxHeight: 180)
+                }.frame(height: max(80, min(CGFloat(request.targets.count) * 26 + 32, 320)))
                 Divider()
                 HStack {
                     Spacer()
@@ -176,9 +176,19 @@ struct NetdiskFilesView: View {
                         deletion = request
                     }.keyboardShortcut(.defaultAction)
                 }.padding()
-            }.frame(minWidth: 600, idealWidth: 660)
+            }.frame(width: deletionSheetWidth(request))
                 .solidSheetSurface()
         }
+    }
+
+    /// 按最长文件名容纳删除清单，短内容保持紧凑，长名称在可用屏幕宽度内展示。
+    private func deletionSheetWidth(_ request: Deletion) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: NSFont.systemFontSize)
+        let nameWidth = request.targets.map {
+            ($0.entry.name as NSString).size(withAttributes: [.font: font]).width
+        }.max() ?? 0
+        let availableWidth = (NSApp.keyWindow?.screen ?? NSScreen.main)?.visibleFrame.width ?? 900
+        return min(max(320, ceil(nameWidth) + 64), min(720, availableWidth * 0.8))
     }
 
     private var navigation: some View {
