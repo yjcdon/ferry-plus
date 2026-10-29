@@ -37,6 +37,7 @@ struct NetdiskOutlineView: NSViewRepresentable {
         table.indentationPerLevel = 18
         table.autosaveTableColumns = false
         table.autoresizesOutlineColumn = false
+        table.headerView = FileColumnHeader()
         for (id, title, width, minimum) in [("name", "名称", 320.0, 180.0),
                                           ("modified", "修改日期", 200.0, 100.0), ("size", "大小", 90.0, 60.0)] {
             let column = NSTableColumn(identifier: .init(id))
@@ -415,6 +416,12 @@ struct NetdiskOutlineView: NSViewRepresentable {
             guard input.allowsUpload, !urls.isEmpty else { return false }
             return input.onUpload((item as? FileNode<RemoteEntry>)?.entry, urls)
         }
+    }
+}
+/// 将表头鼠标事件交给 AppKit 原生的排序与列宽跟踪。
+private final class FileColumnHeader: NSTableHeaderView {
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
     }
 }
 
