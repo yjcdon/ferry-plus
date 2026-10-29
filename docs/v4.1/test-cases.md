@@ -1,6 +1,6 @@
 # Ferry Plus 4.1 测试用例清单
 
-日期：2026-10-29。状态：全部待执行。依据：[产品方案](product-proposal.md)、[技术方案](architecture.md)、[任务清单](tasks.md)。
+日期：2026-10-29。状态：集成验收进行中，逐项结果见[验收执行记录](test-execution.md)。依据：[产品方案](product-proposal.md)、[技术方案](architecture.md)、[任务清单](tasks.md)。
 
 ## 1. 环境、样本与证据
 
