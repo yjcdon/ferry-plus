@@ -1,6 +1,6 @@
 # Ferry Plus 4.1 产品方案：整体 macOS 交互优化
 
-状态：方案阶段。日期：2026-10-29。发布基线：[Ferry Plus 4.0](https://github.com/yjcdon/ferry-plus/releases/tag/v4.0)。
+状态：实施与验收中。日期：2026-10-29。发布基线：[Ferry Plus 4.0](https://github.com/yjcdon/ferry-plus/releases/tag/v4.0)。实际进度见[实施记录](implementation.md)。
 
 ## 1. 目标与继承关系
 
@@ -221,4 +221,4 @@ HIG 约束的是交互效果。代码组件的拆分依据职责与复用确定�
 - 系统树形表格采用原型验证后迁移，重点核对分享文件树和异步展开的调用关系。
 - 较浅的网盘范围高亮保留用户既有选择，视觉强度在实际原型中验证。
 - “正在完成”作为用户状态，真实任务阶段仍决定成功与失败，内容检查继续运行。
-- 当前交付为方案文档。实现按[技术方案](architecture.md)、[任务清单](tasks.md)和[测试用例](test-cases.md)推进，文档审查见 [Review](review.md)。
+- 实现按[技术方案](architecture.md)、[任务清单](tasks.md)和[测试用例](test-cases.md)推进，文档审查见 [Review](review.md)，实际结果见[验收执行记录](test-execution.md)。

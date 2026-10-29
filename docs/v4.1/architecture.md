@@ -124,7 +124,7 @@
 
 上传下载共用行布局，保留 TransferTaskID 的方向与 UUID 联合身份。动态高度稳定后，通过实际选择、滚动、裁剪验证决定清理 rowLayoutID 重建补丁。上传详情 sheet 迁入右侧详情；多选展示数量和共同动作。下载双击 Finder 等既有行为继续保留。
 
-历史手动摘要 UI 清理先迁移数据流程：移除下载任务前，将现有 removalIntegrityManifest 结果保存到 App Support 专用归档目录，按任务 ID 原子写入，读回比对后传入现有 exportedManifest 分支。归档文件使用现有 IntegrityManifest 格式，路径由存储层管理。精确绑定对象的已验证记录继续进入 integrityStore。
+历史手动摘要 UI 清理先迁移数据流程：JobCoordinator.remove 默认 preserve 分支在任务停止后取得最终 removalIntegrityManifest，保存到任务存储同级 IntegrityManifests 目录，按任务 ID 原子写入、读回比对，再复核当前依据后进入移除。界面直接调用现有移除接口。归档文件使用现有 IntegrityManifest 格式，路径由存储层管理。精确绑定对象的已验证记录继续进入 integrityStore。
 
 IntegrityManifest 仅保存相对路径、大小、算法和摘要，属于比对依据。verified／pending／mismatch 状态在存续任务中保持原义；已验证结论只由现有精确对象归档规则生成。保存失败保留任务和文件，提供简短重试；并发变化由移除前的现有比对校验。重试沿用稳定任务标识。升级和降级保留归档目录。迁移完成后清理手动校验 sheet、导出选择器和专用包装；维护时可读取归档。
 
