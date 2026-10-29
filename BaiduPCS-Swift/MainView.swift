@@ -422,7 +422,7 @@ struct MainView: View {
         if #available(macOS 26.0, *) { ToolbarSpacer(.fixed, placement: .primaryAction) }
         ToolbarItem(placement: .primaryAction) {
             TaskSearchField(text: $searchText, focusRequest: searchFocusRequest)
-                .frame(width: min(240, max(140, (workspaceWidth - 480) / 2)))
+                .frame(width: min(240, max(TaskSearchField.minimumWidth, (workspaceWidth - 480) / 2)))
         }.solidToolbarBackground()
     }
 
@@ -747,6 +747,7 @@ private struct StatusBar: View {
 
 /// 原生搜索框直接回写当前窗口状态，工具栏或提示栏更新后仍保持同一条输入链路。
 struct TaskSearchField: NSViewRepresentable {
+    static let minimumWidth: CGFloat = 160
     @Binding var text: String
     let focusRequest: Int
     var placeholder = "搜索任务"
@@ -775,9 +776,9 @@ struct TaskSearchField: NSViewRepresentable {
         }
     }
 
-    /// 搜索框使用稳定的工具栏尺寸，窗口缩放不改变相邻项目的位置约束。
+    /// 最小宽度容纳原生搜索图标、文本及清除按钮，窗口调整保持原生字号。
     func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSSearchField, context: Context) -> CGSize? {
-        CGSize(width: proposal.width ?? 104, height: nsView.intrinsicContentSize.height)
+        CGSize(width: max(Self.minimumWidth, proposal.width ?? Self.minimumWidth), height: nsView.intrinsicContentSize.height)
     }
 
     static func dismantleNSView(_ field: NSSearchField, coordinator: Coordinator) {

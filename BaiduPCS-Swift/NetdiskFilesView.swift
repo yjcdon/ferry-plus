@@ -73,7 +73,7 @@ struct NetdiskFilesView: View {
         !isBusy && pendingNewFolder == nil && pendingRename == nil && pendingDeletion == nil &&
         model.sheet == nil && browser.context.map(isCurrent) == true
     }
-    private var searchWidth: CGFloat { min(220, max(110, contentWidth - 560)) }
+    private var searchWidth: CGFloat { min(220, max(TaskSearchField.minimumWidth, contentWidth - 560)) }
     private var usesCompactToolbar: Bool { contentWidth < 700 }
 
     var body: some View {
