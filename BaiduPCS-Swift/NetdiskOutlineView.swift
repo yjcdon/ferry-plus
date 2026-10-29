@@ -149,7 +149,8 @@ struct NetdiskOutlineView: NSViewRepresentable {
                 _ = input.browser.sort
                 _ = input.browser.descending
                 _ = input.browser.focusedReference
-                roots = input.browser.rootNodes
+                let rootNodes = input.browser.rootNodes
+                roots = rootNodes
                 @MainActor func collect(_ node: FileNode<RemoteEntry>) {
                     _ = node.isExpanded
                     _ = node.isLoading
@@ -164,7 +165,7 @@ struct NetdiskOutlineView: NSViewRepresentable {
                         }
                     }
                 }
-                for node in input.browser.rootNodes { collect(node) }
+                for node in rootNodes { collect(node) }
             } onChange: { [weak self] in
                 Task { @MainActor [weak self] in
                     guard let self, self.observation == token else { return }
@@ -197,11 +198,11 @@ struct NetdiskOutlineView: NSViewRepresentable {
                    (table.item(atRow: $0) as? FileNode<RemoteEntry>)?.entry?.reference == reference
                 })
             }
-            let fallbackRow = input.browser.focusedRowIndex.flatMap { previous in
+            let row = matchingRow ?? input.browser.focusedRowIndex.flatMap { previous in
                 (0..<table.numberOfRows).filter { table.item(atRow: $0) is FileNode<RemoteEntry> }
                     .min { abs($0 - previous) < abs($1 - previous) }
             }
-            if let row = matchingRow ?? fallbackRow,
+            if let row,
                let entry = (table.item(atRow: row) as? FileNode<RemoteEntry>)?.entry {
                 table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
                 input.browser.rememberFocus(entry.reference, row: row)
