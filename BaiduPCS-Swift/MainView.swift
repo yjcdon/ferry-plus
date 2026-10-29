@@ -441,6 +441,7 @@ struct MainView: View {
     private var addLinkAction: some View {
         Button { model.presentAddLink() } label: { Label("添加分享链接", systemImage: "link") }
             .help("添加分享链接")
+            .accessibilityLabel("添加分享链接")
     }
 
     /// 菜单与平铺工具栏共用当前列表能力和详情绑定，保持操作范围一致。
@@ -672,6 +673,7 @@ private struct TransferPauseResumeButton: View {
         }
         .disabled(scope.isBusy || targets.isEmpty)
         .help("\(action == .pause ? "暂停" : "继续")当前列表的 \(targets.count) 个传输任务")
+        .accessibilityLabel(action == .pause ? "暂停当前列表" : "继续当前列表")
     }
 }
 
