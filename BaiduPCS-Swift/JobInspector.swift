@@ -15,7 +15,7 @@ struct JobInspector: View {
     var body: some View {
         switch jobs.count {
         case 0:
-            ContentUnavailableView("未选择任务", systemImage: "sidebar.trailing")
+            ContentUnavailableView("选择任务查看详情", systemImage: "sidebar.trailing")
         case 1:
             JobDetail(job: jobs[0], onAction: onAction, onRemove: { onRemove(jobs, $0) })
                 // 换任务时重新滚动到顶部。

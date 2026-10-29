@@ -655,7 +655,7 @@ private struct TransferInspector: View {
         scope.selectedItems.compactMap { if case .download(let job) = $0 { return job }; return nil }
     }
     var body: some View {
-        if scope.selectedItems.isEmpty { ContentUnavailableView("未选择任务", systemImage: "sidebar.trailing") }
+        if scope.selectedItems.isEmpty { ContentUnavailableView("选择任务查看详情", systemImage: "sidebar.trailing") }
         else if downloads.count == scope.selectedItems.count {
             JobInspector(jobs: downloads, onAction: { jobs, action in
                 scope.onAction(TransferAction(action), jobs.map { .init(direction: .download, id: $0.id) })
