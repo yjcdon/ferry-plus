@@ -400,12 +400,14 @@ struct MainView: View {
                 return true
             }
             .edgeBar(.top) {
-                Picker("传输方向", selection: $direction) {
-                    ForEach(TransferDirectionFilter.allCases) { Text($0.title).tag($0) }
+                VStack(spacing: 0) {
+                    Picker("传输方向", selection: $direction) {
+                        ForEach(TransferDirectionFilter.allCases) { Text($0.title).tag($0) }
+                    }
+                    .pickerStyle(.segmented).labelsHidden()
+                    .frame(width: 280).frame(maxWidth: .infinity).padding(.vertical, 8)
+                    Banners()
                 }
-                .pickerStyle(.segmented).labelsHidden()
-                .frame(width: 280).frame(maxWidth: .infinity).padding(.vertical, 8)
-                Banners()
             }
             .edgeBar(.bottom) { StatusBar(direction: direction, items: items) }
             .focusedSceneValue(\.focusTaskSearch, { searchFocusRequest += 1 })

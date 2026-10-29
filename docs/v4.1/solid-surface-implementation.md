@@ -8,7 +8,7 @@
 - `SolidWindowConfigurator` 在视图连接窗口时设置 `NSWindow.isOpaque`、`backgroundColor`、`titlebarAppearsTransparent` 和标题栏分隔线。属性变化时才更新，保持原生窗口操作。
 - `solidToolbarBackground()` 在 macOS 26 及以上调用公开的 `ToolbarContent.sharedBackgroundVisibility(.hidden)`，将自动共享背景交由实色工具栏承载；macOS 14 使用原有标准工具栏项目。
 - `solidSheetSurface()` 使用内容背景和 `presentationBackground`，接入上传、下载和分享确认面板；其他业务面板沿用同一方法接入。
-- 共享 `edgeBar` 的全部调用方（传输列表、任务详情、侧栏）改用 `safeAreaInset`、实色填充和轻分隔线。登录反馈栏与提示详情也使用实色。
+- 共享 `edgeBar` 的全部调用方（传输列表、任务详情、侧栏）改用 `safeAreaInset`、实色填充和轻分隔线。登录反馈栏与提示详情也使用实色。4.1.2 将传输方向页签与 `Banners` 放入同一个纵向布局，顶部区域按两者合计高度预留空间，清理记录后的提示排列在页签下方。
 
 窗口配置仅在 NSView 更新及连接窗口时执行，使用公开属性。实现采用直接视图引用，无观察器、计时器或持续调度任务。
 
