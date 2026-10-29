@@ -371,23 +371,23 @@ struct NetdiskFilesView: View {
         pendingRename = .init(context: context, entry: entry, parent: path.dropLast().last?.reference ?? context.reference)
     }
 
-    /// 会话一致时提交一次，完成后刷新当前树；查询或网络失败也允许用户刷新核对。
+    /// 会话一致时提交一次，成功按回执定位新名称；失败刷新当前目录供用户核对。
     private func rename(_ request: RenameRequest) async {
-        defer {
-            renaming = nil
-            if isCurrent(request.target.context) { browser.refresh() }
-        }
+        defer { renaming = nil }
         do {
             guard isCurrent(request.target.context) else { throw UploadDestinationError.otherAccount }
             let disk = try model.netdisk(for: request.target.context.provider)
-            _ = try await disk.rename(entry: request.target.entry, parent: request.target.parent,
-                                      newName: request.name, account: request.target.context.account)
+            let renamed = try await disk.rename(entry: request.target.entry, parent: request.target.parent,
+                                                newName: request.name, account: request.target.context.account)
             guard isCurrent(request.target.context) else { throw UploadDestinationError.otherAccount }
             pendingRename = nil
+            if browser.currentDirectory == request.target.context.reference { browser.revealCreated(renamed) }
+            else { browser.refresh() }
             operationFeedback = .init(message: "已重命名为【\(request.name)】。", isError: false)
         } catch {
             if !Task.isCancelled {
                 renameError = isCurrent(request.target.context) ? error.localizedDescription : "请重新选择账号和项目。"
+                if isCurrent(request.target.context) { browser.refresh() }
             }
         }
     }
