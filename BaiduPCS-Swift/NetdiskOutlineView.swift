@@ -64,8 +64,8 @@ struct NetdiskOutlineView: NSViewRepresentable {
         }
         table.onMenu = { [weak coordinator = context.coordinator] row in coordinator?.menu(for: row) }
         scroll.documentView = table
-        scroll.onViewportWidthChange = { [weak coordinator = context.coordinator] width in
-            coordinator?.resizeViewport(to: width)
+        scroll.onColumnLayout = { [weak coordinator = context.coordinator] width in
+            coordinator?.layoutColumns(in: width)
         }
         context.coordinator.table = table
         context.coordinator.refresh()
@@ -78,6 +78,7 @@ struct NetdiskOutlineView: NSViewRepresentable {
 
     static func dismantleNSView(_ view: NSScrollView, coordinator: Coordinator) {
         coordinator.stop()
+        (view as? FileListScrollView)?.onColumnLayout = nil
         (view.documentView as? NSOutlineView)?.delegate = nil
         (view.documentView as? NSOutlineView)?.dataSource = nil
     }
@@ -93,7 +94,6 @@ struct NetdiskOutlineView: NSViewRepresentable {
         private var isUpdating = false
         private var stopped = false
         private var menuEntry: RemoteEntry?
-        private var viewportWidth: CGFloat?
         private var isAdjustingColumns = false
         private var widthAnchor: ColumnWidthAnchor?
         private struct ColumnWidthAnchor {
@@ -126,9 +126,8 @@ struct NetdiskOutlineView: NSViewRepresentable {
         }
 
         /// 窗口宽度始终相对用户拖动锚点计算，临时窄布局的最小宽度保持局部。
-        func resizeViewport(to width: CGFloat) {
+        func layoutColumns(in width: CGFloat) {
             guard !isAdjustingColumns, width > 0, let table, let name = table.tableColumns.first else { return }
-            viewportWidth = width
             let proposed = widthAnchor.map { $0.name + width - $0.viewport } ??
                 (width - table.tableColumns.dropFirst().reduce(0) { $0 + $1.width } - table.intercellSpacing.width * 3)
             isAdjustingColumns = true
@@ -337,13 +336,15 @@ struct NetdiskOutlineView: NSViewRepresentable {
 
         func outlineViewColumnDidResize(_ notification: Notification) {
             guard !isAdjustingColumns, let table, let name = table.tableColumns.first,
-                  let viewportWidth, viewportWidth > 0 else { return }
+                  let scroll = table.enclosingScrollView as? FileListScrollView else { return }
+            let viewportWidth = scroll.contentView.bounds.width
+            guard viewportWidth > 0 else { return }
             widthAnchor = .init(name: name.width, viewport: viewportWidth)
             for column in table.tableColumns {
                 AppPreferences.defaults.set(column.width, forKey: "workspace.columns.v1." + column.identifier.rawValue)
             }
             AppPreferences.defaults.set(viewportWidth, forKey: "workspace.columns.v1.viewport")
-            table.sizeToFit()
+            scroll.requestColumnLayout()
         }
 
         func outlineView(_ outlineView: NSOutlineView, shouldSelectItem item: Any) -> Bool {
@@ -435,17 +436,32 @@ private final class RetryButton: NSButton {
     weak var node: FileNode<RemoteEntry>?
 }
 
-/// 仅视口宽度变化触发名称列调整，列拖动与滚动保持原生行为。
+/// 视口及用户列宽变化交给正常布局阶段合并，表格代理只记录用户锚点。
 private final class FileListScrollView: NSScrollView {
-    var onViewportWidthChange: ((CGFloat) -> Void)?
+    var onColumnLayout: ((CGFloat) -> Void)?
     private var viewportWidth: CGFloat = 0
+    private var columnLayoutPending = false
 
     override func tile() {
         super.tile()
         let width = contentView.bounds.width
         if width > 0, width != viewportWidth {
             viewportWidth = width
-            onViewportWidthChange?(width)
+            requestColumnLayout()
+        }
+    }
+
+    /// 标记下一次列布局，由 AppKit 布局周期读取最新视口宽度。
+    func requestColumnLayout() {
+        columnLayoutPending = true
+        needsLayout = true
+    }
+
+    override func layout() {
+        super.layout()
+        if columnLayoutPending, contentView.bounds.width > 0 {
+            columnLayoutPending = false
+            onColumnLayout?(contentView.bounds.width)
         }
     }
 }
