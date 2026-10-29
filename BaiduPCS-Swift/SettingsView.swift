@@ -104,6 +104,7 @@ private struct TransferSettingsView: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
+            .accessibilityElement(children: .contain)
 
             Section {
                 Toggle("检测剪贴板中的分享链接", isOn: $model.settings.detectsCopiedLinks)
