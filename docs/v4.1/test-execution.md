@@ -8,6 +8,7 @@
 - 实际运行 .build/Ferry Plus.app；/Applications 内正式 App 仍为 4.0。复用两家既有登录及固定签名授权。
 - 两家独立远端目录：FerryPlus-V41-20261029-CUA；本地样本位于 .build/v41-evidence/source/sample。
 - 原始样本：empty.txt 0 字节、small.txt 3400 字节、nested/parts.bin 12582929 字节，包含两层目录。生成内容仅用于本轮验收。
+- 两家回读位置：`.build/v41-evidence/downloads/baidu`、`.build/v41-evidence/downloads/quark/sample`。独立读取原始样本与两家实际下载文件，逐项重算大小及 SHA-256，6 项均一致；完整摘要见 [Core 审查记录](core-final-review.md#双网盘回环证据)。
 
 ## 已执行
 
@@ -24,7 +25,7 @@
 | C32 | 下载确认只展示 sample 和下载地址，选择独立回读目录并提交 | 夸克实际 App 通过 | 百度及多项确认 |
 | C34 | 夸克新建输入 bad/name，按 Return 出现红框和“包含非法字符”；改合法名后创建成功 | 实际截图及远端列表通过 | 两家重命名与其余规则 |
 | C42 | 主窗口、文件页、确认面板、传输行及详情使用实色 | 当前浅色实际截图通过 | 深色／对比度／设置和系统区域完整复核 |
-| C48 | 夸克目录上传后从 App 下载到独立目录 | 三个文件路径、大小和 SHA-256 一致；.build/v41-evidence/quark-roundtrip.json | 百度链路、同名策略及最终样本清理 |
+| C48 | 百度、夸克分别完成 sample 目录上传，并从实际 App 下载到各自独立目录 | 两家各 3 个文件的相对路径、大小及独立重算 SHA-256 全部一致；`.build/v41-evidence/baidu-roundtrip.json`、`quark-roundtrip.json` 与实际文件核对一致 | 4.1 同名策略实际回归及最终样本清理 |
 | C50 | 核心构建、既有套件、历史依据归档和分页读取回归 | 314 个测试、25 个套件通过；/tmp/ferry-v41-tests.log | 最终整合构建、Review 和调用清理 |
 
 上述各组仅已验证子场景通过，整组完成以 test-cases.md 的全部适用子场景为准。
