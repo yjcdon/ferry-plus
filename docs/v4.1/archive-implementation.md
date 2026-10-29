@@ -24,3 +24,15 @@
 `bash Scripts/test-packages.sh --filter 'JobCoordinatorTests/remove'` 通过原有 3 个移除回归测试，覆盖原件保留、用户同名文件保留及取消期间刚完成文件的实际路径。
 
 真实 App 的历史入口清理与交互验收由主窗口迁移后执行。
+
+## C30—C31 补充验证
+
+在既有 JobCoordinatorTests 中补充三个测试，使用现有存储、真实本地摘要校正 API 和 RemovalGateSource 门控，测试采用明确事件条件同步。
+
+- 百度、夸克精确对象的 verified 下载移除后，原账号、远端引用、版本、摘要及验证时间进入 IntegrityStore；原件保留，原版本可查询，其他版本查询为空。
+- 取得旧清单后通过 verifyCompletedFile 修正用户摘要；使用旧清单移除时保留当前任务和原件，改用自动归档重试后保存最新依据并完成移除。
+- 引擎到达明确取消收尾门控后取消移除，释放门控，确认暂停任务和原件仍在；再次移除成功，历史依据保留。
+
+`/tmp/ferry-v41-archive-final-tests.log` 记录本轮 3 个测试、4 个参数场景通过。原子磁盘写入与读回之间的变化交错仍为待验证；同步归档方法当前没有可注入挂起点。本轮仅补充测试和文档。
+
+随后合并运行归档与原有移除回归，8 个测试通过，日志 `/tmp/ferry-v41-removal-regression-final.log`。

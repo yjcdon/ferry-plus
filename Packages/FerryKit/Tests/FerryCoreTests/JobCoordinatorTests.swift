@@ -1180,6 +1180,155 @@ import os
         await coordinator.shutdown()
     }
 
+    /// 账号与精确引用完整的已验证下载保存为独立记录，移除后仍可准确查询原对象。
+    @Test(arguments: [Provider.baidu, .quark])
+    func removalArchivesVerifiedExactObject(_ provider: Provider) async throws {
+        let fixture = Fixture()
+        let contents = Data("verified original".utf8)
+        let localURL = fixture.downloads.appendingPathComponent("verified.bin")
+        try contents.write(to: localURL)
+        let reference: RemoteReference = provider == .baidu ? .baidu(path: "/verified.bin", fsID: 42) : .quark(fid: "verified-file")
+        let account = AccountKey(provider: provider, accountID: "original-account")
+        let entry = RemoteEntry(reference: reference, name: "verified.bin", isDirectory: false, size: Int64(contents.count))
+        let digest = SHA256.hash(data: contents).map { String(format: "%02x", $0) }.joined()
+        let expectation = try IntegrityExpectation(algorithm: .sha256, digest: digest, origin: .userProvided,
+                                                   size: entry.size, reference: reference, remoteVersion: "original-version")
+        let verifiedAt = Date(timeIntervalSince1970: 1_700_000_000)
+        var file = JobFile(remotePath: reference.identifier, relativePath: entry.name, size: entry.size, localURL: localURL)
+        file.remoteReference = reference
+        file.integrityExpectation = expectation
+        file.integrityStatus = .verified
+        file.integrityVerifiedAt = verifiedAt
+        var job = Job(netdiskEntries: [entry])
+        job.accountKey = account
+        job.files = [file]
+        job.phase = .completed
+        try fixture.store.save([job])
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+        #expect(try coordinator.removalIntegrityManifest(job.id) == nil)
+
+        try await coordinator.remove(job.id)
+
+        let integrityStore = IntegrityStore(directory: fixture.directory.appendingPathComponent("Integrity"))
+        let inventory = try await integrityStore.inventory()
+        #expect(inventory.failures.isEmpty)
+        #expect(inventory.recordIDs.count == 1)
+        let record = try await integrityStore.load(id: #require(inventory.recordIDs.first))
+        #expect(record.account == account)
+        #expect(record.reference == reference)
+        #expect(record.remoteVersion == "original-version")
+        #expect(record.expectation == expectation)
+        #expect(record.actualDigest == digest)
+        #expect(record.status == .verified)
+        #expect(record.verifiedAt == verifiedAt)
+        #expect(try await integrityStore.matching(account: account, reference: reference, remoteVersion: "original-version").map(\.id) == [record.id])
+        #expect(try await integrityStore.matching(account: account, reference: reference, remoteVersion: "different-version").isEmpty)
+        #expect(coordinator.job(job.id) == nil)
+        #expect(try fixture.store.load().isEmpty)
+        #expect(try Data(contentsOf: localURL) == contents)
+        #expect(!FileManager.default.fileExists(atPath: fixture.directory.appendingPathComponent("IntegrityManifests").path))
+        await coordinator.shutdown()
+    }
+
+    /// 已保存清单与用户随后确认的新依据发生变化时保留任务，重新归档当前依据后完成移除。
+    @Test func removalRejectsStaleManifestAndPreservesCorrectedBasisForRetry() async throws {
+        let fixture = Fixture()
+        let contents = Data("corrected original".utf8)
+        let localURL = fixture.downloads.appendingPathComponent("sample.bin")
+        try contents.write(to: localURL)
+        let entry = RemoteEntry(fsID: 1, name: "sample.bin", path: "/sample.bin", isDirectory: false, size: Int64(contents.count))
+        var file = JobFile(remotePath: entry.path, relativePath: entry.name, size: entry.size, localURL: localURL)
+        file.integrityExpectation = try IntegrityExpectation(algorithm: .sha256, digest: String(repeating: "a", count: 64),
+                                                             origin: .userProvided, size: entry.size)
+        file.integrityStatus = .mismatch
+        var job = Job(netdiskEntries: [entry])
+        job.files = [file]
+        job.phase = .failed(.download)
+        try fixture.store.save([job])
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+        let originalManifest = try coordinator.removalIntegrityManifest(job.id)
+        let previousManifest = try #require(originalManifest)
+        let actualDigest = SHA256.hash(data: contents).map { String(format: "%02x", $0) }.joined()
+        try await coordinator.verifyCompletedFile(jobID: job.id, fileID: file.id, algorithm: .sha256,
+                                                  digest: actualDigest, replacingUserProvided: true)
+        #expect(coordinator.job(job.id)?.files.first?.integrityExpectation?.digest == actualDigest)
+        do {
+            try await coordinator.remove(job.id, trashingFiles: true, integrityDisposition: .exportedManifest(previousManifest))
+            Issue.record("A stale manifest must preserve the updated task and local file.")
+        } catch {
+            #expect(error is UploadRecordError)
+            #expect(coordinator.job(job.id)?.files.first?.integrityExpectation?.digest == actualDigest)
+            #expect(try fixture.store.load().map(\.id) == [job.id])
+            #expect(try Data(contentsOf: localURL) == contents)
+            #expect(!FileManager.default.fileExists(atPath: fixture.trash.path))
+        }
+
+        try await coordinator.remove(job.id)
+
+        let archiveURL = fixture.directory.appendingPathComponent("IntegrityManifests").appendingPathComponent(job.id.uuidString).appendingPathExtension("json")
+        let saved = try IntegrityManifest.decode(Data(contentsOf: archiveURL))
+        #expect(saved.entries.first?.digest == actualDigest)
+        #expect(saved.entries.first?.digest != previousManifest.entries.first?.digest)
+        #expect(coordinator.job(job.id) == nil)
+        #expect(try Data(contentsOf: localURL) == contents)
+        await coordinator.shutdown()
+    }
+
+    /// 在引擎明确进入取消收尾时取消移除，释放门控后保留任务和原件，随后可再次移除。
+    @Test func cancelledRemovalKeepsTaskAndHistoricalFileForRetry() async throws {
+        let contents = Data("completed original".utf8)
+        let fixture = Fixture(disk: ["/a-blocked.bin": Data("pending".utf8)])
+        let localURL = fixture.downloads.appendingPathComponent("done.bin")
+        try contents.write(to: localURL)
+        let pending = RemoteEntry(fsID: 1, name: "a-blocked.bin", path: "/a-blocked.bin", isDirectory: false, size: 7)
+        let completed = RemoteEntry(fsID: 2, name: "done.bin", path: "/done.bin", isDirectory: false, size: Int64(contents.count))
+        var historical = JobFile(remotePath: completed.path, relativePath: completed.name, size: completed.size, localURL: localURL)
+        historical.integrityExpectation = try IntegrityExpectation(algorithm: .sha256,
+            digest: SHA256.hash(data: contents).map { String(format: "%02x", $0) }.joined(),
+            origin: .userProvided, size: completed.size)
+        historical.integrityStatus = .verified
+        historical.integrityVerifiedAt = .now
+        var job = Job(netdiskEntries: [pending, completed])
+        job.accountKey = Fixture.account
+        job.files = [JobFile(remotePath: pending.path, relativePath: pending.name, size: pending.size), historical]
+        job.phase = .downloading
+        try fixture.store.save([job])
+        let source = RemovalGateSource(base: FileServerSource(server: fixture.server))
+        defer { source.open() }
+        let coordinator = JobCoordinator(engine: fixture.makeEngine(source: source), store: fixture.store,
+            settings: FerrySettings(cleanupAfterDownload: false), downloadFolder: DownloadFolder(url: fixture.downloads),
+            trashItem: Fixture.trashItem(into: fixture.trash), baseConfiguration: Fixture.configuration)
+        coordinator.netdisks[.baidu] = fixture.netdisk
+        await coordinator.start()
+        try await waitUntil("source entered the existing removal gate") { source.hasEntered }
+        let removal = Task { try await coordinator.remove(job.id, trashingFiles: true) }
+        try await waitUntil("engine cancellation reached the removal gate") { source.wasCancelled }
+        removal.cancel()
+        source.open()
+        do {
+            _ = try await removal.value
+            Issue.record("Cancelled removal must preserve the task and completed file.")
+        } catch {
+            #expect(error is CancellationError)
+            #expect(coordinator.job(job.id)?.isPaused == true)
+            #expect(try fixture.store.load().map(\.id) == [job.id])
+            #expect(try Data(contentsOf: localURL) == contents)
+            #expect(!FileManager.default.fileExists(atPath: fixture.trash.path))
+        }
+        #expect(coordinator.removingJobs.isEmpty)
+
+        try await coordinator.remove(job.id)
+
+        #expect(coordinator.job(job.id) == nil)
+        #expect(try fixture.store.load().isEmpty)
+        #expect(try Data(contentsOf: localURL) == contents)
+        let archiveURL = fixture.directory.appendingPathComponent("IntegrityManifests").appendingPathComponent(job.id.uuidString).appendingPathExtension("json")
+        #expect(try IntegrityManifest.decode(Data(contentsOf: archiveURL)).entries.map(\.relativePath) == [completed.name])
+        await coordinator.shutdown()
+    }
+
     @Test func removeCancelsDownloadsAndKeepsCompletedFiles() async throws {
         let fixture = Fixture(share: ["done.bin": Data(), "big.bin": randomData(400_000)])
         let coordinator = fixture.makeCoordinator(settings: FerrySettings(cleanupAfterDownload: true, maxConcurrentFiles: 4))
