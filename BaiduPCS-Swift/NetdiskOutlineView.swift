@@ -381,7 +381,8 @@ struct NetdiskOutlineView: NSViewRepresentable {
         }
 
         func menu(for row: Int) -> NSMenu? {
-            guard let table, let entry = (table.item(atRow: row) as? FileNode<RemoteEntry>)?.entry else { return nil }
+            guard input.allowsUpload, let table,
+                  let entry = (table.item(atRow: row) as? FileNode<RemoteEntry>)?.entry else { return nil }
             menuEntry = entry
             let menu = NSMenu()
             for (title, action) in [("下载", #selector(download)), ("上传到此文件夹", #selector(upload)),
