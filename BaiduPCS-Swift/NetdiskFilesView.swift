@@ -428,6 +428,7 @@ struct NetdiskFilesView: View {
             let disk = try model.netdisk(for: request.target.context.provider)
             let renamed = try await disk.rename(entry: request.target.entry, parent: request.target.parent,
                                                 newName: request.name, account: request.target.context.account)
+            try Task.checkCancellation()
             guard isCurrent(request.target.context) else { throw UploadDestinationError.otherAccount }
             pendingRename = nil
             if browser.currentDirectory == request.target.context.reference {
@@ -450,6 +451,7 @@ struct NetdiskFilesView: View {
             guard isCurrent(request.context) else { throw UploadDestinationError.otherAccount }
             let entry = try await model.createUploadDirectory(name: request.name, parent: request.context.reference,
                                                              account: request.context.account)
+            try Task.checkCancellation()
             guard isCurrent(request.context) else { throw UploadDestinationError.otherAccount }
             if browser.currentDirectory == request.context.reference { browser.reveal(entry, select: true) }
             pendingNewFolder = nil
