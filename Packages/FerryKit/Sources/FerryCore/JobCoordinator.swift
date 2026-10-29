@@ -78,6 +78,7 @@ public final class JobCoordinator {
 
     @ObservationIgnored private let engine: DownloadEngine
     @ObservationIgnored private let integrityStore: IntegrityStore
+    @ObservationIgnored private let integrityArchive: DownloadIntegrityArchive
     @ObservationIgnored private let store: JobStore
     @ObservationIgnored private let baseConfiguration: DownloadConfiguration
     @ObservationIgnored private let folderAccess: any DownloadFolderAccess
@@ -128,6 +129,7 @@ public final class JobCoordinator {
         self.engine = engine
         self.store = store
         self.integrityStore = integrityStore ?? IntegrityStore(directory: store.fileURL.deletingLastPathComponent().appendingPathComponent("Integrity", isDirectory: true))
+        self.integrityArchive = DownloadIntegrityArchive(directory: store.fileURL.deletingLastPathComponent().appendingPathComponent("IntegrityManifests", isDirectory: true))
         self.settings = settings
         self.downloadFolder = downloadFolder
         self.folderAccess = folderAccess
@@ -677,7 +679,7 @@ public final class JobCoordinator {
         return mapped
     }
 
-    /// 移除前需用户导出的不可独立关联依据。按任务生成一份，绝不按当前登录账号补造旧归属。
+    /// 为移除任务生成需要单独保留的历史依据，账号归属沿用任务中记录的内容。
     public func removalIntegrityManifest(_ id: UUID) throws -> IntegrityManifest? {
         guard let job = job(id) else { throw CancellationError() }
         var entries: [IntegrityManifestEntry] = []
@@ -723,15 +725,25 @@ public final class JobCoordinator {
         if case .discardUnarchivable = disposition {
             // 明确放弃只针对不能归档的依据；已知的已验证记录仍然保存。
         } else if let current = try removalIntegrityManifest(job.id) {
-            guard case .exportedManifest(let exported) = disposition else {
-                throw UploadRecordError.invalid("请先保存校验信息，或选择直接移除。")
+            let exported: IntegrityManifest
+            switch disposition {
+            case .preserve:
+                let archive = integrityArchive
+                exported = try await Task.detached {
+                    try Task.checkCancellation()
+                    return try archive.save(current, jobID: job.id)
+                }.value
+            case .exportedManifest(let manifest): exported = manifest
+            case .discardUnarchivable: preconditionFailure("主动放弃已经由外层分支处理")
             }
-            // 导出集可以包含期间已完成而可自动归档的项目，但不得漏掉或改写当前仍需保留的依据。
+            try Task.checkCancellation()
+            // 原子归档等待期间重新读取任务依据，按精确路径、大小、算法与摘要确认保存范围。
             let saved = Dictionary(uniqueKeysWithValues: exported.entries.map { (LocalPath.key($0.relativePath), $0) })
-            guard current.entries.allSatisfy({ entry in
+            let remaining = try removalIntegrityManifest(job.id)?.entries ?? []
+            guard remaining.allSatisfy({ entry in
                 guard let other = saved[LocalPath.key(entry.relativePath)] else { return false }
                 return other.size == entry.size && other.algorithm == entry.algorithm && other.digest == entry.digest
-            }) else { throw UploadRecordError.invalid("校验依据已发生变化，请重新导出清单后移除。") }
+            }) else { throw UploadRecordError.invalid("任务信息已更新，请重试移除。") }
         }
         var changed = false
         do {

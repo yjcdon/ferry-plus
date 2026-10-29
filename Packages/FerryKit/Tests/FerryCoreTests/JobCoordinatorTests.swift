@@ -1110,6 +1110,76 @@ import os
         }
     }
 
+    /// 历史摘要在移除前自动保存为参考依据，三种状态均保持本地文件且不产生精确对象验证记录。
+    @Test(arguments: [IntegrityStatus.pending, .mismatch, .verified])
+    func removalAutomaticallyArchivesHistoricalIntegrity(_ status: IntegrityStatus) async throws {
+        let fixture = Fixture()
+        let contents = Data("historical source".utf8)
+        let localURL = fixture.downloads.appendingPathComponent("sample.bin")
+        try contents.write(to: localURL)
+        let entry = RemoteEntry(fsID: 1, name: "sample.bin", path: "/sample.bin", isDirectory: false, size: Int64(contents.count))
+        var job = Job(netdiskEntries: [entry])
+        var file = JobFile(remotePath: entry.path, relativePath: entry.name, size: entry.size, localURL: localURL)
+        file.integrityExpectation = try IntegrityExpectation(algorithm: .sha256, digest: String(repeating: "a", count: 64),
+                                                             origin: .userProvided, size: entry.size)
+        file.integrityStatus = status
+        file.integrityVerifiedAt = status == .verified ? .now : nil
+        job.files = [file]
+        job.phase = status == .verified ? .completed : .failed(.download)
+        try fixture.store.save([job])
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+        #expect(coordinator.job(job.id)?.files.first?.integrityStatus == status)
+
+        try await coordinator.remove(job.id)
+
+        #expect(coordinator.job(job.id) == nil)
+        #expect(try fixture.store.load().isEmpty)
+        #expect(try Data(contentsOf: localURL) == contents)
+        let archive = fixture.directory.appendingPathComponent("IntegrityManifests").appendingPathComponent(job.id.uuidString).appendingPathExtension("json")
+        let saved = try IntegrityManifest.decode(Data(contentsOf: archive))
+        #expect(saved.entries == [try IntegrityManifestEntry(relativePath: entry.name, size: entry.size,
+                                                             algorithm: .sha256, digest: String(repeating: "a", count: 64))])
+        #expect(!FileManager.default.fileExists(atPath: fixture.directory.appendingPathComponent("Integrity").path))
+        await coordinator.shutdown()
+    }
+
+    /// 归档目录写失败时先保留任务和原件，恢复目录后可以沿用同一任务重试移除。
+    @Test func removalArchiveFailureKeepsTaskAndFilesUntilRetry() async throws {
+        let fixture = Fixture()
+        let localURL = fixture.downloads.appendingPathComponent("sample.bin")
+        try Data("original".utf8).write(to: localURL)
+        let entry = RemoteEntry(fsID: 1, name: "sample.bin", path: "/sample.bin", isDirectory: false, size: 8)
+        var job = Job(netdiskEntries: [entry])
+        var file = JobFile(remotePath: entry.path, relativePath: entry.name, size: entry.size, localURL: localURL)
+        file.integrityExpectation = try IntegrityExpectation(algorithm: .sha256, digest: String(repeating: "b", count: 64),
+                                                             origin: .userProvided, size: entry.size)
+        file.integrityStatus = .mismatch
+        job.files = [file]
+        job.phase = .failed(.download)
+        try fixture.store.save([job])
+        let archiveDirectory = fixture.directory.appendingPathComponent("IntegrityManifests")
+        try Data("blocked directory".utf8).write(to: archiveDirectory)
+        let coordinator = fixture.makeCoordinator()
+        await coordinator.start()
+        do {
+            try await coordinator.remove(job.id, trashingFiles: true)
+            Issue.record("Archive failure must preserve the task and local file.")
+        } catch {
+            #expect(coordinator.job(job.id)?.files.first?.integrityStatus == .mismatch)
+            #expect(try fixture.store.load().map(\.id) == [job.id])
+            #expect(try Data(contentsOf: localURL) == Data("original".utf8))
+            #expect(!FileManager.default.fileExists(atPath: fixture.trash.path))
+        }
+        try Fixture.trashItem(into: fixture.trash)(archiveDirectory)
+        try await coordinator.remove(job.id)
+        #expect(coordinator.job(job.id) == nil)
+        #expect(try Data(contentsOf: localURL) == Data("original".utf8))
+        let archived = archiveDirectory.appendingPathComponent(job.id.uuidString).appendingPathExtension("json")
+        #expect(try IntegrityManifest.decode(Data(contentsOf: archived)).entries.first?.relativePath == entry.name)
+        await coordinator.shutdown()
+    }
+
     @Test func removeCancelsDownloadsAndKeepsCompletedFiles() async throws {
         let fixture = Fixture(share: ["done.bin": Data(), "big.bin": randomData(400_000)])
         let coordinator = fixture.makeCoordinator(settings: FerrySettings(cleanupAfterDownload: true, maxConcurrentFiles: 4))

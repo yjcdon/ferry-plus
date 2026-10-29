@@ -437,8 +437,9 @@ public struct TransferManifestEntry: Codable, Sendable, Hashable {
     }
 }
 
-/// 移除任务不隐式丢弃已记录的摘要；导出成功和主动放弃由主窗口明确传入。
+/// 移除任务时保存历史依据；兼容已导出清单及显式放弃的旧调用入口。
 public enum DownloadIntegrityDisposition: Sendable {
+    /// 在本机内部归档历史依据，成功后移除任务。
     case preserve
     case exportedManifest(IntegrityManifest)
     case discardUnarchivable
