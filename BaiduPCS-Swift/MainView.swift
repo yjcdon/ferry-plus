@@ -240,6 +240,7 @@ struct MainView: View {
         .confirmationDialog(pendingRemoval?.title ?? "", isPresented: Binding(
             get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }
         ), presenting: pendingRemoval) { pending in
+            Button("取消", role: .cancel) { pendingRemoval = nil }
             Button(pending.removal == .trashingFiles ? "移到废纸篓" : "移除记录", role: .destructive) {
                 pendingRemoval = nil
                 remove(pending)
