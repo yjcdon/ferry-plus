@@ -82,16 +82,10 @@ private struct TransferSettingsView: View {
             }
 
             Section {
-                Stepper(value: $model.settings.maxConcurrentFiles, in: model.settings.allowedConcurrentFiles) {
-                    LabeledContent("同时下载文件数", value: "\(model.settings.maxConcurrentFiles)")
-                }
-                .accessibilityLabel("同时下载文件数")
-                .accessibilityValue(Text("\(model.settings.maxConcurrentFiles)"))
-                Stepper(value: $model.settings.maxConcurrentUploads, in: FerrySettings.concurrentUploadsRange) {
-                    LabeledContent("同时上传任务数", value: "\(model.settings.maxConcurrentUploads)")
-                }
-                .accessibilityLabel("同时上传任务数")
-                .accessibilityValue(Text("\(model.settings.maxConcurrentUploads)"))
+                SettingsCountStepper(title: "同时下载文件数", value: $model.settings.maxConcurrentFiles,
+                    range: model.settings.allowedConcurrentFiles, accessibilityName: "同时下载文件数")
+                SettingsCountStepper(title: "同时上传任务数", value: $model.settings.maxConcurrentUploads,
+                    range: FerrySettings.concurrentUploadsRange, accessibilityName: "同时上传任务数")
             }
 
             Section {
@@ -104,11 +98,8 @@ private struct TransferSettingsView: View {
 
             Section {
                 DisclosureGroup("高级") {
-                    Stepper(value: $model.settings.uploadPartsPerFile, in: FerrySettings.uploadPartsRange) {
-                        LabeledContent("每个上传文件的并发分片", value: "\(model.settings.uploadPartsPerFile)")
-                    }
-                    .accessibilityLabel("每个上传文件的并发分片")
-                    .accessibilityValue(Text("\(model.settings.uploadPartsPerFile)"))
+                    SettingsCountStepper(title: "每个上传文件的并发分片", value: $model.settings.uploadPartsPerFile,
+                        range: FerrySettings.uploadPartsRange, accessibilityName: "每个上传文件的并发分片")
                     Text("适用于百度和夸克。增加分片并发可提高上传速度，也会增加内存使用。")
                         .font(.callout)
                         .foregroundStyle(.secondary)
@@ -122,9 +113,7 @@ private struct TransferSettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .settingsFormSurface()
         .directoryPicker(isPresented: $isChoosingDirectory, directory: model.downloadDirectory,
                          onChoose: model.chooseDownloadDirectory)
     }
@@ -211,11 +200,8 @@ private struct NetdiskSettingsView: View {
                 }
                 .help("会员预设会同时调整每个文件的连接数和同时下载文件数。")
                 DisclosureGroup("高级") {
-                    Stepper(value: $model.settings.connectionsPerFile, in: model.settings.allowedConnections) {
-                        LabeledContent("每个文件的连接数", value: "\(model.settings.connectionsPerFile)")
-                    }
-                    .accessibilityLabel("百度网盘每个文件的连接数")
-                    .accessibilityValue(Text("\(model.settings.connectionsPerFile)"))
+                    SettingsCountStepper(title: "每个文件的连接数", value: $model.settings.connectionsPerFile,
+                        range: model.settings.allowedConnections, accessibilityName: "百度网盘每个文件的连接数")
                     concurrencyFooter
                         .font(.callout)
                 }
@@ -231,11 +217,8 @@ private struct NetdiskSettingsView: View {
                     .onSubmit(commitTransferFolders)
                 Toggle("下载完成后清理转存文件", isOn: $model.settings.quarkCleanupAfterDownload)
                 DisclosureGroup("高级") {
-                    Stepper(value: $model.settings.quarkConnectionsPerFile, in: model.settings.allowedConnections) {
-                        LabeledContent("每个文件的连接数", value: "\(model.settings.quarkConnectionsPerFile)")
-                    }
-                    .accessibilityLabel("夸克网盘每个文件的连接数")
-                    .accessibilityValue(Text("\(model.settings.quarkConnectionsPerFile)"))
+                    SettingsCountStepper(title: "每个文件的连接数", value: $model.settings.quarkConnectionsPerFile,
+                        range: model.settings.allowedConnections, accessibilityName: "夸克网盘每个文件的连接数")
                 }
             } header: {
                 Text("夸克网盘")
@@ -245,9 +228,7 @@ private struct NetdiskSettingsView: View {
             }
 
         }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .settingsFormSurface()
         .autocorrectionDisabled()
         .onAppear {
             transferFolder = model.settings.transferFolder
@@ -331,9 +312,7 @@ private struct NetworkSettingsView: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .settingsFormSurface()
         .autocorrectionDisabled()
         .onSubmit { commit() }
         // 在文本框之间切换时不提交：例如填了用户名还没填密码时，设置不完整，会先退回系统设置再换回代理。
@@ -434,9 +413,7 @@ private struct AccountSettingsView: View {
                 }
             }
         }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .settingsFormSurface()
         .logOutConfirmation(isPresented: $isConfirmingLogOut)
     }
 
@@ -453,5 +430,30 @@ private struct AccountSettingsView: View {
                 quarkLogoutError = nil
             } catch { quarkLogoutError = error.localizedDescription }
         }
+    }
+}
+
+/// 设置中的整数预算沿用同一原生步进布局、范围及业务辅助属性。
+private struct SettingsCountStepper: View {
+    let title: String
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+    let accessibilityName: String
+
+    var body: some View {
+        Stepper(value: $value, in: range) {
+            LabeledContent(title, value: "\(value)")
+        }
+        .accessibilityLabel(accessibilityName)
+        .accessibilityValue(Text("\(value)"))
+    }
+}
+
+private extension View {
+    /// 四类设置共用系统分组表单与实色页面表面。
+    func settingsFormSurface() -> some View {
+        formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .background(Color(nsColor: .windowBackgroundColor))
     }
 }
