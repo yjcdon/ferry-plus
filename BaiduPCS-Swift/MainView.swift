@@ -406,25 +406,47 @@ struct MainView: View {
 
     @ToolbarContentBuilder
     private func transferToolbar(scope: TransferSelection) -> some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
-            Button { model.presentAddLink() } label: { Label("添加分享链接", systemImage: "link") }
-                .help("添加分享链接")
-        }.solidToolbarBackground()
-        if #available(macOS 26.0, *), detailWidth >= 700 { ToolbarSpacer(.fixed, placement: .primaryAction) }
-        ToolbarItemGroup(placement: .primaryAction) {
-            TransferPauseResumeButton(scope: scope)
-            Button {
-                inspectorPresentation.wrappedValue.toggle()
-            } label: {
-                Label(showsInspector ? "隐藏详情" : "显示详情", systemImage: "sidebar.trailing")
-            }
-            .help(showsInspector ? "隐藏详情" : "显示详情")
-        }.solidToolbarBackground()
+        if detailWidth < 520 {
+            ToolbarItem(placement: .primaryAction) {
+                Menu("操作") {
+                    addLinkAction
+                    transferControlActions(scope: scope)
+                }
+                .labelStyle(.titleAndIcon)
+                .menuStyle(.borderlessButton).fixedSize()
+                .help("分享链接和传输操作")
+                .accessibilityLabel("传输操作")
+            }.solidToolbarBackground()
+        } else {
+            ToolbarItemGroup(placement: .primaryAction) {
+                addLinkAction
+            }.solidToolbarBackground()
+            if #available(macOS 26.0, *), detailWidth >= 700 { ToolbarSpacer(.fixed, placement: .primaryAction) }
+            ToolbarItemGroup(placement: .primaryAction) {
+                transferControlActions(scope: scope)
+            }.solidToolbarBackground()
+        }
         if #available(macOS 26.0, *), detailWidth >= 700 { ToolbarSpacer(.fixed, placement: .primaryAction) }
         ToolbarItem(id: "transfer.search", placement: .primaryAction) {
             TaskSearchField(text: $searchText, focusRequest: searchFocusRequest)
                 .frame(width: min(240, max(TaskSearchField.minimumWidth, (workspaceWidth - 480) / 2)))
         }.solidToolbarBackground()
+    }
+
+    private var addLinkAction: some View {
+        Button { model.presentAddLink() } label: { Label("添加分享链接", systemImage: "link") }
+            .help("添加分享链接")
+    }
+
+    /// 菜单与平铺工具栏共用当前列表能力和详情绑定，保持操作范围一致。
+    @ViewBuilder private func transferControlActions(scope: TransferSelection) -> some View {
+        TransferPauseResumeButton(scope: scope)
+        Button {
+            inspectorPresentation.wrappedValue.toggle()
+        } label: {
+            Label(showsInspector ? "隐藏详情" : "显示详情", systemImage: "sidebar.trailing")
+        }
+        .help(showsInspector ? "隐藏详情" : "显示详情")
     }
 
     /// 即使菜单携带旧快照，执行入口也只接收当前仍可见的同方向身份。
