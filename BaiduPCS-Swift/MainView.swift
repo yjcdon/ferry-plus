@@ -105,30 +105,35 @@ struct MainView: View {
                 .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 300)
                 .toolbar(removing: .sidebarToggle)
         } detail: {
-            if workspace.isFiles {
-                filesContent
-            } else {
-                // 显式宽度与独立拖动条避免 inspector 和原生分栏相互反馈尺寸。
-                HStack(spacing: 0) {
-                    transferContent(items: items, scope: scope)
-                    if showsInspector {
-                        WidthResizeHandle(width: effectiveInspectorWidth, minimum: 280,
-                                          maximum: maximumInspectorWidth, fillsHeight: true)
-                            .frame(width: 8)
-                            .frame(maxHeight: .infinity)
-                        TransferInspector(scope: scope, onDownloadRemove: requestDownloadRemoval,
-                                          onPresentationChange: { inspectorOperationPresented = $0 })
-                            .frame(width: effectiveInspectorWidth.wrappedValue)
-                            .frame(maxHeight: .infinity)
+            Group {
+                if workspace.isFiles {
+                    filesContent
+                } else {
+                    // 显式宽度与独立拖动条避免 inspector 和原生分栏相互反馈尺寸。
+                    HStack(spacing: 0) {
+                        transferContent(items: items, scope: scope)
+                        if showsInspector {
+                            WidthResizeHandle(width: effectiveInspectorWidth, minimum: 280,
+                                              maximum: maximumInspectorWidth, fillsHeight: true)
+                                .frame(width: 8)
+                                .frame(maxHeight: .infinity)
+                            TransferInspector(scope: scope, onDownloadRemove: requestDownloadRemoval,
+                                              onPresentationChange: { inspectorOperationPresented = $0 })
+                                .frame(width: effectiveInspectorWidth.wrappedValue)
+                                .frame(maxHeight: .infinity)
+                        }
                     }
-                }
-                .background {
-                    GeometryReader { geometry in
-                        Color.clear.onChange(of: geometry.size.width, initial: true) { _, width in detailWidth = width }
+                    .background {
+                        GeometryReader { geometry in
+                            Color.clear.onChange(of: geometry.size.width, initial: true) { _, width in detailWidth = width }
+                        }
                     }
                 }
             }
+            .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
+            .navigationSplitViewColumnWidth(min: 320, ideal: 640, max: .infinity)
         }
+        .navigationSplitViewStyle(.balanced)
         .frame(minWidth: 640, minHeight: 400)
         .toolbar(removing: .sidebarToggle)
         .toolbar {
