@@ -10,7 +10,7 @@
 - 实色衬底内的文件操作和传输操作逐按钮显式声明辅助名称，详情按钮随显示状态、暂停／继续按钮随当前能力更新名称；菜单与独立原生搜索沿用已有业务名称。图标、帮助、分组和业务动作保持一致，独立名称由整合 App 的 AX 读取复验。
 - 文件命令组、传输操作组及独立搜索复用 `toolbarControlSurface`：32 点高的系统实色胶囊衬底与 0.5 点语义描边，组内保持原按钮与命令。原生共享材质继续隐藏，分组、宽窄收纳和搜索焦点沿用原流程。
 - 窗口沿用 AppKit 原生标题栏及空白背景拖动，实色配置明确开启窗口可移动属性；衬底描边只绘制外观，鼠标事件交给原按钮和搜索。使用最低支持系统已有的 [isMovableByWindowBackground](https://developer.apple.com/documentation/appkit/nswindow/ismovablebywindowbackground) 属性。
-- 主窗口采用 `hiddenTitleBar` 与 `unified` 单行工具栏。导航标题是窗口名称的唯一来源；macOS 15 起通过公开的 `toolbar(removing: .title)` 移除系统重复标题，标题文字区域单独承接鼠标。拖动采用按下时的屏幕坐标与窗口原点，随 `mouseDragged` 更新窗口位置，`mouseUp` 清理起点；双击交给原生响应链，具体系统行为单列验收。按钮、搜索与列拖动继续使用各自事件。实际窗口位移仍待验证，工具目前返回 `noWindowsAvailable`；成功截图与 AX 查询分别记录。
+- 主窗口采用 `hiddenTitleBar` 与 `unified` 单行工具栏。导航标题是窗口名称的唯一来源；macOS 15 起通过公开的 `toolbar(removing: .title)` 移除系统重复标题，标题文字区域单独承接鼠标。拖动采用按下时的屏幕坐标与窗口原点，随 `mouseDragged` 更新窗口位置，`mouseUp` 清理起点；双击交给原生响应链，具体系统行为单列验收。按钮、搜索与列拖动继续使用各自事件。拖动使用 `CGEvent.unflippedLocation` 提供的 AppKit 屏幕坐标；无 Core Graphics 来源的 AppKit 事件使用窗口转换。实际双向位移已验证为一比一，记录见 test-execution.md；双击交接行为继续单列验收。
 
 API 已核对本机 macOS 26.5 SDK 的 SwiftUI 接口，sharedBackgroundVisibility 受 macOS 26 可用性判断保护。官方说明：[sharedBackgroundVisibility](https://developer.apple.com/documentation/swiftui/toolbarcontent/sharedbackgroundvisibility(_:))。
 

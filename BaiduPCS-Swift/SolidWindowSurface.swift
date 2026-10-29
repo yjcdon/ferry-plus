@@ -125,18 +125,23 @@ struct WindowTitleDragView: NSViewRepresentable {
                 dragOrigin = nil
                 super.mouseDown(with: event)
             } else {
-                dragOrigin = (NSEvent.mouseLocation, window.frame.origin)
+                dragOrigin = (screenPoint(for: event, in: window), window.frame.origin)
             }
         }
 
         /// 直接使用 AppKit 窗口坐标更新位置，随鼠标拖动逐次执行。
         override func mouseDragged(with event: NSEvent) {
             guard let window, let origin = dragOrigin else { return }
-            let pointer = NSEvent.mouseLocation
+            let pointer = screenPoint(for: event, in: window)
             window.setFrameOrigin(NSPoint(x: origin.window.x + pointer.x - origin.pointer.x,
                                           y: origin.window.y + pointer.y - origin.pointer.y))
         }
 
         override func mouseUp(with event: NSEvent) { dragOrigin = nil }
+
+        /// 优先使用事件自身的全局位置，避免窗口移动后旧局部坐标再次叠加位移。
+        private func screenPoint(for event: NSEvent, in window: NSWindow) -> NSPoint {
+            event.cgEvent?.unflippedLocation ?? window.convertPoint(toScreen: event.locationInWindow)
+        }
     }
 }
