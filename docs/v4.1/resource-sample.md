@@ -2,6 +2,8 @@
 
 日期：2026-10-29。当前设备 Apple Silicon、系统报告 macOS 27.2。
 
+内存目标：常规空闲物理占用约 100 MB。使用系统 `footprint`／`vmmap` 的 physical footprint 观察该目标，RSS 作为常驻页的补充指标。操作峰值与结束后的回落单独记录。
+
 ## 相同场景
 
 串行运行 `/Applications/Ferry Plus.app` 4.0 发布版和 `.build/Ferry Plus.app` 4.1 Release 构建（采样源码 `a02e90a`）。使用相同账号和任务数据，半屏、隐藏侧栏，在百度样本目录进入一次子目录再返回三行列表。预热后间隔两秒取三次 `ps` CPU 与 RSS。
@@ -37,3 +39,9 @@
 ## 最新 Release 连续操作
 
 源码 `5f61c35`，运行进程 54521。完成两家分享列表浏览后，在百度四行样本目录与夸克一行样本目录之间连续切换 12 次，分两轮各 6 次，每次均读到原生列表。操作前、第一轮后、第二轮后 RSS 分别为 169936、169296、169376 KiB（约 165.95、165.33、165.41 MiB），空闲 CPU 三次均为 0%。该短流程的内存保持稳定。原始记录：`/tmp/ferry-v41-continuous-before.log`、`round1.log`、`round2.log`（后两者共用 `ferry-v41-continuous-` 前缀）。长列表和更多业务场景继续单列。
+
+## 物理内存与操作回落
+
+同一 Release 构建，进程 55751 已完成分享下载、文件管理与列表操作。系统 `vmmap` 报告物理占用 98.6 MiB、历史峰值 181.3 MiB；随后 `heap` 报告物理占用 95.9 MiB，实际 malloc 分配约 50.5 MiB。历史峰值尚未归因。
+
+以 `footprint` 逐阶段测量：普通传输页 96 MB → 展开约百项夸克分享列表 124 MB → 关闭后 120 MB → 自然回落 102 MB → 随后空闲 101 MB。该场景的日常占用接近目标，分享浏览产生短时增量。原始日志统一前缀 `/tmp/ferry-v41-memory-`：`vmmap.log`、`heap.log`、`before-share.log`、`open-share.log`、`after-share.log`、`after-share-settled.log`、`final-idle.log`。
