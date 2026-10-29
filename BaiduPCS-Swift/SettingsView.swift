@@ -1,10 +1,11 @@
+import AppKit
 import BaiduKit
 import FerryCore
 import SwiftUI
 
 /// 设置窗口：传输、网盘、网络和账号四个标签页。
 struct SettingsView: View {
-    @State private var tab = 0
+    @AppStorage("settings.selectedTab.v1") private var tab = 0
 
     var body: some View {
         TabView(selection: $tab) {
@@ -22,6 +23,7 @@ struct SettingsView: View {
                 .tag(3)
         }
         .frame(width: 480)
+        .background(Color(nsColor: .windowBackgroundColor))
         #if DEBUG
         .onAppear {
             if DemoData.isEnabled, let demoTab = DemoData.settingsTab { tab = demoTab }
@@ -86,30 +88,37 @@ private struct TransferSettingsView: View {
                 Stepper(value: $model.settings.maxConcurrentUploads, in: FerrySettings.concurrentUploadsRange) {
                     LabeledContent("同时上传任务数", value: "\(model.settings.maxConcurrentUploads)")
                 }
-                Stepper(value: $model.settings.uploadPartsPerFile, in: FerrySettings.uploadPartsRange) {
-                    LabeledContent("每个上传文件的并发分片", value: "\(model.settings.uploadPartsPerFile)")
-                }
-            } footer: {
-                Text("并发设置适用于百度和夸克。提高分片并发会增加内存占用，默认 1 路。")
-                    .foregroundStyle(.secondary)
             }
 
             Section {
                 TransferRateField(title: "上传限速", bytesPerSecond: $model.settings.uploadBytesPerSecond)
                 TransferRateField(title: "下载限速", bytesPerSecond: $model.settings.downloadBytesPerSecond)
             } footer: {
-                Text("0 表示不限速。1 KiB/s = 1024 字节/秒，下载限速也适用于上传后的内容校验。")
+                Text("0 表示不限速，1 KiB/s = 1024 字节/秒。")
                     .foregroundStyle(.secondary)
+            }
+
+            Section {
+                DisclosureGroup("高级") {
+                    Stepper(value: $model.settings.uploadPartsPerFile, in: FerrySettings.uploadPartsRange) {
+                        LabeledContent("每个上传文件的并发分片", value: "\(model.settings.uploadPartsPerFile)")
+                    }
+                    Text("适用于百度和夸克。增加分片并发可提高上传速度，也会增加内存使用。")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             Section {
                 Toggle("检测剪贴板中的分享链接", isOn: $model.settings.detectsCopiedLinks)
             } footer: {
-                Text("复制分享链接后切换到 Ferry Plus，自动打开“添加链接”并填入链接和提取码。")
+                Text("复制分享链接后切换到 Ferry Plus，自动打开【添加链接】并填入链接和提取码。")
                     .foregroundStyle(.secondary)
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: .windowBackgroundColor))
         .directoryPicker(isPresented: $isChoosingDirectory, directory: model.downloadDirectory,
                          onChoose: model.chooseDownloadDirectory)
     }
@@ -169,15 +178,14 @@ private struct NetdiskSettingsView: View {
     @ViewBuilder private var concurrencyFooter: some View {
         switch model.settings.concurrencyPreset {
         case .regular:
-            Text("非超级会员（包括普通会员）同时使用多个连接会被百度限速，所以两项都是 1。")
+            Text("普通账号使用单连接下载。会员预设也会调整同时下载文件数。")
                 .foregroundStyle(.secondary)
         case .svip:
-            Text("超级会员下载不限速。两项相乘最多为 \(FerrySettings.totalConnectionsLimit)，建议不超过 12。")
+            Text("超级会员可使用多连接。总连接数上限为 \(FerrySettings.totalConnectionsLimit)，建议保持在 12 以内。")
                 .foregroundStyle(.secondary)
         case nil:
-            Label("只有超级会员可以同时使用多个连接。其他账号会被百度限速，限速可能持续数小时到数天，并影响这个账号的所有客户端。",
-                  systemImage: "exclamationmark.triangle.fill")
-                .foregroundStyle(.orange)
+            Text("多连接适用于百度超级会员，普通账号建议使用单连接。")
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -187,7 +195,7 @@ private struct NetdiskSettingsView: View {
             Section {
                 TextField("转存目录", text: $transferFolder, prompt: Text("/Ferry"))
                     .onSubmit(commitTransferFolders)
-                Toggle("内容校验通过后清理转存文件", isOn: $model.settings.cleanupAfterDownload)
+                Toggle("下载完成后清理转存文件", isOn: $model.settings.cleanupAfterDownload)
                 Picker("网盘会员", selection: concurrencyPreset) {
                     Text("非超级会员").tag(ConcurrencyPreset?.some(.regular))
                     Text("超级会员").tag(ConcurrencyPreset?.some(.svip))
@@ -195,36 +203,41 @@ private struct NetdiskSettingsView: View {
                         Text("自定义").tag(ConcurrencyPreset?.none)
                     }
                 }
-                Stepper(value: $model.settings.connectionsPerFile, in: model.settings.allowedConnections) {
-                    LabeledContent("每个文件的连接数", value: "\(model.settings.connectionsPerFile)")
+                .help("会员预设会同时调整每个文件的连接数和同时下载文件数。")
+                DisclosureGroup("高级") {
+                    Stepper(value: $model.settings.connectionsPerFile, in: model.settings.allowedConnections) {
+                        LabeledContent("每个文件的连接数", value: "\(model.settings.connectionsPerFile)")
+                    }
+                    concurrencyFooter
+                        .font(.callout)
                 }
             } header: {
                 Text("百度网盘")
             } footer: {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("每个分享任务转存到指定目录的独立子目录。会员预设会同时调整通用的同时下载文件数。")
-                        .foregroundStyle(.secondary)
-                    concurrencyFooter
-                }
-                .fixedSize(horizontal: false, vertical: true)
+                Text("每个分享任务使用独立子目录。清理范围为本任务创建的转存文件。")
+                    .foregroundStyle(.secondary)
             }
 
             Section {
                 TextField("转存目录", text: $quarkTransferFolder, prompt: Text("/Ferry Plus"))
                     .onSubmit(commitTransferFolders)
-                Toggle("内容校验通过后清理转存文件", isOn: $model.settings.quarkCleanupAfterDownload)
-                Stepper(value: $model.settings.quarkConnectionsPerFile, in: model.settings.allowedConnections) {
-                    LabeledContent("每个文件的连接数", value: "\(model.settings.quarkConnectionsPerFile)")
+                Toggle("下载完成后清理转存文件", isOn: $model.settings.quarkCleanupAfterDownload)
+                DisclosureGroup("高级") {
+                    Stepper(value: $model.settings.quarkConnectionsPerFile, in: model.settings.allowedConnections) {
+                        LabeledContent("每个文件的连接数", value: "\(model.settings.quarkConnectionsPerFile)")
+                    }
                 }
             } header: {
                 Text("夸克网盘")
             } footer: {
-                Text("每个分享任务转存到指定目录的独立子目录。仅清理本任务创建的转存文件，直接从网盘下载的源文件会保留。")
+                Text("每个分享任务使用独立子目录。清理范围为本任务创建的转存文件。")
                     .foregroundStyle(.secondary)
             }
 
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: .windowBackgroundColor))
         .autocorrectionDisabled()
         .onAppear {
             transferFolder = model.settings.transferFolder
@@ -296,7 +309,7 @@ private struct NetworkSettingsView: View {
                         .focused($focusedField, equals: .password)
                 }
                 if !isBlank, let problem = model.proxyProblem {
-                    Label("\(problem)Ferry 暂时使用系统设置。", systemImage: "exclamationmark.triangle.fill")
+                    Label("\(problem)当前使用系统代理设置。", systemImage: "exclamationmark.triangle.fill")
                         .foregroundStyle(.orange)
                 }
                 if let problem = model.proxyPasswordProblem {
@@ -309,6 +322,8 @@ private struct NetworkSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: .windowBackgroundColor))
         .autocorrectionDisabled()
         .onSubmit { commit() }
         // 在文本框之间切换时不提交：例如填了用户名还没填密码时，设置不完整，会先退回系统设置再换回代理。
@@ -350,7 +365,7 @@ private struct AccountSettingsView: View {
         Form {
             Section {
                 if let account = model.account {
-                    LabeledContent("用户名", value: account.username.isEmpty ? "—" : account.username)
+                    LabeledContent("账号名称", value: account.username.isEmpty ? "百度账号" : account.username)
                     LabeledContent("状态") {
                         if model.isLoginExpired {
                             Label("登录已失效", systemImage: "exclamationmark.triangle.fill")
@@ -378,7 +393,7 @@ private struct AccountSettingsView: View {
             }
             Section("夸克网盘") {
                 if let summary = model.quark.summary {
-                    LabeledContent("用户名", value: summary.name)
+                    LabeledContent("账号名称", value: summary.name)
                 }
                 LabeledContent("状态") {
                     if case .expired = model.quark.state {
@@ -410,6 +425,8 @@ private struct AccountSettingsView: View {
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
+        .background(Color(nsColor: .windowBackgroundColor))
         .logOutConfirmation(isPresented: $isConfirmingLogOut)
     }
 
