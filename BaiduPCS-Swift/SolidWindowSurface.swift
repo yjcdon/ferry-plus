@@ -2,6 +2,17 @@ import AppKit
 import SwiftUI
 
 extension View {
+    /// 工具栏操作组使用统一实色衬底，保持搜索与按钮分组清晰。
+    func toolbarControlSurface() -> some View {
+        labelStyle(.iconOnly)
+            .buttonStyle(.plain)
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(Color(nsColor: .controlColor), in: Capsule())
+            .overlay { Capsule().strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5) }
+            .padding(.horizontal, 3)
+    }
+
     /// 应用窗口使用实色内容与工具栏表面，保留系统标题栏、焦点和窗口操作。
     func solidWindowSurface() -> some View {
         background(Color(nsColor: .windowBackgroundColor).ignoresSafeArea())

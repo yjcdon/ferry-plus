@@ -232,27 +232,30 @@ struct NetdiskFilesView: View {
     }
 
     @ToolbarContentBuilder private var toolbar: some ToolbarContent {
-        ToolbarItemGroup(placement: .primaryAction) {
-            if usesMinimalToolbar {
-                Menu("操作") {
-                    transferActions
-                    Divider()
-                    directoryActions
-                }
-                .menuStyle(.borderlessButton).fixedSize()
-                .help("上传、下载和目录操作")
-                .accessibilityLabel("文件操作")
-            } else {
-                transferActions
-                if usesCompactToolbar {
-                    Menu("操作") { directoryActions }
-                        .menuStyle(.borderlessButton).fixedSize()
-                        .help("新建文件夹、移到回收站和刷新")
-                        .accessibilityLabel("文件操作")
+        ToolbarItem(placement: .primaryAction) {
+            HStack(spacing: 12) {
+                if usesMinimalToolbar {
+                    Menu("操作") {
+                        transferActions
+                        Divider()
+                        directoryActions
+                    }
+                    .menuStyle(.borderlessButton).fixedSize()
+                    .help("上传、下载和目录操作")
+                    .accessibilityLabel("文件操作")
                 } else {
-                    directoryActions
+                    transferActions
+                    if usesCompactToolbar {
+                        Menu("操作") { directoryActions }
+                            .menuStyle(.borderlessButton).fixedSize()
+                            .help("新建文件夹、移到回收站和刷新")
+                            .accessibilityLabel("文件操作")
+                    } else {
+                        directoryActions
+                    }
                 }
             }
+            .toolbarControlSurface()
         }
         .solidToolbarBackground()
         if #available(macOS 26.0, *), !usesCompactToolbar {
@@ -261,6 +264,7 @@ struct NetdiskFilesView: View {
         ToolbarItem(id: "files.search", placement: .primaryAction) {
             TaskSearchField(text: $browser.query, focusRequest: searchFocusRequest, placeholder: "搜索当前目录")
                 .frame(width: searchWidth)
+                .toolbarControlSurface()
         }
         .solidToolbarBackground()
     }

@@ -416,20 +416,22 @@ struct MainView: View {
                 .menuStyle(.borderlessButton).fixedSize()
                 .help("分享链接和传输操作")
                 .accessibilityLabel("传输操作")
+                .toolbarControlSurface()
             }.solidToolbarBackground()
         } else {
-            ToolbarItemGroup(placement: .primaryAction) {
-                addLinkAction
+            ToolbarItem(placement: .primaryAction) {
+                HStack { addLinkAction }.toolbarControlSurface()
             }.solidToolbarBackground()
             if #available(macOS 26.0, *), detailWidth >= 700 { ToolbarSpacer(.fixed, placement: .primaryAction) }
-            ToolbarItemGroup(placement: .primaryAction) {
-                transferControlActions(scope: scope)
+            ToolbarItem(placement: .primaryAction) {
+                HStack(spacing: 12) { transferControlActions(scope: scope) }.toolbarControlSurface()
             }.solidToolbarBackground()
         }
         if #available(macOS 26.0, *), detailWidth >= 700 { ToolbarSpacer(.fixed, placement: .primaryAction) }
         ToolbarItem(id: "transfer.search", placement: .primaryAction) {
             TaskSearchField(text: $searchText, focusRequest: searchFocusRequest)
                 .frame(width: min(240, max(TaskSearchField.minimumWidth, (workspaceWidth - 480) / 2)))
+                .toolbarControlSurface()
         }.solidToolbarBackground()
     }
 
