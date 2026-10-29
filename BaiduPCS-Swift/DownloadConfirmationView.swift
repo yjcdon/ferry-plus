@@ -12,7 +12,6 @@ struct DownloadConfirmationTarget: Identifiable {
 /// 普通下载只确认所选文件与保存位置，枚举和内容检查继续由现有下载任务执行。
 struct DownloadConfirmationView: View {
     let target: DownloadConfirmationTarget
-    private let onSubmitted: @MainActor () -> Void
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var selectedFolder: DownloadFolder?
@@ -20,11 +19,6 @@ struct DownloadConfirmationView: View {
     @State private var submissionError: String?
     @State private var contextInvalidated = false
     @State private var isFinished = false
-
-    init(target: DownloadConfirmationTarget, onSubmitted: @escaping @MainActor () -> Void) {
-        self.target = target
-        self.onSubmitted = onSubmitted
-    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -99,7 +93,6 @@ struct DownloadConfirmationView: View {
         isFinished = true
         model.addNetdiskJob(entries: target.entries, account: target.account,
                             downloadFolder: selectedFolder ?? model.currentFolder)
-        onSubmitted()
         dismiss()
     }
 

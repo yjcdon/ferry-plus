@@ -227,7 +227,7 @@ struct MainView: View {
             UploadConfirmationView(target: target) { workspace.pendingFiles = [] }
         }
         .sheet(item: $downloadConfirmation, onDismiss: consumeWorkspaceRequest) { target in
-            DownloadConfirmationView(target: target) {}
+            DownloadConfirmationView(target: target)
         }
         .task(id: uploadCommand?.id) {
             guard let uploadCommand else { return }
@@ -673,10 +673,10 @@ private struct TransferInspector: View {
     let scope: TransferSelection
     let onDownloadRemove: ([Job], JobRemoval) -> Void
     let onPresentationChange: (Bool) -> Void
-    private var downloads: [Job] {
-        scope.selectedItems.compactMap { if case .download(let job) = $0 { return job }; return nil }
-    }
     var body: some View {
+        let downloads = scope.selectedItems.compactMap { item -> Job? in
+            if case .download(let job) = item { return job }; return nil
+        }
         if scope.selectedItems.isEmpty { ContentUnavailableView("选择任务查看详情", systemImage: "sidebar.trailing") }
         else if downloads.count == scope.selectedItems.count {
             JobInspector(jobs: downloads, onAction: { jobs, action in
@@ -835,6 +835,21 @@ extension FocusedValues {
         get { self[WorkspaceIsFilesKey.self] }
         set { self[WorkspaceIsFilesKey.self] = newValue }
     }
+
+    var selectWorkspaceItems: (() -> Void)? {
+        get { self[WorkspaceSelectAllKey.self] }
+        set { self[WorkspaceSelectAllKey.self] = newValue }
+    }
+
+    var focusTaskSearch: (() -> Void)? {
+        get { self[TaskSearchFocusKey.self] }
+        set { self[TaskSearchFocusKey.self] = newValue }
+    }
+
+    var transferInspectorPresented: Binding<Bool>? {
+        get { self[TransferInspectorPresentedKey.self] }
+        set { self[TransferInspectorPresentedKey.self] = newValue }
+    }
 }
 
 private struct WorkspaceIsFilesKey: FocusedValueKey {
@@ -845,27 +860,6 @@ private struct WorkspaceSelectAllKey: FocusedValueKey {
     typealias Value = () -> Void
 }
 
-extension FocusedValues {
-    var selectWorkspaceItems: (() -> Void)? {
-        get { self[WorkspaceSelectAllKey.self] }
-        set { self[WorkspaceSelectAllKey.self] = newValue }
-    }
-}
-
-extension FocusedValues {
-    var focusTaskSearch: (() -> Void)? {
-        get { self[TaskSearchFocusKey.self] }
-        set { self[TaskSearchFocusKey.self] = newValue }
-    }
-}
-
 private struct TransferInspectorPresentedKey: FocusedValueKey {
     typealias Value = Binding<Bool>
-}
-
-extension FocusedValues {
-    var transferInspectorPresented: Binding<Bool>? {
-        get { self[TransferInspectorPresentedKey.self] }
-        set { self[TransferInspectorPresentedKey.self] = newValue }
-    }
 }
