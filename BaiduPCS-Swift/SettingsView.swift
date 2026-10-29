@@ -157,29 +157,6 @@ private struct NetdiskSettingsView: View {
     @State private var transferFolder = ""
     @State private var quarkTransferFolder = ""
 
-    /// 选择预设时填入它的两项。两项不等于任何预设时显示“自定义”。
-    private var concurrencyPreset: Binding<ConcurrencyPreset?> {
-        Binding {
-            model.settings.concurrencyPreset
-        } set: { preset in
-            if let preset { model.settings.apply(preset) }
-        }
-    }
-
-    @ViewBuilder private var concurrencyFooter: some View {
-        switch model.settings.concurrencyPreset {
-        case .regular:
-            Text("普通账号使用单连接下载。会员预设也会调整同时下载文件数。")
-                .foregroundStyle(.secondary)
-        case .svip:
-            Text("超级会员可使用多连接。总连接数上限为 \(FerrySettings.totalConnectionsLimit)，建议保持在 12 以内。")
-                .foregroundStyle(.secondary)
-        case nil:
-            Text("多连接适用于百度超级会员，普通账号建议使用单连接。")
-                .foregroundStyle(.secondary)
-        }
-    }
-
     var body: some View {
         @Bindable var model = model
         Form {
@@ -187,18 +164,8 @@ private struct NetdiskSettingsView: View {
                 TextField("转存目录", text: $transferFolder, prompt: Text("/Ferry"))
                     .onSubmit(commitTransferFolders)
                 Toggle("下载完成后清理转存文件", isOn: $model.settings.cleanupAfterDownload)
-                Picker("网盘会员", selection: concurrencyPreset) {
-                    Text("非超级会员").tag(ConcurrencyPreset?.some(.regular))
-                    Text("超级会员").tag(ConcurrencyPreset?.some(.svip))
-                    if model.settings.concurrencyPreset == nil {
-                        Text("自定义").tag(ConcurrencyPreset?.none)
-                    }
-                }
-                .help("会员预设会同时调整每个文件的连接数和同时下载文件数。")
                 SettingsCountStepper(title: "每个文件的连接数", value: $model.settings.connectionsPerFile,
                     range: model.settings.allowedConnections, accessibilityName: "百度网盘每个文件的连接数")
-                concurrencyFooter
-                    .font(.callout)
             } header: {
                 Text("百度网盘")
             }
