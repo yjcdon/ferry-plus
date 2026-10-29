@@ -238,7 +238,9 @@ final class DirectoryBrowserState {
                     throw CancellationError()
                 }
                 return entries
-            }, onError: { _ in })
+            }, onError: { [weak model] error in
+                model?.noteError(error, from: disk)
+            })
             await next.load(next.root)
             try Task.checkCancellation()
             guard requestID == id, currentDirectory == directory, session == identity else { return }
@@ -260,6 +262,7 @@ final class DirectoryBrowserState {
             pruneInvisibleSelection(); saveLocation()
         } catch {
             guard !Task.isCancelled, requestID == id else { return }
+            model.noteError(error, from: disk)
             errorMessage = error.localizedDescription
         }
     }
