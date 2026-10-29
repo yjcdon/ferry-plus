@@ -285,7 +285,7 @@ struct NetdiskFilesView: View {
     @ViewBuilder private var transferActions: some View {
         Button {
             if let context = browser.context { onUpload(context, []) }
-        } label: { Label("上传", systemImage: "arrow.up.doc") }
+        } label: { Label("上传", systemImage: "icloud.and.arrow.up") }
             .disabled(!canOperate).help("上传到当前目录")
             .accessibilityLabel("上传")
         Button {
