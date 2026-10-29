@@ -310,6 +310,7 @@ struct UploadInspector: View {
                             }
                         } label: { Label("定位", systemImage: "location") }
                             .menuStyle(.borderlessButton).fixedSize().help("定位文件")
+                            .accessibilityLabel("定位 \(file.relativePath)")
                         }
                     }
                     if !integrityDescription(file).isEmpty {
@@ -345,7 +346,9 @@ struct UploadInspector: View {
                             }.controlSize(.small)
                         }
                     }
-                }.padding(.vertical, 3)
+                }
+                .padding(.vertical, 3)
+                .accessibilityElement(children: .contain)
             }
             .overlay(alignment: .topTrailing) {
                 if isLoading { ProgressView().controlSize(.small).padding(8).accessibilityLabel("正在刷新明细") }
