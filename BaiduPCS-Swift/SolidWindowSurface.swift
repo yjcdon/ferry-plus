@@ -9,7 +9,10 @@ extension View {
             .padding(.horizontal, 10)
             .frame(height: 32)
             .background(Color(nsColor: .controlColor), in: Capsule())
-            .overlay { Capsule().strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5) }
+            .overlay {
+                Capsule().strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5)
+                    .allowsHitTesting(false)
+            }
             .padding(.horizontal, 3)
     }
 
@@ -55,6 +58,8 @@ private struct SolidWindowConfigurator: NSViewRepresentable {
         /// 只更新发生变化的窗口属性，避免外观刷新引发重复布局。
         func configureWindow() {
             guard let window else { return }
+            if !window.isMovable { window.isMovable = true }
+            if !window.isMovableByWindowBackground { window.isMovableByWindowBackground = true }
             if !window.isOpaque { window.isOpaque = true }
             if window.backgroundColor != .windowBackgroundColor { window.backgroundColor = .windowBackgroundColor }
             if window.titlebarAppearsTransparent { window.titlebarAppearsTransparent = false }
