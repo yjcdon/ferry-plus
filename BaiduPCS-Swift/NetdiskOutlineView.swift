@@ -36,6 +36,7 @@ struct NetdiskOutlineView: NSViewRepresentable {
         table.allowsMultipleSelection = false
         table.indentationPerLevel = 18
         table.autosaveTableColumns = false
+        table.autoresizesOutlineColumn = false
         for (id, title, width, minimum) in [("name", "名称", 320.0, 180.0),
                                           ("modified", "修改日期", 200.0, 100.0), ("size", "大小", 90.0, 60.0)] {
             let column = NSTableColumn(identifier: .init(id))
@@ -87,6 +88,12 @@ struct NetdiskOutlineView: NSViewRepresentable {
         private var stopped = false
         private var menuEntry: RemoteEntry?
         private var viewportWidth: CGFloat?
+        private var isAdjustingColumns = false
+        private var widthAnchor: ColumnWidthAnchor?
+        private struct ColumnWidthAnchor {
+            let name: CGFloat
+            let viewport: CGFloat
+        }
         private static let formatter: DateFormatter = {
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
@@ -96,7 +103,14 @@ struct NetdiskOutlineView: NSViewRepresentable {
             return formatter
         }()
 
-        init(_ input: NetdiskOutlineView) { self.input = input }
+        init(_ input: NetdiskOutlineView) {
+            self.input = input
+            let name = CGFloat(UserDefaults.standard.double(forKey: "workspace.columns.v1.name"))
+            let viewport = CGFloat(UserDefaults.standard.double(forKey: "workspace.columns.v1.viewport"))
+            if name.isFinite, name >= 180, viewport.isFinite, viewport > 0 {
+                widthAnchor = .init(name: min(name, 4000), viewport: viewport)
+            }
+        }
 
         /// SwiftUI 更新只替换动作与可用性；业务变化由已有的一次性观察触发。
         func updateInput(_ input: NetdiskOutlineView) {
@@ -105,17 +119,16 @@ struct NetdiskOutlineView: NSViewRepresentable {
             if changesBadge { render() }
         }
 
-        /// 窗口宽度变化由名称列承接，原生列拖动保持用户给出的宽度。
+        /// 窗口宽度始终相对用户拖动锚点计算，临时窄布局的最小宽度保持局部。
         func resizeViewport(to width: CGFloat) {
-            guard width > 0, let table, let name = table.tableColumns.first else { return }
-            let savedWidth = CGFloat(UserDefaults.standard.double(forKey: "workspace.columns.v1.viewport"))
-            let previous = viewportWidth ?? (savedWidth.isFinite && savedWidth > 0 ? savedWidth : nil)
+            guard !isAdjustingColumns, width > 0, let table, let name = table.tableColumns.first else { return }
             viewportWidth = width
-            let proposed = previous.map { name.width + width - $0 } ??
+            let proposed = widthAnchor.map { $0.name + width - $0.viewport } ??
                 (width - table.tableColumns.dropFirst().reduce(0) { $0 + $1.width } - table.intercellSpacing.width * 3)
+            isAdjustingColumns = true
+            defer { isAdjustingColumns = false }
             name.width = min(name.maxWidth, max(name.minWidth, proposed))
             table.sizeToFit()
-            UserDefaults.standard.set(width, forKey: "workspace.columns.v1.viewport")
         }
 
         /// 一次性观察覆盖已加载子树；每次变化合并到主线程下一次刷新，空闲时没有轮询。
@@ -316,10 +329,13 @@ struct NetdiskOutlineView: NSViewRepresentable {
         }
 
         func outlineViewColumnDidResize(_ notification: Notification) {
-            guard let table else { return }
+            guard !isAdjustingColumns, let table, let name = table.tableColumns.first,
+                  let viewportWidth, viewportWidth > 0 else { return }
+            widthAnchor = .init(name: name.width, viewport: viewportWidth)
             for column in table.tableColumns {
                 UserDefaults.standard.set(column.width, forKey: "workspace.columns.v1." + column.identifier.rawValue)
             }
+            UserDefaults.standard.set(viewportWidth, forKey: "workspace.columns.v1.viewport")
             table.sizeToFit()
         }
 
