@@ -18,6 +18,14 @@
 
 原始记录：`.build/v41-evidence/resources-4.0.json`、`resources-4.1.json`。两版本串行启动后均读取既有登录和三行目录。
 
+## 对象扫描对照
+
+最新 Release 进程在界面读取前执行 `leaks -quiet`，结果为 0 对象／0 字节。随后同一进程连续读取 10 次辅助功能树，扫描报告 363 对象／17424 字节；根对象均为 `NSAccessibilityCustomAction`，已显示的处理闭包来自 AppKit `NSToolbarItemViewer.accessibilityCustomActions`。期间保持同一目录，业务操作保持空闲。
+
+这组对照将报告的增长定位到辅助功能树读取关联的系统工具栏动作对象。当前引用图中可见对象均属上述类型；系统对已签名进程的调试限制继续适用。源码复核同时检查观察取消、弱引用及原生代理销毁。连续业务操作的趋势继续独立记录。
+
+原始扫描保存在 `/tmp/ferry-v41-leaks-before-ax.log`、`/tmp/ferry-v41-leaks-after-ax.log`。
+
 ## 构建产物
 
 保留 `.build/Ferry Plus.app`、`.build/dist/Ferry-Plus-4.1-arm64.zip` 与摘要文件。4.0 旧 ZIP 及摘要已移动至本机废纸篓。正式安装路径仍为 4.0。
