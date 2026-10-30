@@ -466,7 +466,7 @@ struct NetdiskFilesView: View {
                 browser.reveal(renamed, select: request.target.wasSelected)
             }
             else { browser.refresh() }
-            operationFeedback = .init(message: "已重命名为【\(request.name)】。", isError: false)
+            operationFeedback = nil
         } catch {
             if !Task.isCancelled {
                 renameError = isCurrent(request.target.context) ? error.localizedDescription : "请重新选择账号和项目。"
