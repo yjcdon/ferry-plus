@@ -104,6 +104,7 @@ struct NetdiskOutlineView: NSViewRepresentable {
         private var roots: [AnyObject] = []
         private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
         private var observation = UUID()
+        private var selectionObservation = UUID()
         private var isUpdating = false
         private var stopped = false
         private var menuEntry: RemoteEntry?
@@ -173,7 +174,6 @@ struct NetdiskOutlineView: NSViewRepresentable {
             observation = token
             children.removeAll(keepingCapacity: true)
             withObservationTracking {
-                _ = input.tree.selection
                 _ = input.browser.query
                 _ = input.browser.sort
                 _ = input.browser.descending
@@ -202,6 +202,39 @@ struct NetdiskOutlineView: NSViewRepresentable {
                 }
             }
             render()
+            observeSelection()
+        }
+
+        /// 选择变化只同步高亮及现有勾选框，保留原生行视图和鼠标选择锚点。
+        private func observeSelection() {
+            let token = UUID()
+            selectionObservation = token
+            withObservationTracking {
+                _ = input.tree.selection
+            } onChange: { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self, !self.stopped, self.selectionObservation == token else { return }
+                    self.observeSelection()
+                    self.updateSelection()
+                }
+            }
+        }
+
+        private func updateSelection() {
+            guard let table, !isUpdating else { return }
+            isUpdating = true
+            defer { isUpdating = false }
+            var selected = IndexSet()
+            for row in 0..<table.numberOfRows {
+                guard let node = table.item(atRow: row) as? FileNode<RemoteEntry> else { continue }
+                if input.tree.isSelected(node) { selected.insert(row) }
+                if let cell = table.view(atColumn: 0, row: row, makeIfNecessary: false) as? NameCell {
+                    updateCheckbox(cell, node: node)
+                }
+            }
+            if table.selectedRowIndexes != selected {
+                table.selectRowIndexes(selected, byExtendingSelection: false)
+            }
         }
 
         /// 表格渲染使用当前快照，程序性展开与焦点恢复保持独立于用户动作。
@@ -333,6 +366,7 @@ struct NetdiskOutlineView: NSViewRepresentable {
             editingCell = nil
             editingReference = nil
             observation = UUID()
+            selectionObservation = UUID()
             for task in tasks.values { task.cancel() }
             tasks.removeAll()
             children.removeAll()
@@ -382,6 +416,24 @@ struct NetdiskOutlineView: NSViewRepresentable {
             }
         }
 
+        /// 已选目录的子项继承勾选状态；仅更新控件外观，不重新创建整行。
+        private func updateCheckbox(_ cell: NameCell, node: FileNode<RemoteEntry>) {
+            guard let table else { return }
+            var parent = table.parent(forItem: node) as? FileNode<RemoteEntry>
+            var inherited = false
+            while let value = parent {
+                if input.tree.isSelected(value) { inherited = true; break }
+                parent = table.parent(forItem: value) as? FileNode<RemoteEntry>
+            }
+            cell.checkbox.state = inherited || input.tree.isSelected(node) ? .on : .off
+            cell.checkbox.image = NSImage(systemSymbolName: cell.checkbox.state == .on ? "checkmark.square.fill" : "square",
+                                          accessibilityDescription: nil)
+            cell.checkbox.contentTintColor = cell.checkbox.state == .on ? .controlAccentColor : .secondaryLabelColor
+            cell.checkbox.isEnabled = !inherited
+            cell.checkbox.setAccessibilityLabel("选择\(node.entry?.name ?? "")")
+            cell.checkbox.setAccessibilityHelp(inherited ? "随父文件夹一起选择" : "用于批量操作")
+        }
+
         func outlineView(_ outlineView: NSOutlineView, viewFor tableColumn: NSTableColumn?, item: Any) -> NSView? {
             if let placeholder = item as? Placeholder {
                 guard tableColumn?.identifier.rawValue == "name" else { return nil }
@@ -396,19 +448,7 @@ struct NetdiskOutlineView: NSViewRepresentable {
             guard let node = item as? FileNode<RemoteEntry>, let entry = node.entry else { return nil }
             if tableColumn?.identifier.rawValue == "name" {
                 let cell = NameCell()
-                var parent = outlineView.parent(forItem: node) as? FileNode<RemoteEntry>
-                var inherited = false
-                while let value = parent {
-                    if input.tree.isSelected(value) { inherited = true; break }
-                    parent = outlineView.parent(forItem: value) as? FileNode<RemoteEntry>
-                }
-                cell.checkbox.state = inherited || input.tree.isSelected(node) ? .on : .off
-                cell.checkbox.image = NSImage(systemSymbolName: cell.checkbox.state == .on ? "checkmark.square.fill" : "square",
-                                              accessibilityDescription: nil)
-                cell.checkbox.contentTintColor = cell.checkbox.state == .on ? .controlAccentColor : .secondaryLabelColor
-                cell.checkbox.isEnabled = !inherited
-                cell.checkbox.setAccessibilityLabel("选择\(entry.name)")
-                cell.checkbox.setAccessibilityHelp(inherited ? "随父文件夹一起选择" : "用于批量操作")
+                updateCheckbox(cell, node: node)
                 cell.onToggle = { [weak self, weak node] in
                     guard let self, let node else { return }
                     self.input.tree.setSelected(node, !self.input.tree.isSelected(node))
