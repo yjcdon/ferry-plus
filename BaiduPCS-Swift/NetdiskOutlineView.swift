@@ -105,7 +105,6 @@ struct NetdiskOutlineView: NSViewRepresentable {
         private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
         private var observation = UUID()
         private var isUpdating = false
-        private weak var renderedTree: FileTree<RemoteEntry>?
         private var stopped = false
         private var menuEntry: RemoteEntry?
         private var isMenuTracking = false
@@ -210,10 +209,6 @@ struct NetdiskOutlineView: NSViewRepresentable {
             guard !stopped, let table, !isUpdating else { return }
             isUpdating = true
             defer { isUpdating = false }
-            let highlighted = renderedTree === input.tree ? Set(table.selectedRowIndexes.compactMap {
-                (table.item(atRow: $0) as? FileNode<RemoteEntry>)?.entry?.reference
-            }) : []
-            renderedTree = input.tree
             let hadEditor = editingCell?.label.currentEditor() != nil
             let selection = (editingCell?.label.currentEditor() as? NSTextView)?.selectedRange()
             editingCell?.stopEditing()
@@ -240,14 +235,14 @@ struct NetdiskOutlineView: NSViewRepresentable {
                 (0..<table.numberOfRows).filter { table.item(atRow: $0) is FileNode<RemoteEntry> }
                     .min { abs($0 - previous) < abs($1 - previous) }
             }
+            let retainedRows = IndexSet((0..<table.numberOfRows).filter { index in
+                guard let node = table.item(atRow: index) as? FileNode<RemoteEntry> else { return false }
+                return input.tree.isSelected(node)
+            })
+            let requestedRows = input.browser.focusedReference != nil ? row.map { IndexSet(integer: $0) } : nil
+            table.selectRowIndexes(requestedRows ?? retainedRows, byExtendingSelection: false)
             if let row,
                let entry = (table.item(atRow: row) as? FileNode<RemoteEntry>)?.entry {
-                let retainedRows = IndexSet((0..<table.numberOfRows).filter { index in
-                    guard let reference = (table.item(atRow: index) as? FileNode<RemoteEntry>)?.entry?.reference else { return false }
-                    return highlighted.contains(reference)
-                })
-                table.selectRowIndexes(input.browser.focusedReference != nil || retainedRows.isEmpty
-                                       ? IndexSet(integer: row) : retainedRows, byExtendingSelection: false)
                 input.browser.rememberFocus(entry.reference, row: row)
                 if let requested = input.browser.focusedReference, entry.reference == requested {
                     table.scrollRowToVisible(row)
@@ -480,6 +475,8 @@ struct NetdiskOutlineView: NSViewRepresentable {
 
         func outlineViewSelectionDidChange(_ notification: Notification) {
             guard !isUpdating, let table else { return }
+            let nodes = table.selectedRowIndexes.compactMap { table.item(atRow: $0) as? FileNode<RemoteEntry> }
+            input.tree.selectTopLevel(nodes)
             let row = table.selectedRow
             let entry = (table.item(atRow: row) as? FileNode<RemoteEntry>)?.entry
             input.browser.rememberFocus(entry?.reference, row: entry == nil ? nil : row)
@@ -490,7 +487,7 @@ struct NetdiskOutlineView: NSViewRepresentable {
             if entry.isDirectory { input.browser.enter(entry) }
         }
 
-        /// 键盘打开使用当前行焦点，和勾选集合保持独立。
+        /// 键盘打开使用当前行焦点。
         func openSelected() {
             guard let table, let entry = (table.item(atRow: table.selectedRow) as? FileNode<RemoteEntry>)?.entry else { return }
             if entry.isDirectory { input.browser.enter(entry) }

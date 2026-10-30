@@ -272,14 +272,14 @@ struct NetdiskFilesView: View {
         Button {
             if let context = browser.context { onDownload(context, browser.selectedEntries) }
         } label: { Label("下载", systemImage: "arrow.down") }
-            .disabled(!canOperate || browser.selectedEntries.isEmpty).help("下载勾选项目")
+            .disabled(!canOperate || browser.selectedEntries.isEmpty).help("下载选中项目")
             .accessibilityLabel("下载")
     }
 
     /// 次要目录操作在宽窗平铺、窄窗收入菜单，共用同一目标和启用条件。
     @ViewBuilder private var directoryActions: some View {
         Button { prepareDeletion(browser.selectedEntries) } label: { Label("移到回收站", systemImage: "trash") }
-            .disabled(!canOperate || browser.selectedEntries.isEmpty).help("将勾选项目移到网盘回收站")
+            .disabled(!canOperate || browser.selectedEntries.isEmpty).help("将选中项目移到网盘回收站")
             .accessibilityLabel("移到回收站")
         Button { browser.refresh() } label: { Label("刷新", systemImage: "arrow.clockwise") }
             .disabled(isBusy || browser.isLoading).help("刷新当前目录")
