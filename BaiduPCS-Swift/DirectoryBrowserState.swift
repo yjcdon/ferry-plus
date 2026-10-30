@@ -128,6 +128,16 @@ final class DirectoryBrowserState {
         refresh()
     }
 
+    /// 当前目录收到创建回执后就地发布，省去整树重载并保持行内编辑焦点。
+    func insertCreated(_ entry: RemoteEntry) {
+        guard let tree else { return }
+        tree.root.insertCreated(entry)
+        if let node = tree.root.children?.first(where: { $0.entry?.reference == entry.reference }) {
+            tree.setSelected(node, true)
+        }
+        focusedReference = entry.reference
+    }
+
     /// 原生列表完成滚动和聚焦后消费一次定位请求。
     func consumeFocus(_ reference: RemoteReference) {
         if focusedReference == reference { focusedReference = nil }

@@ -3,6 +3,17 @@ import FerryCore
 import Observation
 import SwiftUI
 
+/// 文件页拥有名称与提交状态；原生表格只负责指定条目的行内输入和焦点。
+struct FileNameEditing {
+    let reference: RemoteReference
+    let name: String
+    let error: String?
+    let isSubmitting: Bool
+    let onChange: (String) -> Void
+    let onSubmit: () -> Void
+    let onCancel: () -> Void
+}
+
 /// 文件工作区的原生树表：列、焦点与拖放由 AppKit 管理，目录与勾选仍属于文件树。
 struct NetdiskOutlineView: NSViewRepresentable {
     let browser: DirectoryBrowserState
@@ -14,6 +25,7 @@ struct NetdiskOutlineView: NSViewRepresentable {
     let onRename: (RemoteEntry) -> Void
     let onDelete: (RemoteEntry) -> Void
     let onNewFolder: (() -> Void)?
+    var nameEditing: FileNameEditing? = nil
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -85,7 +97,7 @@ struct NetdiskOutlineView: NSViewRepresentable {
     }
 
     /// 原生代理保存展示映射和观察任务；界面销毁后释放回调及加载任务。
-    final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate {
+    final class Coordinator: NSObject, NSOutlineViewDataSource, NSOutlineViewDelegate, NSMenuDelegate {
         var input: NetdiskOutlineView
         weak var table: FileOutline?
         private var children: [ObjectIdentifier: [AnyObject]] = [:]
@@ -95,7 +107,11 @@ struct NetdiskOutlineView: NSViewRepresentable {
         private var isUpdating = false
         private var stopped = false
         private var menuEntry: RemoteEntry?
+        private var isMenuTracking = false
+        private var renameAfterMenu: RemoteEntry?
         private var isAdjustingColumns = false
+        private weak var editingCell: NameCell?
+        private var editingReference: RemoteReference?
         private var widthAnchor: ColumnWidthAnchor?
         private struct ColumnWidthAnchor {
             let name: CGFloat
@@ -122,8 +138,21 @@ struct NetdiskOutlineView: NSViewRepresentable {
         /// SwiftUI 更新只替换动作与可用性；业务变化由已有的一次性观察触发。
         func updateInput(_ input: NetdiskOutlineView) {
             let changesBadge = self.input.transferFolder != input.transferFolder
+            let previous = self.input.nameEditing
             self.input = input
             if changesBadge { render() }
+            else {
+                let errorChanged = previous?.error != input.nameEditing?.error
+                if errorChanged, let table {
+                    let affected = [previous?.reference, input.nameEditing?.reference].compactMap { $0 }
+                    let rows = (0..<table.numberOfRows).filter { row in
+                        guard let entry = (table.item(atRow: row) as? FileNode<RemoteEntry>)?.entry else { return false }
+                        return affected.contains(entry.reference)
+                    }
+                    table.noteHeightOfRows(withIndexesChanged: IndexSet(rows))
+                }
+                updateNameEditing(refocus: errorChanged && input.nameEditing?.error != nil)
+            }
         }
 
         /// 窗口宽度始终相对用户拖动锚点计算，临时窄布局的最小宽度保持局部。
@@ -180,6 +209,10 @@ struct NetdiskOutlineView: NSViewRepresentable {
             guard !stopped, let table, !isUpdating else { return }
             isUpdating = true
             defer { isUpdating = false }
+            let hadEditor = editingCell?.label.currentEditor() != nil
+            let selection = (editingCell?.label.currentEditor() as? NSTextView)?.selectedRange()
+            editingCell?.stopEditing()
+            editingCell = nil
             let sort = input.browser.sort.rawValue
             table.sortDescriptors = [NSSortDescriptor(key: sort, ascending: !input.browser.descending)]
             table.reloadData()
@@ -213,10 +246,87 @@ struct NetdiskOutlineView: NSViewRepresentable {
             } else if table.numberOfRows == 0 {
                 input.browser.rememberFocus(nil, row: nil)
             }
+            updateNameEditing(refocus: hadEditor, selection: selection)
+        }
+
+        /// 名称变化只更新对应输入框；仅初次编辑、恢复刷新和错误反馈请求焦点。
+        private func updateNameEditing(refocus: Bool = false, selection: NSRange? = nil) {
+            guard !stopped, let table else { return }
+            guard let editing = input.nameEditing else {
+                editingCell?.stopEditing()
+                editingCell = nil
+                editingReference = nil
+                return
+            }
+            guard let row = (0..<table.numberOfRows).first(where: {
+                (table.item(atRow: $0) as? FileNode<RemoteEntry>)?.entry?.reference == editing.reference
+            }) else {
+                editingCell?.stopEditing()
+                editingCell = nil
+                editingReference = nil
+                // 对象已加载但被搜索或折叠隐藏时结束编辑；新建条目尚未刷新则继续等待。
+                if input.browser.path(to: editing.reference) != nil,
+                   !input.browser.isLoading, !editing.isSubmitting {
+                    Task { @MainActor [weak self] in
+                        guard let self, !self.stopped, let table = self.table,
+                              let current = self.input.nameEditing, current.reference == editing.reference,
+                              !current.isSubmitting, !self.input.browser.isLoading,
+                              self.input.browser.path(to: current.reference) != nil,
+                              !(0..<table.numberOfRows).contains(where: {
+                                  (table.item(atRow: $0) as? FileNode<RemoteEntry>)?.entry?.reference == current.reference
+                              }) else { return }
+                        current.onCancel()
+                    }
+                }
+                return
+            }
+            let begins = editingReference != editing.reference
+            if begins { table.scrollRowToVisible(row) }
+            guard let cell = table.view(atColumn: 0, row: row, makeIfNecessary: true) as? NameCell else { return }
+            let replacesCell = editingCell !== cell
+            if replacesCell { editingCell?.stopEditing() }
+            editingCell = cell
+            editingReference = editing.reference
+            cell.configure(editing: editing)
+            cell.onNameChange = { [weak self, weak cell] name in
+                guard let self, !self.stopped, !self.isUpdating, self.editingCell === cell,
+                      self.input.nameEditing?.reference == editing.reference else { return }
+                self.input.nameEditing?.onChange(name)
+            }
+            cell.onNameSubmit = { [weak self, weak cell] in
+                guard let self, !self.stopped, !self.isUpdating, self.editingCell === cell,
+                      let current = self.input.nameEditing, current.reference == editing.reference,
+                      !current.isSubmitting else { return }
+                current.onSubmit()
+                // 无效输入仍保持可继续修改；成功或提交中由最新状态结束输入。
+                Task { @MainActor [weak self] in
+                    guard let self, self.input.nameEditing?.error != nil else { return }
+                    self.updateNameEditing(refocus: true)
+                }
+            }
+            cell.onNameCancel = { [weak self, weak cell] in
+                guard let self, !self.stopped, !self.isUpdating, self.editingCell === cell,
+                      let current = self.input.nameEditing, current.reference == editing.reference,
+                      !current.isSubmitting else { return }
+                cell?.stopEditing()
+                current.onCancel()
+            }
+            if begins || refocus || replacesCell {
+                Task { @MainActor [weak self, weak cell] in
+                    guard let self, !self.stopped, self.editingCell === cell,
+                          let current = self.input.nameEditing, current.reference == editing.reference,
+                          !current.isSubmitting else { return }
+                    cell?.focusName(selection: selection, selectAll: begins || (replacesCell && selection == nil))
+                }
+            }
         }
 
         func stop() {
             stopped = true
+            renameAfterMenu = nil
+            editingCell?.stopEditing()
+            editingCell = nil
+            editingReference = nil
             observation = UUID()
             for task in tasks.values { task.cancel() }
             tasks.removeAll()
@@ -328,6 +438,12 @@ struct NetdiskOutlineView: NSViewRepresentable {
             return cell
         }
 
+        func outlineView(_ outlineView: NSOutlineView, heightOfRowByItem item: Any) -> CGFloat {
+            guard let editing = input.nameEditing, editing.error != nil,
+                  (item as? FileNode<RemoteEntry>)?.entry?.reference == editing.reference else { return 30 }
+            return 50
+        }
+
         func outlineView(_ outlineView: NSOutlineView, sortDescriptorsDidChange oldDescriptors: [NSSortDescriptor]) {
             guard !isUpdating, let sort = outlineView.sortDescriptors.first,
                   let key = sort.key, let field = DirectoryBrowserState.Sort(rawValue: key) else { return }
@@ -389,6 +505,7 @@ struct NetdiskOutlineView: NSViewRepresentable {
             if row == -1 {
                 guard input.onNewFolder != nil else { return nil }
                 let menu = NSMenu()
+                menu.delegate = self
                 let item = NSMenuItem(title: "新建文件夹", action: #selector(newFolder), keyEquivalent: "")
                 item.target = self
                 menu.addItem(item)
@@ -398,6 +515,7 @@ struct NetdiskOutlineView: NSViewRepresentable {
                   let entry = (table.item(atRow: row) as? FileNode<RemoteEntry>)?.entry else { return nil }
             menuEntry = entry
             let menu = NSMenu()
+            menu.delegate = self
             for (title, action) in [("下载", #selector(download)), ("上传到此文件夹", #selector(upload)),
                                     ("重命名", #selector(rename)), ("移到回收站", #selector(deleteEntry))] {
                 if action == #selector(upload), !entry.isDirectory { continue }
@@ -411,7 +529,28 @@ struct NetdiskOutlineView: NSViewRepresentable {
         @objc private func newFolder() { input.onNewFolder?() }
         @objc private func download() { if let menuEntry { input.onDownload(menuEntry) } }
         @objc private func upload() { if let menuEntry { _ = input.onUpload(menuEntry, []) } }
-        @objc private func rename() { if let menuEntry { input.onRename(menuEntry) } }
+        /// 菜单先完成焦点归还，再让行内编辑取得焦点，避免立刻收到离焦提交。
+        @objc private func rename() {
+            guard let menuEntry else { return }
+            if isMenuTracking { renameAfterMenu = menuEntry }
+            else { beginRenameAfterMenu(menuEntry) }
+        }
+
+        func menuWillOpen(_ menu: NSMenu) { isMenuTracking = true }
+
+        func menuDidClose(_ menu: NSMenu) {
+            isMenuTracking = false
+            guard let entry = renameAfterMenu else { return }
+            renameAfterMenu = nil
+            beginRenameAfterMenu(entry)
+        }
+
+        private func beginRenameAfterMenu(_ entry: RemoteEntry) {
+            DispatchQueue.main.async { [weak self] in
+                guard let self, !self.stopped else { return }
+                self.input.onRename(entry)
+            }
+        }
         @objc private func deleteEntry() { if let menuEntry { input.onDelete(menuEntry) } }
 
         func outlineView(_ outlineView: NSOutlineView, validateDrop info: any NSDraggingInfo,
@@ -500,11 +639,20 @@ final class FileOutline: NSOutlineView {
     }
 }
 
-private final class NameCell: NSTableCellView {
+private final class NameCell: NSTableCellView, NSTextFieldDelegate {
     let checkbox = NSButton(title: "", target: nil, action: nil)
     let icon = NSImageView()
     let label = NSTextField(labelWithString: "")
+    private let errorLabel = NSTextField(labelWithString: "")
+    private var editing = false
+    private var suppressEndEditing = false
+    private var originalName = ""
+    private var pendingFocus: (selection: NSRange?, selectAll: Bool)?
+    private var isApplyingFocus = false
     var onToggle: (() -> Void)?
+    var onNameChange: ((String) -> Void)?
+    var onNameSubmit: (() -> Void)?
+    var onNameCancel: (() -> Void)?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -517,19 +665,139 @@ private final class NameCell: NSTableCellView {
         checkbox.setAccessibilityRole(.checkBox)
         label.lineBreakMode = .byTruncatingMiddle
         label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
-        let stack = NSStackView(views: [checkbox, icon, label])
-        stack.spacing = 7
-        stack.alignment = .centerY
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
-        NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor), stack.trailingAnchor.constraint(equalTo: trailingAnchor),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor), icon.widthAnchor.constraint(equalToConstant: 18),
-            icon.heightAnchor.constraint(equalToConstant: 18), checkbox.widthAnchor.constraint(equalToConstant: 18)
-        ])
+        label.delegate = self
+        errorLabel.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+        errorLabel.textColor = .systemRed
+        errorLabel.lineBreakMode = .byTruncatingTail
+        errorLabel.isHidden = true
+        for view in [checkbox, icon, label, errorLabel] as [NSView] { addSubview(view) }
         textField = label
         imageView = icon
     }
+
+    /// 可见条目身份由代理核对；更新文案时保留正在输入的选区和输入法组合文本。
+    func configure(editing state: FileNameEditing) {
+        suppressEndEditing = true
+        defer { suppressEndEditing = false }
+        if !editing {
+            originalName = label.stringValue
+        }
+        editing = true
+        if label.currentEditor() == nil { label.stringValue = state.name }
+        let acceptsInput = !state.isSubmitting
+        if label.isEnabled != acceptsInput { label.isEnabled = acceptsInput }
+        if label.isEditable != acceptsInput { label.isEditable = acceptsInput }
+        if label.isSelectable != acceptsInput { label.isSelectable = acceptsInput }
+        label.isBezeled = true
+        label.bezelStyle = .roundedBezel
+        label.drawsBackground = true
+        label.backgroundColor = .textBackgroundColor
+        label.lineBreakMode = .byClipping
+        label.wantsLayer = true
+        label.layer?.cornerRadius = 4
+        label.layer?.borderWidth = state.error == nil ? 0 : 1
+        label.layer?.borderColor = NSColor.systemRed.cgColor
+        errorLabel.stringValue = state.error ?? ""
+        errorLabel.toolTip = state.error
+        errorLabel.isHidden = state.error == nil
+        label.setAccessibilityLabel("名称")
+        label.setAccessibilityHelp(state.error)
+        needsLayout = true
+    }
+
+    /// 表格提供单元格宽度，固定图标区后将剩余宽度全部交给名称。
+    override func layout() {
+        super.layout()
+        let width = max(0, bounds.width - 50)
+        checkbox.frame = NSRect(x: 0, y: (bounds.height - 18) / 2, width: 18, height: 18)
+        icon.frame = NSRect(x: 25, y: (bounds.height - 18) / 2, width: 18, height: 18)
+        if errorLabel.isHidden {
+            label.frame = NSRect(x: 50, y: (bounds.height - 22) / 2, width: width, height: 22)
+        } else {
+            label.frame = NSRect(x: 50, y: bounds.height - 25, width: width, height: 24)
+            errorLabel.frame = NSRect(x: 50, y: 5, width: width, height: 14)
+        }
+        applyPendingFocus()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil { needsLayout = true }
+    }
+
+    /// 程序性刷新或销毁输入框不触发用户提交。
+    func stopEditing() {
+        guard editing else { return }
+        suppressEndEditing = true
+        editing = false
+        pendingFocus = nil
+        if label.currentEditor() != nil { window?.endEditing(for: label) }
+        label.isEnabled = true
+        label.isEditable = false
+        label.isSelectable = false
+        label.isBezeled = false
+        label.drawsBackground = false
+        label.layer?.borderWidth = 0
+        label.stringValue = originalName
+        label.lineBreakMode = .byTruncatingMiddle
+        errorLabel.isHidden = true
+        needsLayout = true
+        onNameChange = nil
+        onNameSubmit = nil
+        onNameCancel = nil
+        suppressEndEditing = false
+    }
+
+    /// 焦点请求保留到视图已挂载且 field editor 建立，避免刷新过程中丢失首次编辑。
+    func focusName(selection: NSRange?, selectAll: Bool) {
+        guard editing, label.isEditable else { return }
+        pendingFocus = (selection, selectAll)
+        needsLayout = true
+        layoutSubtreeIfNeeded()
+        applyPendingFocus()
+    }
+
+    private func applyPendingFocus() {
+        guard !isApplyingFocus, let request = pendingFocus, editing, label.isEditable,
+              label.bounds.width > 0, let window else { return }
+        isApplyingFocus = true
+        defer { isApplyingFocus = false }
+        if label.currentEditor() == nil {
+            window.makeFirstResponder(label)
+            if label.currentEditor() == nil { label.selectText(nil) }
+        }
+        guard let editor = label.currentEditor() as? NSTextView else { return }
+        pendingFocus = nil
+        if let selection = request.selection {
+            let count = (editor.string as NSString).length
+            let location = min(selection.location, count)
+            editor.setSelectedRange(NSRange(location: location, length: min(selection.length, count - location)))
+        } else if request.selectAll { editor.selectAll(nil) }
+    }
+
+    func controlTextDidChange(_ notification: Notification) {
+        guard editing, !suppressEndEditing else { return }
+        onNameChange?(label.stringValue)
+    }
+
+    func controlTextDidEndEditing(_ notification: Notification) {
+        guard editing, !suppressEndEditing, !isApplyingFocus else { return }
+        onNameSubmit?()
+    }
+
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        guard editing else { return false }
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+            onNameSubmit?()
+            return true
+        }
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            onNameCancel?()
+            return true
+        }
+        return false
+    }
+
     required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
     @objc private func toggle() { onToggle?() }
 }

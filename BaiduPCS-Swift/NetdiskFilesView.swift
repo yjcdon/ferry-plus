@@ -14,9 +14,6 @@ struct NetdiskFilesView: View {
     @Environment(AppModel.self) private var model
     @State private var searchFocusRequest = 0
     @State private var contentWidth: CGFloat = 0
-    @State private var pendingNewFolder: NewFolderTarget?
-    @State private var folderName = ""
-    @State private var folderError: String?
     @State private var creation: Creation?
     @State private var pendingDeletion: Deletion?
     @State private var deletion: Deletion?
@@ -36,10 +33,6 @@ struct NetdiskFilesView: View {
         let id = UUID()
         let context: DirectoryContext
         let name: String
-    }
-    private struct NewFolderTarget: Identifiable {
-        let id = UUID()
-        let context: DirectoryContext
     }
     private struct OperationFeedback: Identifiable {
         let id = UUID()
@@ -71,7 +64,7 @@ struct NetdiskFilesView: View {
         .init(account: model.accountKey(for: browser.provider), session: sessionIdentity, generation: browser.generation)
     }
     private var canOperate: Bool {
-        !isBusy && pendingNewFolder == nil && pendingRename == nil && pendingDeletion == nil &&
+        !isBusy && pendingRename == nil && pendingDeletion == nil &&
         model.sheet == nil && browser.context.map(isCurrent) == true
     }
     private var canUpload: Bool { canOperate && allowsUpload }
@@ -107,7 +100,10 @@ struct NetdiskFilesView: View {
             HStack {
                 if let tree = browser.tree { FileSelectionSummary(entries: tree.selectedEntries) }
                 Spacer()
-                if browser.isLoading { ProgressView().controlSize(.small) }
+                if creation != nil {
+                    ProgressView().controlSize(.small)
+                    Text("创建中").foregroundStyle(.secondary)
+                } else if browser.isLoading { ProgressView().controlSize(.small) }
             }.padding(.horizontal).workspaceFooter()
         }
         .background {
@@ -132,24 +128,26 @@ struct NetdiskFilesView: View {
         .task(id: deletion?.id) { if let deletion { await delete(deletion) } }
         .task(id: renaming?.id) { if let renaming { await rename(renaming) } }
         .focusedSceneValue(\.focusTaskSearch, { searchFocusRequest += 1 })
-        .onChange(of: loadID.account) { _, _ in operationFeedback = nil }
-        .onChange(of: loadID.session) { _, _ in operationFeedback = nil }
-        .onChange(of: pendingNewFolder != nil || pendingDeletion != nil || pendingRename != nil || isBusy) { _, presented in
+        .onChange(of: loadID.account) { _, _ in operationFeedback = nil; pendingRename = nil }
+        .onChange(of: loadID.session) { _, _ in operationFeedback = nil; pendingRename = nil }
+        .onChange(of: pendingDeletion != nil || pendingRename != nil || isBusy) { _, presented in
             browser.isOperationPresented = presented
         }
+        .onChange(of: browser.currentDirectory) { _, _ in pendingRename = nil }
+        .onChange(of: browser.tree.map(ObjectIdentifier.init)) { _, _ in
+            guard browser.tree != nil, !browser.isLoading, let target = pendingRename,
+                  renaming == nil, browser.path(to: target.entry.reference) == nil else { return }
+            operationFeedback = .init(message: renameError ?? "目录已更新，请重新选择项目。", isError: true)
+            pendingRename = nil
+            renameError = nil
+        }
         .onDisappear {
+            pendingRename = nil
             browser.clearSelection()
             browser.isOperationPresented = false
             isDropTarget = false
             operationFeedback = nil
         }
-        .sheet(item: $pendingNewFolder) { target in
-            NameInputSheet(title: "新建文件夹", prompt: "文件夹名称", submitTitle: "新建",
-                           name: $folderName, error: $folderError, isSubmitting: creation != nil,
-                           destination: target.context.pathDescription,
-                           onCancel: { pendingNewFolder = nil }, onSubmit: { submitNewFolder(target) })
-        }
-        .sheet(item: $pendingRename, content: renameSheet)
         .sheet(item: $pendingDeletion) { request in
             VStack(spacing: 0) {
                 HStack { Text("移到网盘回收站？").font(.headline); Spacer() }.padding()
@@ -334,7 +332,7 @@ struct NetdiskFilesView: View {
                     }, onDownload: { entry in
                         if canOperate, let context = browser.context { onDownload(context, contextEntries(entry)) }
                     }, onRename: prepareRename, onDelete: { prepareDeletion(contextEntries($0)) },
-                    onNewFolder: newFolderAction)
+                    onNewFolder: newFolderAction, nameEditing: nameEditing)
                     .id(ObjectIdentifier(tree))
             }
         } else if let error = browser.errorMessage {
@@ -374,11 +372,30 @@ struct NetdiskFilesView: View {
         return { prepareNewFolder() }
     }
 
-    /// 空白处的新建命令沿用当前目录与现有名称校验弹窗。
+    /// 在当前目录创建默认名称，收到准确回执后立即在列表中编辑名称。
     private func prepareNewFolder() {
-        guard canOperate, let context = browser.context else { return }
-        folderName = ""; folderError = nil
-        pendingNewFolder = .init(context: context)
+        guard canOperate, let context = browser.context,
+              let nodes = browser.tree?.root.children else { return }
+        let names = Set(nodes.compactMap { $0.entry?.name })
+        let base = "未命名文件夹"
+        var name = base
+        var suffix = 2
+        while names.contains(name) {
+            name = "\(base) \(suffix)"
+            suffix += 1
+        }
+        operationFeedback = nil
+        browser.query = ""
+        creation = .init(context: context, name: name)
+    }
+
+    private var nameEditing: FileNameEditing? {
+        guard let target = pendingRename else { return nil }
+        return .init(reference: target.entry.reference, name: renameName, error: renameError,
+                     isSubmitting: renaming != nil,
+                     onChange: { renameName = $0; renameError = nil },
+                     onSubmit: { submitRename(target) },
+                     onCancel: { if renaming == nil { pendingRename = nil; renameError = nil } })
     }
 
     private func notice(_ message: String) -> some View {
@@ -409,29 +426,9 @@ struct NetdiskFilesView: View {
         pendingDeletion = .init(context: context, targets: targets)
     }
 
-    /// 校验失败保留名称和弹窗，红框与简短提示直接标记需要修改的输入。
-    private func renameSheet(_ target: RenameTarget) -> some View {
-        NameInputSheet(title: "重命名", prompt: "名称", submitTitle: "确定",
-                       name: $renameName, error: $renameError, isSubmitting: renaming != nil,
-                       onCancel: { pendingRename = nil }, onSubmit: { submitRename(target) })
-    }
-
-    /// 新建和改名采用同一名称约束，提交失败时在原面板保留输入与提示。
-    private func submitNewFolder(_ target: NewFolderTarget) {
-        if let message = NetdiskRenameError.validationMessage(folderName, provider: target.context.provider) {
-            folderError = message
-            return
-        }
-        guard isCurrent(target.context) else {
-            folderError = "请重新选择账号和新建位置。"
-            return
-        }
-        folderError = nil
-        creation = .init(context: target.context, name: folderName)
-    }
-
-    /// 仅在点击确定时校验名称，不用禁用按钮隐藏无效输入的原因。
+    /// 提交时校验名称，错误留在行内，输入及准确目标保持可恢复。
     private func submitRename(_ target: RenameTarget) {
+        guard renaming == nil else { return }
         if let message = NetdiskRenameError.validationMessage(renameName, provider: target.context.provider) {
             renameError = message
             return
@@ -478,7 +475,7 @@ struct NetdiskFilesView: View {
         }
     }
 
-    /// 只提交一次创建，服务端回执未确认时由用户刷新核对，不自动重发写请求。
+    /// 从已加载目录选择默认名；创建只提交一次，按准确回执插入列表后编辑。
     private func createFolder(_ request: Creation) async {
         defer { creation = nil }
         do {
@@ -487,12 +484,17 @@ struct NetdiskFilesView: View {
                                                              account: request.context.account)
             try Task.checkCancellation()
             guard isCurrent(request.context) else { throw UploadDestinationError.otherAccount }
-            if browser.currentDirectory == request.context.reference { browser.reveal(entry, select: true) }
-            pendingNewFolder = nil
-            operationFeedback = .init(message: "已创建【\(entry.name)】。", isError: false)
+            if browser.currentDirectory == request.context.reference {
+                renameName = entry.name
+                renameError = nil
+                pendingRename = .init(context: request.context, entry: entry,
+                                      parent: request.context.reference, wasSelected: true)
+                browser.insertCreated(entry)
+            }
         } catch {
             if !Task.isCancelled {
-                folderError = isCurrent(request.context) ? error.localizedDescription : "请重新选择账号和新建位置。"
+                operationFeedback = .init(message: isCurrent(request.context) ? error.localizedDescription : "请重新选择账号和新建位置。",
+                                          isError: true)
             }
         }
     }
@@ -524,57 +526,5 @@ struct NetdiskFilesView: View {
             (unconfirmed > 0 ? "\n\(unconfirmed) 项待处理。" : "") +
             (failures.isEmpty ? "" : "\n" + failures.joined(separator: "\n"))
         operationFeedback = .init(message: message, isError: unconfirmed > 0)
-    }
-}
-
-/// 名称编辑保持同一输入、错误和提交布局，异步操作期间固定当前面板。
-private struct NameInputSheet: View {
-    let title: String
-    let prompt: String
-    let submitTitle: String
-    @Binding var name: String
-    @Binding var error: String?
-    let isSubmitting: Bool
-    var destination: String? = nil
-    let onCancel: () -> Void
-    let onSubmit: () -> Void
-    @FocusState private var isNameFocused: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(title).font(.headline)
-            if let destination {
-                Text("新建到【\(destination)】").font(.callout).foregroundStyle(.secondary)
-                    .lineLimit(2)
-            }
-            TextField(prompt, text: $name)
-                .textFieldStyle(.plain)
-                .padding(8)
-                .background(Color(nsColor: .textBackgroundColor), in: .rect(cornerRadius: 5))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 5)
-                        .stroke(error == nil ? Color.secondary.opacity(0.4) : Color.red,
-                                lineWidth: error == nil ? 1 : 2)
-                }
-                .accessibilityLabel(prompt)
-                .accessibilityHint(error ?? "")
-                .focused($isNameFocused)
-                .disabled(isSubmitting)
-                .onChange(of: name) { _, _ in error = nil }
-            if let error { Text(error).font(.callout).foregroundStyle(.red) }
-            HStack {
-                if isSubmitting { ProgressView().controlSize(.small) }
-                Spacer()
-                Button("取消", role: .cancel, action: onCancel)
-                    .keyboardShortcut(.cancelAction).disabled(isSubmitting)
-                Button(submitTitle, action: onSubmit)
-                    .keyboardShortcut(.defaultAction).disabled(isSubmitting)
-            }
-        }
-        .padding(20)
-        .frame(width: 480)
-        .solidSheetSurface()
-        .interactiveDismissDisabled(isSubmitting)
-        .onAppear { isNameFocused = true }
     }
 }

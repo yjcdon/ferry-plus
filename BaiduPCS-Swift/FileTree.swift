@@ -27,6 +27,13 @@ final class FileNode<Entry: FileTreeEntry>: Identifiable {
         self.entry = entry
     }
 
+    /// 将已确认创建的条目加入已加载目录；保留其余节点、展开和选择状态。
+    func insertCreated(_ entry: Entry) {
+        precondition(children != nil, "Created entries require a loaded directory")
+        guard children?.contains(where: { $0.id == entry.id }) == false else { return }
+        children?.append(FileNode(entry: entry))
+    }
+
     /// 绕过编译器崩溃：Swift 6.3 用 `-O` 编译默认 MainActor 隔离的泛型类的隐式 deinit 时崩溃。
     nonisolated deinit {}
 
