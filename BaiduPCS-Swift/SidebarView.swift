@@ -146,7 +146,8 @@ private struct AccountView: View {
                 Image(systemName: "person.crop.circle").font(.title2)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("账号与设置").lineLimit(1)
-                    Text(accountStatus).font(.caption).foregroundStyle(.secondary)
+                    Text(accountStatus).font(.caption)
+                        .foregroundStyle(hasAccountProblem ? Color.orange : Color.secondary)
                 }
                 Spacer(minLength: 0)
             }
@@ -158,6 +159,8 @@ private struct AccountView: View {
         .help("百度与夸克账号")
         .logOutConfirmation(isPresented: $isConfirmingLogOut)
     }
+
+    private var hasAccountProblem: Bool { model.isLoginExpired || model.quark.problem != nil }
 
     private var accountStatus: String {
         let baidu = model.account == nil ? "待登录" : model.isLoginExpired ? "登录已失效" : "已登录"

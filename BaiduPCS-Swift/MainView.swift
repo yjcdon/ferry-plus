@@ -138,6 +138,7 @@ struct MainView: View {
                     }
                 }
             }
+            .safeAreaInset(edge: .top, spacing: 0) { operationFeedback }
             .frame(minWidth: 0, maxWidth: .infinity, maxHeight: .infinity)
             .navigationTitle(windowTitle)
             .navigationSplitViewColumnWidth(min: 320, ideal: 640, max: .infinity)
@@ -221,7 +222,10 @@ struct MainView: View {
             if sheet == nil { consumeWorkspaceRequest() }
         }
         .onChange(of: workspace.page, initial: true) { old, page in
-            if old != page, let provider = old?.provider { workspace.browser(for: provider).clearSelection() }
+            if old != page {
+                operationError = nil
+                if let provider = old?.provider { workspace.browser(for: provider).clearSelection() }
+            }
             if let provider = page?.provider { providerFilter = provider }
             if case .transfers(let selected) = page { category = selected }
         }
@@ -259,15 +263,28 @@ struct MainView: View {
                 remove(pending)
             }
         } message: { pending in Text(pending.message) }
-        .alert("传输操作提示", isPresented: Binding(
-            get: { operationError != nil }, set: { if !$0 { operationError = nil } }
-        )) { Button("好") { operationError = nil } } message: { Text(operationError ?? "") }
-        .alert("请在 Finder 中处理剩余文件", isPresented: Binding(
-            get: { !model.untrashedItems.isEmpty }, set: { if !$0 { model.untrashedItems = [] } }
-        ), presenting: model.untrashedItems) { items in
-            Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting(items) }
-            Button("好", role: .cancel) {}
-        } message: { items in Text("\(items.count) 项仍在原来的位置，可以在 Finder 中手动删除。") }
+    }
+
+    /// 操作尚未形成任务或定位失败时，就近保留原因与恢复入口，避免打断当前操作。
+    @ViewBuilder private var operationFeedback: some View {
+        VStack(spacing: 0) {
+            if let operationError {
+                Banner(message: operationError) {
+                    Button("关闭") { self.operationError = nil }
+                }
+            }
+            if let problem = model.uploadProblem {
+                Banner(message: problem) {
+                    Button("关闭") { model.uploadProblem = nil }
+                }
+            }
+            if !model.untrashedItems.isEmpty {
+                Banner(message: "\(model.untrashedItems.count) 项文件待移到废纸篓。") {
+                    Button("在 Finder 中显示") { NSWorkspace.shared.activateFileViewerSelecting(model.untrashedItems) }
+                    Button("关闭") { model.untrashedItems = [] }
+                }
+            }
+        }
     }
 
     private var selectWorkspaceItemsAction: (() -> Void)? {
@@ -280,13 +297,13 @@ struct MainView: View {
     }
 
     private var canPresentConfirmation: Bool {
-        model.sheet == nil && !hasWorkspacePresentation && !model.isConfirmingMenuLogOut && model.untrashedItems.isEmpty
+        model.sheet == nil && !hasWorkspacePresentation && !model.isConfirmingMenuLogOut
     }
 
     /// 只由主窗口实际流程推导占用；不反读反馈给 AppModel 的标记，避免关闭后自锁。
     private var hasWorkspacePresentation: Bool {
         directUpload.isBusy || downloadConfirmation != nil || inspectorOperationPresented ||
-        workspace.browser.isOperationPresented || pendingRemoval != nil || !downloadRemoval.isIdle || operationError != nil
+        workspace.browser.isOperationPresented || pendingRemoval != nil || !downloadRemoval.isIdle
     }
 
     private var filesContent: some View {
@@ -329,6 +346,7 @@ struct MainView: View {
     /// 选择和投放共用同一入口；来自列表的账号和目录在操作开始时固定。
     private func presentUpload(_ context: DirectoryContext, _ files: [URL]) {
         guard canPresentConfirmation else { return }
+        operationError = nil
         var seen = Set<URL>()
         let selected = (workspace.pendingFiles + files).map(\.standardizedFileURL).filter { seen.insert($0).inserted }
         directUpload.start(context: context, files: selected, model: model) { result in
@@ -476,6 +494,7 @@ struct MainView: View {
 
     /// 即使菜单携带旧快照，执行入口也只接收当前仍可见的同方向身份。
     private func perform(_ action: TransferAction, _ ids: [TransferTaskID]) {
+        operationError = nil
         guard uploadCommand == nil else { return }
         let wanted = Set(ids)
         let targets = visibleItems.filter { wanted.contains($0.id) && action.allows($0, model: model) }

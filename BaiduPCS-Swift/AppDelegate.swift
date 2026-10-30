@@ -159,6 +159,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter,
                                             willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .list]
+        await MainActor.run { NSApp.isActive ? [] : [.banner, .list] }
     }
 }

@@ -34,10 +34,8 @@ struct NetdiskFilesView: View {
         let context: DirectoryContext
         let name: String
     }
-    private struct OperationFeedback: Identifiable {
-        let id = UUID()
+    private struct OperationFeedback {
         let message: String
-        let isError: Bool
     }
     private struct Deletion: Identifiable {
         let id = UUID()
@@ -81,9 +79,7 @@ struct NetdiskFilesView: View {
             }
             if let operationFeedback {
                 HStack {
-                    if operationFeedback.isError {
-                        Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
-                    }
+                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
                     Text(operationFeedback.message).font(.callout).textSelection(.enabled)
                     Spacer()
                     if !browser.query.isEmpty {
@@ -115,15 +111,6 @@ struct NetdiskFilesView: View {
         }
         .toolbar { toolbar }
         .task(id: loadID) { await browser.load(model: model) }
-        .task(id: operationFeedback?.id) {
-            guard let feedback = operationFeedback, !feedback.isError else { return }
-            do {
-                try await Task.sleep(for: .seconds(10))
-                if operationFeedback?.id == feedback.id { operationFeedback = nil }
-            } catch is CancellationError {
-                // 新提示或页面关闭会取消旧提示的倒计时。
-            } catch { assertionFailure("Unexpected sleep error: \(error)") }
-        }
         .task(id: creation?.id) { if let creation { await createFolder(creation) } }
         .task(id: deletion?.id) { if let deletion { await delete(deletion) } }
         .task(id: renaming?.id) { if let renaming { await rename(renaming) } }
@@ -137,7 +124,7 @@ struct NetdiskFilesView: View {
         .onChange(of: browser.tree.map(ObjectIdentifier.init)) { _, _ in
             guard browser.tree != nil, !browser.isLoading, let target = pendingRename,
                   renaming == nil, browser.path(to: target.entry.reference) == nil else { return }
-            operationFeedback = .init(message: renameError ?? "目录已更新，请重新选择项目。", isError: true)
+            operationFeedback = .init(message: renameError ?? "目录已更新，请重新选择项目。")
             pendingRename = nil
             renameError = nil
         }
@@ -170,7 +157,7 @@ struct NetdiskFilesView: View {
                     Button("移到回收站", role: .destructive) {
                         pendingDeletion = nil
                         guard isCurrent(request.context) else {
-                            operationFeedback = .init(message: "请重新选择账号和项目。", isError: true)
+                            operationFeedback = .init(message: "请重新选择账号和项目。")
                             return
                         }
                         deletion = request
@@ -493,8 +480,7 @@ struct NetdiskFilesView: View {
             }
         } catch {
             if !Task.isCancelled {
-                operationFeedback = .init(message: isCurrent(request.context) ? error.localizedDescription : "请重新选择账号和新建位置。",
-                                          isError: true)
+                operationFeedback = .init(message: isCurrent(request.context) ? error.localizedDescription : "请重新选择账号和新建位置。")
             }
         }
     }
@@ -522,9 +508,10 @@ struct NetdiskFilesView: View {
         }
         guard isCurrent(request.context), !Task.isCancelled else { return }
         let unconfirmed = request.targets.count - confirmed
+        guard unconfirmed > 0 else { operationFeedback = nil; return }
         let message = "已移入回收站 \(confirmed) 项。" +
-            (unconfirmed > 0 ? "\n\(unconfirmed) 项待处理。" : "") +
+            "\n\(unconfirmed) 项待处理。" +
             (failures.isEmpty ? "" : "\n" + failures.joined(separator: "\n"))
-        operationFeedback = .init(message: message, isError: unconfirmed > 0)
+        operationFeedback = .init(message: message)
     }
 }

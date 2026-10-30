@@ -796,7 +796,7 @@ final class AppModel {
         openLoginWindow?()
     }
 
-    /// 百度明确返回登录失效时，显示失效横幅。其他错误不影响登录状态。
+    /// 百度明确返回登录失效时更新账号状态，其他错误不影响登录状态。
     func noteError(_ error: any Error, from disk: any Netdisk) {
         guard coordinator.netdisks[disk.account.provider] === disk else { return }
         if let error = error as? BaiduError, error == .loginExpired, client != nil {
@@ -949,6 +949,7 @@ final class AppModel {
             if checkingCancellationAfterSettings {
                 guard !Task.isCancelled, authorization?.isCancelled != true else { return }
             }
+            guard !NSApp.isActive else { return }
             try? await center.add(request)
         }
     }

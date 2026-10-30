@@ -63,7 +63,7 @@ struct WindowReader: NSViewRepresentable {
     }
 }
 
-/// 任务列表上方的提示条：加载警告、未登录、登录失效。
+/// 传输记录加载和清理问题留在传输列表，账号问题由账号入口处理。
 struct Banners: View {
     @Environment(AppModel.self) private var model
 
@@ -72,26 +72,6 @@ struct Banners: View {
             if let warning = model.coordinator.loadWarning {
                 Banner(message: warning) {
                     Button("关闭") { model.coordinator.dismissLoadWarning() }
-                }
-            }
-            if let problem = model.uploadProblem {
-                Banner(message: "上传：" + problem) {
-                    Button("关闭") { model.uploadProblem = nil }
-                }
-            }
-            if model.account == nil, model.coordinator.jobs.contains(where: { $0.provider == .baidu && $0.isUnfinished }) {
-                Banner(message: "请登录百度网盘。") {
-                    Button("登录") { model.presentLogin() }
-                }
-            } else if model.isLoginExpired {
-                Banner(message: "请重新登录百度网盘。") {
-                    Button("重新登录") { model.presentLogin() }
-                }
-            }
-            if let problem = model.quark.problem {
-                Banner(message: "夸克网盘：" + problem) {
-                    Button("重试") { Task { await model.quark.revalidate() } }
-                    Button("登录") { model.presentLogin(for: .quark) }
                 }
             }
             if !model.coordinator.removalProblems.isEmpty {

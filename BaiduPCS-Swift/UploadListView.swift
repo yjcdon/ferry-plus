@@ -176,8 +176,7 @@ struct UploadInspector: View {
     }
     private var job: UploadJob? { model.uploadJobs.first { $0.id == jobID } }
     private var isPresentingOperation: Bool {
-        relocation.isPickerPresented || relocation.request != nil || relocation.error != nil ||
-        location.request != nil || location.error != nil
+        relocation.isPickerPresented || relocation.request != nil || location.request != nil
     }
     private var request: PageRequest {
         .init(offset: offset, generation: generation, integrityRevision: model.integrityRecordsRevision, count: job?.fileIDs.count ?? 0, phase: job?.phase,
@@ -213,6 +212,13 @@ struct UploadInspector: View {
                     if let error = job.error { Text(error).font(.callout).foregroundStyle(.red).textSelection(.enabled) }
                 }
             }.frame(maxWidth: .infinity, alignment: .leading).padding()
+            if let problem = location.error ?? relocation.error {
+                HStack(alignment: .top, spacing: 8) {
+                    Text(problem).font(.callout).foregroundStyle(.red).textSelection(.enabled)
+                    Spacer(minLength: 0)
+                    Button("关闭") { location.error = nil; relocation.error = nil }
+                }.padding(.horizontal).padding(.bottom, 12)
+            }
             Divider()
             content.frame(maxWidth: .infinity, maxHeight: .infinity)
             Divider()
@@ -242,9 +248,6 @@ struct UploadInspector: View {
             guard let request = location.request else { return }
             await openCloudDirectory(request)
         }
-        .alert("文件定位失败", isPresented: Binding(
-            get: { location.error != nil }, set: { if !$0 { location.error = nil } }
-        )) { Button("好") { location.error = nil } } message: { Text(location.error ?? "") }
         .fileImporter(isPresented: $relocation.isPickerPresented, allowedContentTypes: [.item],
                       allowsMultipleSelection: false, onCompletion: { [picker = relocation.picker] result in
             guard let picker, relocation.picker?.id == picker.id else { return }
@@ -259,9 +262,6 @@ struct UploadInspector: View {
             guard let picker, relocation.picker?.id == picker.id else { return }
             relocation.picker = nil; relocation.isPickerPresented = false
         })
-        .alert("源文件定位失败", isPresented: Binding(
-            get: { relocation.error != nil }, set: { if !$0 { relocation.error = nil } }
-        )) { Button("好") { relocation.error = nil } } message: { Text(relocation.error ?? "") }
         .onChange(of: job?.fileIDs.count) {
             let count = job?.fileIDs.count ?? 0
             if offset >= count { showPage(max(0, ((count - 1) / pageSize) * pageSize)) }
@@ -307,7 +307,7 @@ struct UploadInspector: View {
                     if canRelocate(file) {
                         HStack {
                             Button("重新定位源文件") {
-                                relocation.picker = .init(fileID: file.id); relocation.isPickerPresented = true
+                                relocation.error = nil; relocation.picker = .init(fileID: file.id); relocation.isPickerPresented = true
                             }.controlSize(.small).disabled(relocation.request != nil)
                             if relocation.request?.fileID == file.id {
                                 ProgressView().controlSize(.small)
@@ -379,6 +379,7 @@ struct UploadInspector: View {
 
     /// 先关闭传输明细，再交给主文件页定位；查询及导航始终绑定原任务账号。
     private func openCloudDirectory(_ request: CloudRequest) async {
+        location.error = nil
         defer { if location.request?.id == request.id { location.request = nil } }
         do {
             guard let sourceJob = job, let coordinator = model.uploadCoordinator else { throw UploadCoordinatorError.missingJob }
@@ -429,6 +430,7 @@ struct UploadInspector: View {
 
     /// 选择仅变更本地定位；协调器停稳旧执行器并复核完整摘要，失败保持原记录。
     private func relocate(_ request: RelocationRequest) async {
+        relocation.error = nil
         defer { if relocation.request?.id == request.id { relocation.request = nil } }
         do {
             guard let coordinator = model.uploadCoordinator else { throw UploadCoordinatorError.missingJob }
