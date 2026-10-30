@@ -46,7 +46,7 @@ struct NetdiskOutlineView: NSViewRepresentable {
         table.columnAutoresizingStyle = .noColumnAutoresizing
         table.allowsColumnReordering = false
         table.allowsColumnResizing = true
-        table.allowsMultipleSelection = false
+        table.allowsMultipleSelection = true
         table.indentationPerLevel = 18
         table.autosaveTableColumns = false
         table.autoresizesOutlineColumn = false
@@ -105,6 +105,7 @@ struct NetdiskOutlineView: NSViewRepresentable {
         private var tasks: [ObjectIdentifier: Task<Void, Never>] = [:]
         private var observation = UUID()
         private var isUpdating = false
+        private weak var renderedTree: FileTree<RemoteEntry>?
         private var stopped = false
         private var menuEntry: RemoteEntry?
         private var isMenuTracking = false
@@ -209,6 +210,10 @@ struct NetdiskOutlineView: NSViewRepresentable {
             guard !stopped, let table, !isUpdating else { return }
             isUpdating = true
             defer { isUpdating = false }
+            let highlighted = renderedTree === input.tree ? Set(table.selectedRowIndexes.compactMap {
+                (table.item(atRow: $0) as? FileNode<RemoteEntry>)?.entry?.reference
+            }) : []
+            renderedTree = input.tree
             let hadEditor = editingCell?.label.currentEditor() != nil
             let selection = (editingCell?.label.currentEditor() as? NSTextView)?.selectedRange()
             editingCell?.stopEditing()
@@ -237,7 +242,12 @@ struct NetdiskOutlineView: NSViewRepresentable {
             }
             if let row,
                let entry = (table.item(atRow: row) as? FileNode<RemoteEntry>)?.entry {
-                table.selectRowIndexes(IndexSet(integer: row), byExtendingSelection: false)
+                let retainedRows = IndexSet((0..<table.numberOfRows).filter { index in
+                    guard let reference = (table.item(atRow: index) as? FileNode<RemoteEntry>)?.entry?.reference else { return false }
+                    return highlighted.contains(reference)
+                })
+                table.selectRowIndexes(input.browser.focusedReference != nil || retainedRows.isEmpty
+                                       ? IndexSet(integer: row) : retainedRows, byExtendingSelection: false)
                 input.browser.rememberFocus(entry.reference, row: row)
                 if let requested = input.browser.focusedReference, entry.reference == requested {
                     table.scrollRowToVisible(row)
