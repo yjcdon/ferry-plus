@@ -273,7 +273,7 @@ struct UploadInspector: View {
                 }
                 HStack(spacing: 6) {
                     ProviderIcon(provider: job.account.provider, size: 14)
-                    Text(job.account.provider.title + " · " + job.accountName).lineLimit(1)
+                    Text(job.account.provider.title).lineLimit(1)
                 }.font(.caption).foregroundStyle(.secondary)
                 Text(countSummary(job)).font(.caption).foregroundStyle(.secondary)
                 // 有文件失败时逐项展示原因；仅批次级问题留在摘要，避免重复整段错误。
@@ -415,7 +415,7 @@ struct UploadInspector: View {
         do {
             guard let sourceJob = job, let coordinator = model.uploadCoordinator else { throw UploadCoordinatorError.missingJob }
             guard model.accountKey(for: sourceJob.account.provider) == sourceJob.account else {
-                throw UploadRecordError.invalid("请先登录\(sourceJob.account.provider.title)账号【\(sourceJob.accountName)】再打开云端目录。")
+                throw UploadRecordError.invalid("请先登录任务所属的\(sourceJob.account.provider.title)账号，再打开云端目录。")
             }
             let directory: RemoteReference
             if let backupDirectory = request.directory {

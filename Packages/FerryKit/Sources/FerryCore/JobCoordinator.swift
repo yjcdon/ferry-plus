@@ -656,7 +656,7 @@ public final class JobCoordinator {
                 try await deleteJobDirectory(of: job, using: disk(for: job))
             } catch {
                 logger.error("cannot delete \(job.remoteDirectory): \(error.localizedDescription)")
-                removalProblems.append("\(job.provider.title) · \(job.accountName ?? job.accountKey?.accountID ?? "未记录账号") · \(job.remoteDirectory)：转存目录未清理，\(Self.message(for: error))")
+                removalProblems.append("\(job.provider.title) · \(job.remoteDirectory)：转存目录未清理，\(Self.message(for: error))")
             }
         }
         return failed

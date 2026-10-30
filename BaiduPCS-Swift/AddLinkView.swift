@@ -73,9 +73,8 @@ struct AddLinkView: View {
             }
             .disabled(isOpening)
             if let link = DiskShareLink.parse(linkText) {
-                let account = model.accountKey(for: link.provider)
                 Label {
-                    Text("\(link.provider.title) · \(account == nil ? "待登录" : model.coordinator.accountNames[link.provider] ?? "已登录账号")")
+                    Text(link.provider.title)
                 } icon: {
                     ProviderIcon(provider: link.provider, size: 16)
                 }

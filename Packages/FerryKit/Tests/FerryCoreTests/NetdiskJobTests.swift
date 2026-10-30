@@ -337,7 +337,7 @@ import Testing
         #expect(fixture.contents("a.bin") == data)
         #expect(fixture.netdisk.remotePaths() == remotePaths)
         #expect(fixture.netdisk.deletes == (failure == "deleteFailure" ? [[saved.remoteDirectory]] : []))
-        let expectedProblem = "百度网盘 · 原分享账号 · \(saved.remoteDirectory)：转存目录未清理，\(expectedReason)"
+        let expectedProblem = "百度网盘 · \(saved.remoteDirectory)：转存目录未清理，\(expectedReason)"
         #expect(coordinator.removalProblems == [expectedProblem])
         await coordinator.shutdown()
         #expect(coordinator.removalProblems == [expectedProblem])

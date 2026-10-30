@@ -479,11 +479,8 @@ struct JobNotes: View {
         }
     }
 
-    /// 有昵称时明确原账号；历史任务沿用原账号提示，账号标识仍用于内部归属判断。
+    /// 恢复提示只标识网盘，原任务的账号身份继续用于内部归属判断。
     private var accountRecoveryText: String {
-        if let name = job.accountName {
-            return "登录\(job.provider.title)账号【\(name)】后可继续此任务。"
-        }
-        return "登录此任务原来的\(job.provider.title)账号后可继续。"
+        "登录此任务原来的\(job.provider.title)账号后可继续。"
     }
 }
