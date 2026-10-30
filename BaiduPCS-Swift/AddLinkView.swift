@@ -53,12 +53,6 @@ struct AddLinkView: View {
                         fillPassword()
                         closeShare()
                     }
-                PasteButton(payloadType: String.self) { strings in
-                    guard let text = strings.first, let link = DiskShareLink.parse(text) else { return }
-                    fillAndOpen(link)
-                }
-                .labelStyle(.iconOnly)
-                .help("粘贴分享链接")
                 LabeledContent("提取码") {
                     TextField("提取码", text: $password, prompt: Text("4 位"))
                         .labelsHidden()
