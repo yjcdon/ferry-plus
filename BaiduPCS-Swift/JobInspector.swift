@@ -80,71 +80,57 @@ private struct JobDetail: View {
         // 不在这里读取进度，进度变化只让读取它的子视图刷新。
         let activity = model.coordinator.activity(of: job.id)
         let isRemoving = model.coordinator.removingJobs.contains(job.id)
-        Form {
-            Section {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: job.systemImage)
-                        .font(.largeTitle)
-                        .foregroundStyle(.secondary)
-                        .accessibilityHidden(true)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(job.title)
-                            .font(.headline)
-                            .textSelection(.enabled)
-                        JobStatusText(job: job, activity: activity, isRemoving: isRemoving)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                JobProgressBar(job: job, activity: activity, isRemoving: isRemoving)
-                JobNotes(job: job)
-            }
-            Section("统计") {
-                JobStats(job: job, activity: activity)
-            }
-            Section("来源") {
-                LabeledContent("网盘", value: job.provider.title)
-                LabeledContent("创建时间", value: job.createdAt.formatted(date: .abbreviated, time: .standard))
-            }
-            Section("位置") {
-                if let sourceLink = job.sourceLink {
-                    LabeledContent("来源") {
-                        HStack(spacing: 4) {
-                            PathText(sourceLink)
-                            Button {
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(sourceLink, forType: .string)
-                            } label: {
-                                Label("拷贝链接", systemImage: "doc.on.doc")
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text(job.title).font(.headline).textSelection(.enabled)
+                    JobStatusText(job: job, activity: activity, isRemoving: isRemoving)
+                        .font(.callout).foregroundStyle(.secondary)
+                    JobProgressBar(job: job, activity: activity, isRemoving: isRemoving)
+                    JobStats(job: job, activity: activity)
+                    HStack(spacing: 6) {
+                        ProviderIcon(provider: job.provider, size: 14)
+                        Text(job.provider.title)
+                    }.font(.caption).foregroundStyle(.secondary)
+                    JobNotes(job: job)
+                }.padding()
+                Divider()
+                VStack(alignment: .leading, spacing: 10) {
+                    LabeledContent("创建时间", value: job.createdAt.formatted(date: .abbreviated, time: .standard))
+                    if let sourceLink = job.sourceLink {
+                        LabeledContent("分享链接") {
+                            HStack(spacing: 4) {
+                                PathText(sourceLink)
+                                Button {
+                                    NSPasteboard.general.clearContents()
+                                    NSPasteboard.general.setString(sourceLink, forType: .string)
+                                } label: { Image(systemName: "doc.on.doc") }
+                                    .buttonStyle(.borderless).help("拷贝链接").accessibilityLabel("拷贝链接")
                             }
-                            .labelStyle(.iconOnly)
-                            .buttonStyle(.borderless)
-                            .help("拷贝链接")
                         }
                     }
-                }
-                if let netdiskSource = job.netdiskSource {
-                    LabeledContent("来源") { PathText(netdiskSource) }
-                }
-                if job.hasJobDirectory, !job.isCleanedUp {
-                    LabeledContent("网盘") { PathText(job.remoteDirectory) }
-                }
-                LabeledContent("本地") {
-                    PathText((job.downloadFolder ?? model.coordinator.downloadFolder).url.path(percentEncoded: false))
-                }
-            }
-            if !job.files.isEmpty {
-                Section("文件（\(job.files.count)）") {
+                    if let netdiskSource = job.netdiskSource {
+                        LabeledContent("来源路径") { PathText(netdiskSource) }
+                    }
+                    if job.hasJobDirectory, !job.isCleanedUp {
+                        LabeledContent("转存目录") { PathText(job.remoteDirectory) }
+                    }
+                    LabeledContent("下载到") {
+                        PathText((job.downloadFolder ?? model.coordinator.downloadFolder).url.path(percentEncoded: false))
+                    }
+                }.font(.callout).padding()
+                if !job.files.isEmpty {
+                    Divider()
+                    Text("文件（\(job.files.count)）").font(.headline).padding()
                     ForEach(job.files) { file in
-                        VStack(alignment: .leading, spacing: 6) {
-                            FileRow(file: file, activity: model.coordinator.activity(ofFile: file.id))
-                        }
+                        FileRow(file: file, activity: model.coordinator.activity(ofFile: file.id))
+                            .padding(.horizontal).padding(.vertical, 8)
+                        Divider().padding(.leading, 44)
                     }
                 }
             }
         }
-        .formStyle(.grouped)
-        .scrollContentBackground(.hidden)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(Color(nsColor: .windowBackgroundColor))
         .edgeBar(.bottom) {
             HStack {
@@ -156,17 +142,20 @@ private struct JobDetail: View {
                 }
                 Spacer(minLength: 0)
                 // 点按钮只移除任务；删除文件在按钮的菜单中，是不常用的破坏性操作。
-                Menu("移除") {
-                    Button("移除并删除文件", role: .destructive) { onRemove(.trashingFiles) }
-                        .disabled(!model.canTrashFiles(of: [job]))
-                } primaryAction: {
-                    onRemove(.keepingFiles)
-                }
-                .fixedSize()
-                .disabled(!model.canOperate(on: job))
+                Group {
+                    if model.canTrashFiles(of: [job]) {
+                        Menu("移除") {
+                            Button("移除并删除文件", role: .destructive) { onRemove(.trashingFiles) }
+                        } primaryAction: {
+                            onRemove(.keepingFiles)
+                        }
+                    } else {
+                        Button("移除") { onRemove(.keepingFiles) }
+                    }
+                }.fixedSize().disabled(!model.canOperate(on: job))
             }
-            .labelStyle(.titleOnly)
-            .padding()
+            .labelStyle(.titleOnly).controlSize(.small)
+            .padding(.horizontal).workspaceFooter()
         }
     }
 }

@@ -78,16 +78,10 @@ struct NetdiskFilesView: View {
                 notice("更新失败：" + error)
             }
             if let operationFeedback {
-                HStack {
-                    Image(systemName: "exclamationmark.triangle").foregroundStyle(.orange)
-                    Text(operationFeedback.message).font(.callout).textSelection(.enabled)
-                    Spacer()
-                    if !browser.query.isEmpty {
-                        Button("清除筛选") { browser.query = "" }
-                    }
-                    Button { self.operationFeedback = nil } label: { Image(systemName: "xmark") }
-                        .buttonStyle(.plain).help("关闭提示")
-                }.padding(.horizontal).padding(.bottom, 10)
+                Banner(message: operationFeedback.message) {
+                    if !browser.query.isEmpty { Button("清除筛选") { browser.query = "" } }
+                    Button("关闭") { self.operationFeedback = nil }
+                }
             }
             Divider()
             content
@@ -386,8 +380,9 @@ struct NetdiskFilesView: View {
     }
 
     private func notice(_ message: String) -> some View {
-        HStack { Label(message, systemImage: "exclamationmark.triangle").font(.callout); Spacer() }
-            .padding(.horizontal).padding(.bottom, 10)
+        Banner(message: message) {
+            Button("重试") { browser.refresh() }.disabled(browser.isLoading || isBusy)
+        }
     }
 
     private func isCurrent(_ context: DirectoryContext) -> Bool {

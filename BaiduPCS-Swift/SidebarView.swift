@@ -126,16 +126,7 @@ private struct AccountView: View {
 
     var body: some View {
         Menu {
-            Text("百度网盘 · \(model.account.map { $0.username.isEmpty ? "百度账号" : $0.username } ?? "待登录")")
-            if model.account != nil {
-                if model.isLoginExpired {
-                    Text("登录已失效")
-                    Button("重新登录") { model.presentLogin() }
-                }
-                Button("退出登录") { isConfirmingLogOut = model.requestLogOut() }
-            } else {
-                Button("登录") { model.presentLogin() }
-            }
+            BaiduAccountControls { isConfirmingLogOut = true }
             Divider()
             Text("夸克网盘 · \(model.quark.summary?.name ?? "待登录")")
             QuarkAccountControls()
@@ -146,8 +137,9 @@ private struct AccountView: View {
                 Image(systemName: "person.crop.circle").font(.title2)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("账号与设置").lineLimit(1)
-                    Text(accountStatus).font(.caption)
-                        .foregroundStyle(hasAccountProblem ? Color.orange : Color.secondary)
+                    if let accountStatus {
+                        Text(accountStatus).font(.caption).foregroundStyle(.orange)
+                    }
                 }
                 Spacer(minLength: 0)
             }
@@ -160,11 +152,11 @@ private struct AccountView: View {
         .logOutConfirmation(isPresented: $isConfirmingLogOut)
     }
 
-    private var hasAccountProblem: Bool { model.isLoginExpired || model.quark.problem != nil }
-
-    private var accountStatus: String {
-        let baidu = model.account == nil ? "待登录" : model.isLoginExpired ? "登录已失效" : "已登录"
-        let quark = model.quark.state.title
-        return "百度" + baidu + " · 夸克" + quark
+    private var accountStatus: String? {
+        var problems: [String] = []
+        if model.isLoginExpired { problems.append("百度登录已失效") }
+        if model.quark.problem != nil { problems.append("夸克" + model.quark.state.title) }
+        else if case .expired = model.quark.state { problems.append("夸克登录已失效") }
+        return problems.isEmpty ? nil : problems.joined(separator: " · ")
     }
 }

@@ -46,7 +46,7 @@ struct AddLinkView: View {
     private var linkFields: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                TextField("分享链接", text: $linkText, prompt: Text("百度或夸克分享链接"))
+                TextField("分享链接", text: $linkText, prompt: Text("粘贴分享链接"))
                     .labelsHidden()
                     .autocorrectionDisabled()
                     .onChange(of: linkText) {
@@ -118,9 +118,9 @@ struct AddLinkView: View {
             }
         } else {
             ContentUnavailableView {
-                Label("打开分享链接", systemImage: "link")
+                Label("添加分享链接", systemImage: "link")
             } description: {
-                Text("粘贴百度或夸克网盘分享链接，点击“打开”或按回车键。链接带提取码时自动填入。")
+                Text("支持百度网盘和夸克网盘")
             }
         }
     }

@@ -40,7 +40,7 @@ final class WorkspaceState {
     private(set) var recentProvider: Provider
     var pendingFiles: [URL] = []
     var isUploadRequested = false
-    var lastAddedTransfer: TransferTaskID?
+    var pendingTransferSelection: TransferTaskID?
     private static let pageKey = "workspace.page.v1"
     private static let recentKey = "workspace.recentProvider.v1"
 

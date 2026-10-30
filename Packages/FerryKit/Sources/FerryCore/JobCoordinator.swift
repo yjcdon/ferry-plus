@@ -69,7 +69,6 @@ public final class JobCoordinator {
     public private(set) var isStarted = false
     /// 正在移除的任务。移除完成前它们仍在 `jobs` 中，但不再接受操作。
     public private(set) var removingJobs: Set<Job.ID> = []
-    @ObservationIgnored public var onIntegrityRecordsChanged: (() -> Void)?
     @ObservationIgnored public var onJobCompleted: ((Job) -> Void)?
     @ObservationIgnored public var onRunningChanged: ((Bool) -> Void)?
     @ObservationIgnored private var runningFileIDs: Set<String> = []
@@ -745,23 +744,15 @@ public final class JobCoordinator {
                 return other.size == entry.size && other.algorithm == entry.algorithm && other.digest == entry.digest
             }) else { throw UploadRecordError.invalid("任务信息已更新，请重试移除。") }
         }
-        var changed = false
-        do {
-            for file in job.files {
+        for file in job.files {
+            try Task.checkCancellation()
+            guard !isShuttingDown else { throw CancellationError() }
+            if let record = try archivedIntegrityRecord(file, job: job) {
+                try await integrityStore.save(record)
                 try Task.checkCancellation()
                 guard !isShuttingDown else { throw CancellationError() }
-                if let record = try archivedIntegrityRecord(file, job: job) {
-                    try await integrityStore.save(record)
-                    changed = true
-                    try Task.checkCancellation()
-                    guard !isShuttingDown else { throw CancellationError() }
-                }
             }
-        } catch {
-            if changed { onIntegrityRecordsChanged?() }
-            throw error
         }
-        if changed { onIntegrityRecordsChanged?() }
     }
 
     public func progress(of job: Job) -> JobProgress {

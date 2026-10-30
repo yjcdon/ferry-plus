@@ -83,11 +83,11 @@ struct Banners: View {
     }
 }
 
-/// 固定高度的提示条；点击摘要可滚动查看全文，长错误不改变主窗口的最小尺寸。
+/// 就近错误反馈共用紧凑样式；长内容保留完整详情，操作由所属页面提供。
 struct Banner<Actions: View>: View {
     let message: String
     var systemImage = "exclamationmark.triangle.fill"
-    var iconColor: Color = .yellow
+    var iconColor: Color = .orange
     @ViewBuilder let actions: Actions
     @State private var isShowingDetails = false
 
@@ -118,8 +118,35 @@ struct Banner<Actions: View>: View {
                 .fixedSize()
         }
         .padding(.horizontal)
-        .frame(height: 64)
+        .padding(.vertical, 8)
+        .frame(minHeight: 36)
         .accessibilityElement(children: .combine)
+    }
+}
+
+/// 侧栏和系统账号菜单共用百度状态及动作，确认由对应窗口承接。
+struct BaiduAccountControls: View {
+    let confirmLogOut: () -> Void
+    @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Text("百度网盘 · \(model.account.map { $0.username.isEmpty ? "百度账号" : $0.username } ?? "待登录")")
+        if model.account == nil || model.isLoginExpired {
+            if model.isLoginExpired { Text("登录已失效") }
+            Button(model.isLoginExpired ? "重新登录" : "登录") {
+                openWindow(id: ContentView.windowID)
+                model.presentLogin()
+            }
+        }
+        if model.account != nil {
+            Button("退出登录") {
+                if model.requestLogOut() {
+                    openWindow(id: ContentView.windowID)
+                    confirmLogOut()
+                }
+            }
+        }
     }
 }
 

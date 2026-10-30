@@ -31,7 +31,6 @@ final class AppModel {
     private(set) var uploadJobs: [UploadJob] = []
     var uploadProblem: String?
     let integrityStore = IntegrityStore()
-    var integrityRecordsRevision = 0
     @ObservationIgnored private let transferBudget: TransferBudget
     @ObservationIgnored private var uploadUpdates: Task<Void, Never>?
     @ObservationIgnored private var uploadActivityUpdates: Task<Void, Never>?
@@ -146,7 +145,6 @@ final class AppModel {
         downloadDirectory = Self.defaultDownloadDirectory
         coordinator = JobCoordinator(engine: engine, store: JobStore(fileURL: jobsFile),
                                      settings: settings, downloadFolder: DownloadFolder(url: Self.defaultDownloadDirectory), integrityStore: integrityStore)
-        coordinator.onIntegrityRecordsChanged = { [weak self] in self?.integrityRecordsRevision += 1 }
         checkedSource.connect(coordinator)
         coordinator.onJobCompleted = { [weak self] job in self?.notifyCompletion(of: job) }
         #if DEBUG
@@ -919,9 +917,8 @@ final class AppModel {
         sendCompletionNotification(request, checkingCancellationAfterSettings: true)
     }
 
-    /// 终态已保存且 worker 移除后刷新校验记录视图并通知；不等待生命周期 lane 或系统授权。
+    /// 终态保存且 worker 移除后发送后台通知；不等待生命周期 lane 或系统授权。
     private func notifyUploadCompletion(of job: UploadJob) {
-        integrityRecordsRevision += 1
         guard !isShuttingDown else { return }
         let content = UNMutableNotificationContent()
         switch job.phase {

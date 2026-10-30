@@ -132,24 +132,9 @@ private struct FerryCommands: Commands {
 /// 菜单栏与主窗口读取同一会话；仅在未登录或登录失效时提供登录入口。
 private struct AccountCommandsView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
-        Text("百度网盘 · \(model.account.map { $0.username.isEmpty ? "百度账号" : $0.username } ?? "待登录")")
-        if model.account == nil || model.isLoginExpired {
-            Button(model.isLoginExpired ? "重新登录百度网盘" : "登录百度网盘") {
-                openWindow(id: ContentView.windowID)
-                model.presentLogin()
-            }
-        }
-        if model.account != nil {
-            Button("退出登录") {
-                if model.requestLogOut() {
-                    openWindow(id: ContentView.windowID)
-                    model.isConfirmingMenuLogOut = true
-                }
-            }
-        }
+        BaiduAccountControls { model.isConfirmingMenuLogOut = true }
         Divider()
         Text("夸克网盘 · \(model.quark.summary?.name ?? "待登录")")
         QuarkAccountControls()

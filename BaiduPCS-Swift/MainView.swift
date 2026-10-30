@@ -229,13 +229,14 @@ struct MainView: View {
             if let provider = page?.provider { providerFilter = provider }
             if case .transfers(let selected) = page { category = selected }
         }
+        .task(id: workspace.page) { selectPendingTransfer() }
         .focusedSceneValue(\.transferSelection, workspace.isFiles ? nil : scope)
         .focusedSceneValue(\.transferInspectorPresented, workspace.isFiles ? nil : inspectorPresentation)
         .focusedSceneValue(\.workspaceIsFiles, workspace.isFiles)
         .onChange(of: items.map(\.id)) { _, ids in selection.formIntersection(ids) }
         .onChange(of: model.lastAddedJobID) { _, id in
             guard let id, let job = model.coordinator.jobs.first(where: { $0.id == id }) else { return }
-            if workspace.isFiles { workspace.lastAddedTransfer = .init(direction: .download, id: id) }
+            if workspace.isFiles { workspace.pendingTransferSelection = .init(direction: .download, id: id) }
             else { reveal(.download(job)) }
         }
         .onChange(of: model.lastAddedUploadID) { revealNewUpload() }
@@ -307,40 +308,21 @@ struct MainView: View {
     }
 
     private var filesContent: some View {
-        VStack(spacing: 0) {
-            if let added = workspace.lastAddedTransfer {
-                HStack {
-                    Text("已加入传输")
-                    Spacer()
-                    Button("查看传输") {
-                        switch added.direction {
-                        case .download:
-                            if let job = model.coordinator.jobs.first(where: { $0.id == added.id }) { reveal(.download(job)) }
-                        case .upload:
-                            if let job = model.uploadJobs.first(where: { $0.id == added.id }) { reveal(.upload(job)) }
-                        }
-                        workspace.lastAddedTransfer = nil
-                    }
-                    Button { workspace.lastAddedTransfer = nil } label: { Image(systemName: "xmark") }
-                        .buttonStyle(.plain).help("关闭提示")
-                }.font(.callout).padding(10).background(.quaternary)
-            }
-            NetdiskFilesView(browser: workspace.browser, onUpload: presentUpload, onDownload: presentDownload,
-                             allowsUpload: !directUpload.isBusy, pendingFiles: workspace.pendingFiles,
-                             onConfirmPending: { presentUpload($0, workspace.pendingFiles) },
-                             onCancelPending: {
-                                 workspace.pendingFiles = []
-                                 workspace.isUploadRequested = false
-                             })
-                .id(workspace.browser.provider)
-        }
-        .task(id: workspace.lastAddedTransfer) {
-            guard let added = workspace.lastAddedTransfer else { return }
-            do { try await Task.sleep(for: .seconds(10)) }
-            catch { return }
-            if workspace.lastAddedTransfer == added { workspace.lastAddedTransfer = nil }
-        }
-        .onDisappear { workspace.lastAddedTransfer = nil }
+        NetdiskFilesView(browser: workspace.browser, onUpload: presentUpload, onDownload: presentDownload,
+                         allowsUpload: !directUpload.isBusy, pendingFiles: workspace.pendingFiles,
+                         onConfirmPending: { presentUpload($0, workspace.pendingFiles) },
+                         onCancelPending: {
+                             workspace.pendingFiles = []
+                             workspace.isUploadRequested = false
+                         })
+            .id(workspace.browser.provider)
+    }
+
+    /// 进入传输页时只选中当前筛选可见的新任务，不改变用户的网盘和方向条件。
+    private func selectPendingTransfer() {
+        guard !workspace.isFiles, let id = workspace.pendingTransferSelection else { return }
+        workspace.pendingTransferSelection = nil
+        if visibleItems.contains(where: { $0.id == id }) { selection = [id] }
     }
 
     /// 选择和投放共用同一入口；来自列表的账号和目录在操作开始时固定。
@@ -654,7 +636,7 @@ struct MainView: View {
         guard let id = model.lastAddedUploadID, id != revealedUploadID,
               let job = model.uploadJobs.first(where: { $0.id == id }) else { return }
         revealedUploadID = id
-        if workspace.isFiles { workspace.lastAddedTransfer = .init(direction: .upload, id: id) }
+        if workspace.isFiles { workspace.pendingTransferSelection = .init(direction: .upload, id: id) }
         else { reveal(.upload(job)) }
     }
 

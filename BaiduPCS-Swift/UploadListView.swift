@@ -187,11 +187,9 @@ struct UploadInspector: View {
         VStack(spacing: 0) {
             summary
             if let problem = location.error ?? relocation.error {
-                HStack(alignment: .top, spacing: 8) {
-                    Text(problem).font(.callout).foregroundStyle(.red).textSelection(.enabled)
-                    Spacer(minLength: 0)
+                Banner(message: problem) {
                     Button("关闭") { location.error = nil; relocation.error = nil }
-                }.padding(.horizontal).padding(.bottom, 12)
+                }
             }
             Divider()
             content.frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -371,13 +369,9 @@ struct UploadInspector: View {
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 if let error {
-                    HStack(alignment: .top, spacing: 8) {
-                        Text(error).font(.caption).foregroundStyle(.red).textSelection(.enabled)
-                        Spacer(minLength: 0)
-                        Button("重试") { generation += 1 }.controlSize(.small).disabled(isLoading)
+                    Banner(message: error) {
+                        Button("重试") { generation += 1 }.disabled(isLoading)
                     }
-                    .padding(8)
-                    .background(Color(nsColor: .windowBackgroundColor))
                 }
             }
         }
@@ -385,10 +379,11 @@ struct UploadInspector: View {
 
     /// 定位菜单与辅助技术使用同一动作和能力条件，目标始终来自该文件记录。
     @ViewBuilder private func fileLocationActions(for file: UploadFile) -> some View {
-        Button("打开云端所在目录", systemImage: "cloud") {
-            location.request = .init(fileID: file.id, focus: file.isDirectory ? nil : file.remoteReference)
+        if file.remoteReference != nil {
+            Button("打开云端所在目录", systemImage: "cloud") {
+                location.request = .init(fileID: file.id, focus: file.isDirectory ? nil : file.remoteReference)
+            }.disabled(location.request != nil)
         }
-        .disabled(file.remoteReference == nil || location.request != nil)
         Button("在 Finder 中显示源文件", systemImage: "folder") { revealSource(file) }
         if let replacement = file.replacement, let snapshot = replacement.snapshotObject {
             Button("打开旧版本备份", systemImage: "clock.arrow.circlepath") {
