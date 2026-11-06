@@ -3,10 +3,10 @@
 set -euo pipefail
 framework="$1"
 identity="$2"
-codesign --force --sign "$identity" --timestamp=none "$framework/Versions/B/Autoupdate"
+codesign --force --sign "$identity" --timestamp=none --options runtime "$framework/Versions/B/Autoupdate"
 for service in "$framework/Versions/B/XPCServices/"*.xpc; do
-    codesign --force --sign "$identity" --timestamp=none "$service"
+    codesign --force --sign "$identity" --timestamp=none --options runtime "$service"
 done
-codesign --force --sign "$identity" --timestamp=none "$framework/Versions/B/Updater.app"
-codesign --force --sign "$identity" --timestamp=none "$framework"
+codesign --force --sign "$identity" --timestamp=none --options runtime "$framework/Versions/B/Updater.app"
+codesign --force --sign "$identity" --timestamp=none --options runtime "$framework"
 codesign --verify --deep --strict "$framework"

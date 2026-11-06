@@ -82,8 +82,8 @@ final class AppModel {
     @ObservationIgnored private var quarkStartupTask: Task<Void, Never>?
     @ObservationIgnored private var transferLifecycle: TransferLifecycle?
     @ObservationIgnored private var isSystemSleeping = false
-    @ObservationIgnored private var downloadIsExecuting = false
-    @ObservationIgnored private var uploadIsExecuting = false
+    private var downloadIsExecuting = false
+    private var uploadIsExecuting = false
     @ObservationIgnored private var hasStarted = false
     @ObservationIgnored private var isShuttingDown = false
     @ObservationIgnored private var notificationAuthorizationTask: Task<Bool, Never>?
@@ -268,6 +268,22 @@ final class AppModel {
         if NSApp.isActive { await detectCopiedLink() }
         guard !isShuttingDown else { return }
         await revalidate()
+    }
+
+    /// 更新器取得安装意图后阻止新任务，失败时可恢复操作。
+    var isInstallingUpdate = false
+
+    /// 更新安装与防休眠共用实际工作状态，涵盖上传回读校验。
+    var hasActiveTransfers: Bool {
+        !coordinator.isStarted || downloadIsExecuting || uploadIsExecuting ||
+        !coordinator.verifyingLocalFiles.isEmpty || !coordinator.removingJobs.isEmpty ||
+        coordinator.jobs.contains { job in
+            guard !job.isPaused else { return false }
+            switch job.phase {
+            case .transferring, .downloading: return true
+            default: return false
+            }
+        }
     }
 
     func shutdown() async {
@@ -678,6 +694,7 @@ final class AppModel {
         guard accountKey(for: account.provider) == account, let uploadCoordinator else {
             throw UploadDestinationError.otherAccount
         }
+        guard !isShuttingDown, !isInstallingUpdate else { throw CancellationError() }
         let selections = try files.map { try UploadSelection(url: $0, bookmark: UploadSource.bookmark(for: $0)) }
         let name = coordinator.accountNames[account.provider] ?? account.provider.title
         requestNotificationAuthorization()
@@ -836,21 +853,21 @@ final class AppModel {
 
     /// `downloadFolder` 为 nil 时，任务使用设置中的下载目录。
     func addJob(session: DiskShareSession, entries: [RemoteEntry], downloadFolder: DownloadFolder? = nil) {
-        guard accountKey(for: session.account.provider) == session.account else { return }
+        guard !isShuttingDown, !isInstallingUpdate, accountKey(for: session.account.provider) == session.account else { return }
         lastAddedJobID = coordinator.addJob(session: session, entries: entries, downloadFolder: downloadFolder).id
         requestNotificationAuthorization()
     }
 
     /// `accountUK` 是勾选的条目所在网盘的账号。`downloadFolder` 为 nil 时，任务使用设置中的下载目录。
     func addNetdiskJob(entries: [RemoteEntry], account: AccountKey, downloadFolder: DownloadFolder? = nil) {
-        guard accountKey(for: account.provider) == account else { return }
+        guard !isShuttingDown, !isInstallingUpdate, accountKey(for: account.provider) == account else { return }
         lastAddedJobID = coordinator.addNetdiskJob(entries: entries, account: account, downloadFolder: downloadFolder).id
         requestNotificationAuthorization()
     }
 
     /// 启动恢复完成前和移除期间，任务不接受操作。
     func canOperate(on job: Job) -> Bool {
-        coordinator.isStarted && coordinator.restorationProblem == nil && !coordinator.removingJobs.contains(job.id)
+        !isShuttingDown && !isInstallingUpdate && coordinator.isStarted && coordinator.restorationProblem == nil && !coordinator.removingJobs.contains(job.id)
     }
 
     func pause(_ job: Job) {
@@ -858,6 +875,7 @@ final class AppModel {
     }
 
     func resume(_ job: Job) {
+        guard !isInstallingUpdate, !isShuttingDown else { return }
         Task { await coordinator.resume(job.id) }
     }
 
@@ -877,6 +895,7 @@ final class AppModel {
     }
 
     func retry(_ job: Job) {
+        guard !isInstallingUpdate, !isShuttingDown else { return }
         Task { await coordinator.retry(job.id) }
     }
 
