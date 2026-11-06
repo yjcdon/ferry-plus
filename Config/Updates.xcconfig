@@ -1,0 +1,3 @@
+// 仅发布公钥。签名私钥保存在发布机钥匙串或受保护的 CI Secret。
+SU_FEED_URL = https:/$()/raw.githubusercontent.com/yjcdon/ferry-plus/main/updates/appcast.xml
+SU_PUBLIC_ED_KEY = RSY3MnIMazLjtrMODIfF2jrZWAV1jjlYi7UNfbuFZvI=

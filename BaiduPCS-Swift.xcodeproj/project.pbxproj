@@ -11,12 +11,14 @@
 		18F1CB343086E8A000A59465 /* DownloadKit in Frameworks */ = {isa = PBXBuildFile; productRef = 18F1CB323086E8A000A59465 /* DownloadKit */; };
 		18F1CB363086E8A000A59465 /* FerryCore in Frameworks */ = {isa = PBXBuildFile; productRef = 18F1CB353086E8A000A59465 /* FerryCore */; };
 		A1F100013086E8A000000001 /* QuarkKit in Frameworks */ = {isa = PBXBuildFile; productRef = A1F100023086E8A000000001 /* QuarkKit */; };
+		A42000013086E8A000000001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; fileRef = A42000023086E8A000000001 /* Sparkle.framework */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		18F1CB143086E87B00A59465 /* BaiduPCS-Swift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Ferry Plus.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		18F1CB403086E8A000A59465 /* Shared.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Shared.xcconfig; sourceTree = "<group>"; };
 		A31F00103086E8A000000001 /* Version.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Version.xcconfig; sourceTree = "<group>"; };
+		A42000023086E8A000000001 /* Sparkle.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; path = ".build/dependencies/Sparkle-2.10.1/Sparkle.framework"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -32,6 +34,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A42000013086E8A000000001 /* Sparkle in Frameworks */,
 				18F1CB333086E8A000A59465 /* BaiduKit in Frameworks */,
 				18F1CB343086E8A000A59465 /* DownloadKit in Frameworks */,
 				18F1CB363086E8A000A59465 /* FerryCore in Frameworks */,
@@ -79,6 +82,7 @@
 				18F1CB103086E87B00A59465 /* Sources */,
 				18F1CB113086E87B00A59465 /* Frameworks */,
 				18F1CB123086E87B00A59465 /* Resources */,
+				A42000033086E8A000000001 /* Embed Sparkle */,
 			);
 			buildRules = (
 			);
@@ -161,8 +165,20 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/bash;
-			shellScript = "set -euo pipefail\nversion=\"$(/bin/bash \"$SRCROOT/Scripts/read-version.sh\")\"\nif [ \"${MARKETING_VERSION-}\" != \"$version\" ]; then\n    printf 'error: MARKETING_VERSION must match Config/Version.xcconfig (%s).\\n' \"$version\" >&2\n    exit 1\nfi\n";
+			shellScript = "set -euo pipefail\nversion=\"$(/bin/bash \"$SRCROOT/Scripts/read-version.sh\")\"\nbuild_number=\"$(/bin/bash \"$SRCROOT/Scripts/read-version.sh\" --build-number)\"\n[ \"$CURRENT_PROJECT_VERSION\" = \"$build_number\" ] || exit 1\nbash \"$SRCROOT/Scripts/setup-sparkle.sh\" >/dev/null\nif [ \"${MARKETING_VERSION-}\" != \"$version\" ]; then\n    printf 'error: MARKETING_VERSION must match Config/Version.xcconfig (%s).\\n' \"$version\" >&2\n    exit 1\nfi\n";
 		};
+		A42000033086E8A000000001 /* Embed Sparkle */ = {
+            isa = PBXShellScriptBuildPhase;
+            alwaysOutOfDate = 1;
+            buildActionMask = 2147483647;
+            files = ();
+            inputPaths = ();
+            outputPaths = ();
+            name = "Embed Sparkle";
+            runOnlyForDeploymentPostprocessing = 0;
+            shellPath = /bin/bash;
+            shellScript = "set -euo pipefail\nsparkle_dir=\"$(bash \"$SRCROOT/Scripts/setup-sparkle.sh\")\"\nmkdir -p \"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH\"\nditto \"$sparkle_dir/Sparkle.framework\" \"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/Sparkle.framework\"\nbash \"$SRCROOT/Scripts/sign-sparkle.sh\" \"$TARGET_BUILD_DIR/$FRAMEWORKS_FOLDER_PATH/Sparkle.framework\" \"$EXPANDED_CODE_SIGN_IDENTITY\"\n";
+        };
 /* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -305,8 +321,9 @@
 				CODE_SIGN_ENTITLEMENTS = "BaiduPCS-Swift/BaiduPCS-Swift.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
-				ENABLE_APP_SANDBOX = YES;
+								ENABLE_APP_SANDBOX = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				FRAMEWORK_SEARCH_PATHS = "$(SRCROOT)/.build/dependencies/Sparkle-2.10.1";
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readwrite;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
@@ -315,6 +332,14 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Ferry Plus";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+                INFOPLIST_KEY_SUFeedURL = "$(SU_FEED_URL)";
+                INFOPLIST_KEY_SUPublicEDKey = "$(SU_PUBLIC_ED_KEY)";
+                INFOPLIST_KEY_SURequireSignedFeed = YES;
+                INFOPLIST_KEY_SUVerifyUpdateBeforeExtraction = YES;
+                INFOPLIST_KEY_SUEnableAutomaticChecks = YES;
+                INFOPLIST_KEY_SUAutomaticallyUpdate = NO;
+                INFOPLIST_KEY_SUAllowsAutomaticUpdates = NO;
+                INFOPLIST_KEY_SUScheduledCheckInterval = 86400;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",
@@ -341,8 +366,9 @@
 				CODE_SIGN_ENTITLEMENTS = "BaiduPCS-Swift/BaiduPCS-Swift.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 1;
-				ENABLE_APP_SANDBOX = YES;
+								ENABLE_APP_SANDBOX = NO;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
+				FRAMEWORK_SEARCH_PATHS = "$(SRCROOT)/.build/dependencies/Sparkle-2.10.1";
 				ENABLE_FILE_ACCESS_DOWNLOADS_FOLDER = readwrite;
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES;
@@ -351,6 +377,14 @@
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Ferry Plus";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+                INFOPLIST_KEY_SUFeedURL = "$(SU_FEED_URL)";
+                INFOPLIST_KEY_SUPublicEDKey = "$(SU_PUBLIC_ED_KEY)";
+                INFOPLIST_KEY_SURequireSignedFeed = YES;
+                INFOPLIST_KEY_SUVerifyUpdateBeforeExtraction = YES;
+                INFOPLIST_KEY_SUEnableAutomaticChecks = YES;
+                INFOPLIST_KEY_SUAutomaticallyUpdate = NO;
+                INFOPLIST_KEY_SUAllowsAutomaticUpdates = NO;
+                INFOPLIST_KEY_SUScheduledCheckInterval = 86400;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/../Frameworks",

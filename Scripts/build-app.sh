@@ -4,6 +4,8 @@ set -euo pipefail
 
 repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
 version="$(bash "$repo_dir/Scripts/read-version.sh")"
+build_number="$(bash "$repo_dir/Scripts/read-version.sh" --build-number)"
+sparkle_dir="$(bash "$repo_dir/Scripts/setup-sparkle.sh")"
 package_dir="$repo_dir/Packages/FerryKit"
 build_dir="$repo_dir/.build"
 app_dir="$build_dir/Ferry Plus.app"
@@ -33,6 +35,17 @@ if [ "$signing_identity" = auto ]; then
             ;;
     esac
 fi
+if [ "$build_configuration" = release ] && [ "$signing_identity" = - ]; then
+    printf '%s\n' 'Release 构建需要固定签名证书，请设置 FERRY_CODESIGN_IDENTITY。' >&2
+    exit 1
+fi
+if [ -n "${FERRY_BUILD_NUMBER-}" ]; then
+    if [ "${FERRY_UPDATE_TESTING-}" != 1 ] || [[ ! "$FERRY_BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+        printf '%s\n' 'FERRY_BUILD_NUMBER 仅供显式更新测试使用，且必须为正整数。' >&2
+        exit 1
+    fi
+    build_number="$FERRY_BUILD_NUMBER"
+fi
 # 本项目本机使用 Command Line Tools + 26.5 SDK；完整 Xcode 环境可显式指定其他 SDK。
 sdk_dir="$(xcrun --sdk "${FERRY_MACOS_SDK:-macosx26.5}" --show-sdk-path)"
 
@@ -52,7 +65,8 @@ swiftc -swift-version 6 -parse-as-library "${swift_flags[@]}" \
     -enable-upcoming-feature NonisolatedNonsendingByDefault \
     -enable-upcoming-feature InferIsolatedConformances \
     -target arm64-apple-macos14.0 -sdk "$sdk_dir" \
-    -I "$package_bin/Modules" \
+    -I "$package_bin/Modules" -F "$sparkle_dir" -framework Sparkle \
+    -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
     "$repo_dir/BaiduPCS-Swift/"*.swift "${objects[@]}" \
     -o "$app_dir/Contents/MacOS/Ferry Plus"
 
@@ -66,12 +80,20 @@ cat > "$app_dir/Contents/Info.plist" <<PLIST
     <key>CFBundleExecutable</key><string>Ferry Plus</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>$version</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleVersion</key><string>$build_number</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSHighResolutionCapable</key><true/>
     <key>CFBundleIconFile</key><string>AppIcon</string>
 </dict></plist>
 PLIST
+
+python3 "$repo_dir/Scripts/read-update-config.py" "$app_dir/Contents/Info.plist"
+mkdir -p "$app_dir/Contents/Frameworks"
+if [ -d "$app_dir/Contents/Frameworks/Sparkle.framework" ]; then
+    /usr/bin/trash "$app_dir/Contents/Frameworks/Sparkle.framework"
+fi
+ditto "$sparkle_dir/Sparkle.framework" "$app_dir/Contents/Frameworks/Sparkle.framework"
+bash "$repo_dir/Scripts/sign-sparkle.sh" "$app_dir/Contents/Frameworks/Sparkle.framework" "$signing_identity"
 
 # 现有各尺寸图标原样打包，无需资源目录编译器。
 iconset_dir="$build_dir/AppIcon.iconset"
