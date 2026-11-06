@@ -580,7 +580,7 @@ struct MainView: View {
         guard let coordinator = model.uploadCoordinator else { operationError = "请稍后重试上传。"; return }
         var failures: [String] = []
         for requested in request.jobs {
-            if Task.isCancelled { return }
+            if Task.isCancelled || model.isInstallingUpdate { return }
             let key = TransferTaskID(direction: .upload, id: requested.id)
             guard visibleItems.contains(where: { $0.id == key }),
                   let job = model.uploadJobs.first(where: { $0.id == requested.id }), request.action.allows(job) else { continue }

@@ -447,7 +447,7 @@ struct UploadInspector: View {
 
     /// 仅待发送且已有原始 SHA-256 的失败项可重新选源，校验云端内容时不再依赖本地文件。
     private func canRelocate(_ file: UploadFile) -> Bool {
-        !file.isDirectory && file.phase == .failed && file.remoteReference == nil &&
+        !model.isInstallingUpdate && !file.isDirectory && file.phase == .failed && file.remoteReference == nil &&
         file.failedPhase.map { [.preparing, .queued, .uploading].contains($0) } == true &&
         !file.commits.contains { $0.status == .pending } &&
         file.expectation?.algorithm == .sha256 && file.expectation?.origin == .localOriginal &&
@@ -459,6 +459,7 @@ struct UploadInspector: View {
         relocation.error = nil
         defer { if relocation.request?.id == request.id { relocation.request = nil } }
         do {
+            guard !model.isInstallingUpdate else { throw CancellationError() }
             guard let coordinator = model.uploadCoordinator else { throw UploadCoordinatorError.missingJob }
             try await coordinator.relocateSource(jobID: jobID, fileID: request.fileID, to: request.url)
             try Task.checkCancellation()
