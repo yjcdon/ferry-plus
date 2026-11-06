@@ -17,7 +17,7 @@ struct FerryApp: App {
         .defaultSize(width: 960, height: 640)
         .commands {
             SidebarCommands()
-            FerryCommands(model: appDelegate.model)
+            FerryCommands(model: appDelegate.model, updates: appDelegate.updates)
         }
 
         // 百度的登录页可能比主窗口大，所以登录用单独的窗口，不用 sheet。
@@ -39,6 +39,7 @@ struct FerryApp: App {
 
         Settings {
             SettingsView()
+                .environment(appDelegate.updates)
                 .environment(appDelegate.model)
                 .solidWindowSurface()
         }
@@ -47,6 +48,7 @@ struct FerryApp: App {
 
 private struct FerryCommands: Commands {
     let model: AppModel
+    let updates: ApplicationUpdater
     @Environment(\.openWindow) private var openWindow
     @FocusedValue(\.transferSelection) private var selection
     @FocusedValue(\.focusTaskSearch) private var focusTaskSearch
@@ -55,6 +57,14 @@ private struct FerryCommands: Commands {
     @FocusedBinding(\.transferInspectorPresented) private var inspectorPresented: Bool?
 
     var body: some Commands {
+        CommandGroup(after: .appInfo) {
+            Button("检查更新", action: updates.checkForUpdates)
+                .disabled(!updates.canCheck)
+            if updates.hasPreparedUpdate {
+                Button("安装更新并重新启动", action: updates.installPreparedUpdate)
+                    .disabled(model.hasActiveTransfers)
+            }
+        }
         CommandGroup(replacing: .pasteboard) {
             editingButton("剪切", action: #selector(NSText.cut(_:))).keyboardShortcut("x")
             editingButton("拷贝", action: #selector(NSText.copy(_:))).keyboardShortcut("c")

@@ -3,6 +3,7 @@ import UserNotifications
 
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     let model = AppModel()
+    lazy var updates = ApplicationUpdater(model: model)
     #if DEBUG
     private var naturalExpirySignals: [any DispatchSourceSignal] = []
     #endif

@@ -34,6 +34,7 @@ struct SettingsView: View {
 
 /// 下载目录、上传和下载预算以及剪贴板检测。
 private struct TransferSettingsView: View {
+    @Environment(ApplicationUpdater.self) private var updates
     @Environment(AppModel.self) private var model
     @State private var isChoosingDirectory = false
 
@@ -108,6 +109,12 @@ private struct TransferSettingsView: View {
 
             Section {
                 Toggle("检测剪贴板中的分享链接", isOn: $model.settings.detectsCopiedLinks)
+            }
+            Section {
+                @Bindable var updates = updates
+                Toggle("自动检查更新", isOn: $updates.automaticChecks)
+                Button("检查更新", action: updates.checkForUpdates)
+                    .disabled(!updates.canCheck)
             }
         }
         .settingsFormSurface()
