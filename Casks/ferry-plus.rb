@@ -15,5 +15,7 @@ cask "ferry-plus" do
   depends_on arch: :arm64
   depends_on macos: :sonoma
 
+  auto_updates true
+
   app "Ferry Plus.app"
 end

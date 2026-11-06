@@ -2,63 +2,82 @@ name: Release
 
 on:
   push:
-    tags: ["v*"]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: ferry-release
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: macos-26
+    environment: release
     steps:
       - uses: actions/checkout@v5
 
-      - name: Read release notes
+      - name: Validate version and release credentials
+        env:
+          CERTIFICATE: ${{ secrets.FERRY_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.FERRY_CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY: ${{ secrets.FERRY_CODESIGN_IDENTITY }}
+          UPDATE_KEY: ${{ secrets.FERRY_UPDATE_PRIVATE_KEY }}
         run: |
+          set -euo pipefail
+          test -n "$CERTIFICATE"
+          test -n "$CERTIFICATE_PASSWORD"
+          test -n "$SIGNING_IDENTITY"
+          test -n "$UPDATE_KEY"
           version="$(bash Scripts/read-version.sh)"
-          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
-            echo "::error::Release tag must match Config/Version.xcconfig (v$version)"
-            exit 1
-          fi
-          awk -v v="$version" '
-            /^## / { if (found) exit; found = (index($0, "## " v " ") == 1 || $0 == "## " v); next }
-            found { print }
-          ' CHANGELOG.md > notes.md
-          if ! grep -q '[^[:space:]]' notes.md; then
-            echo "::error::CHANGELOG.md has no section for $version"
-            exit 1
-          fi
+          test "$GITHUB_REF_NAME" = "v$version"
           echo "VERSION=$version" >> "$GITHUB_ENV"
 
-      - name: Build
-        run: |
-          xcodebuild -version
-          xcodebuild -project BaiduPCS-Swift.xcodeproj -scheme BaiduPCS-Swift \
-            -configuration Release -destination 'generic/platform=macOS' \
-            -derivedDataPath build \
-            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
-            CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM= \
-            CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO \
-            ENABLE_APP_SANDBOX=NO \
-            ARCHS=arm64 ONLY_ACTIVE_ARCH=NO \
-            build
-
-      - name: Verify and package
-        run: |
-          app="build/Build/Products/Release/Ferry Plus.app"
-          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$VERSION"
-          artifacts="$(bash Scripts/package-app.sh "$app")"
-          {
-            IFS= read -r archive
-            IFS= read -r checksum
-          } <<< "$artifacts"
-          printf 'ARCHIVE_PATH=%s\nCHECKSUM_PATH=%s\n' "$archive" "$checksum" >> "$GITHUB_ENV"
-
-      - name: Publish
+      - name: Build and prepare signed update
         env:
+          FERRY_CERTIFICATE_P12: ${{ secrets.FERRY_CERTIFICATE_P12 }}
+          FERRY_CERTIFICATE_PASSWORD: ${{ secrets.FERRY_CERTIFICATE_PASSWORD }}
+          FERRY_CODESIGN_IDENTITY: ${{ secrets.FERRY_CODESIGN_IDENTITY }}
+          FERRY_UPDATE_PRIVATE_KEY: ${{ secrets.FERRY_UPDATE_PRIVATE_KEY }}
+          FERRY_BUILD_CONFIGURATION: release
+          FERRY_MACOS_SDK: macosx
           GH_TOKEN: ${{ github.token }}
         run: |
-          prerelease=""
-          case "$VERSION" in *-*) prerelease="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" "$ARCHIVE_PATH" "$CHECKSUM_PATH" \
-            --title "Ferry Plus $VERSION" --notes-file notes.md $prerelease
+          set -euo pipefail
+          keychain="$RUNNER_TEMP/ferry-release.keychain-db"
+          keychain_password="$(openssl rand -hex 32)"
+          trap 'security delete-keychain "$keychain"; /usr/bin/trash "$RUNNER_TEMP/ferry-certificate.p12" "$RUNNER_TEMP/ferry-update-key"' EXIT
+          printf '%s' "$FERRY_CERTIFICATE_P12" | base64 --decode > "$RUNNER_TEMP/ferry-certificate.p12"
+          printf '%s' "$FERRY_UPDATE_PRIVATE_KEY" > "$RUNNER_TEMP/ferry-update-key"
+          chmod 600 "$RUNNER_TEMP/ferry-certificate.p12" "$RUNNER_TEMP/ferry-update-key"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security list-keychains -d user -s "$keychain" "$HOME/Library/Keychains/login.keychain-db"
+          security default-keychain -d user -s "$keychain"
+          security import "$RUNNER_TEMP/ferry-certificate.p12" -k "$keychain" -P "$FERRY_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" >/dev/null
+          sparkle="$(bash Scripts/setup-sparkle.sh)"
+          "$sparkle/bin/generate_keys" --account io.github.yjcdon.FerryPlus.updates -f "$RUNNER_TEMP/ferry-update-key"
+          previous=()
+          archive="Ferry-Plus-$VERSION-arm64.zip"
+          if gh release view "$GITHUB_REF_NAME" --repo yjcdon/ferry-plus --json assets --jq '.assets[].name' 2>/dev/null | grep -Fxq "$archive"; then
+            mkdir -p .build/dist
+            gh release download "$GITHUB_REF_NAME" --repo yjcdon/ferry-plus --pattern "$archive" --dir .build/dist
+            ditto -x -k ".build/dist/$archive" .build
+            (cd .build/dist && shasum -a 256 "$archive" > "$archive.sha256")
+          else
+            bash Scripts/build-app.sh
+            bash Scripts/package-app.sh
+            if [ -f updates/appcast.xml ]; then previous=(--previous-feed updates/appcast.xml); fi
+          fi
+          python3 Scripts/prepare-update.py '.build/Ferry Plus.app' ".build/dist/Ferry-Plus-$VERSION-arm64.zip" \
+            --tools "$sparkle/bin" --account io.github.yjcdon.FerryPlus.updates \
+            --output .build/release-update "${previous[@]}"
+
+          gh auth setup-git
+          git config --global user.name github-actions[bot]
+          git config --global user.email 41898282+github-actions[bot]@users.noreply.github.com
+          bash Scripts/publish-update.sh ".build/dist/Ferry-Plus-$VERSION-arm64.zip" .build/release-update

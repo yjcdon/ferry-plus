@@ -28,7 +28,11 @@ if [ "$(lipo -archs "$app_dir/Contents/MacOS/$executable")" != arm64 ]; then
     printf '%s\n' '交付 App 必须仅包含 arm64 架构。' >&2
     exit 1
 fi
-codesign --verify --strict "$app_dir"
+codesign --verify --deep --strict "$app_dir"
+if codesign -dv "$app_dir" 2>&1 | grep -q "Signature=adhoc"; then
+    printf '%s\n' '发布包需要固定证书签名。' >&2
+    exit 1
+fi
 
 output_dir="$repo_dir/.build/dist"
 archive_name="Ferry-Plus-$version-arm64.zip"
