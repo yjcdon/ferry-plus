@@ -1,6 +1,6 @@
 cask "ferry-plus" do
-  version "4.1.4"
-  sha256 "b41704f8bf6b20de33e328e5927e6dd0fa68a94d927c31fa27ec566902b35790"
+  version "4.2.0"
+  sha256 "109ffc7296e0a809971a2009d64ad1839505ba04e5149baabe73458e44d3ce17"
 
   url "https://github.com/yjcdon/ferry-plus/releases/download/v#{version}/Ferry-Plus-#{version}-arm64.zip"
   name "Ferry Plus"
