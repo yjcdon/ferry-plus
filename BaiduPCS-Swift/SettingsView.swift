@@ -22,7 +22,7 @@ struct SettingsView: View {
                 .tabItem { Label("账号", systemImage: "person.crop.circle") }
                 .tag(3)
             UpdateSettingsView()
-                .tabItem { Label("更新", systemImage: "arrow.clockwise") }
+                .tabItem { Label("更新", systemImage: "arrow.up.circle") }
                 .tag(4)
         }
         .frame(width: 480)
@@ -122,10 +122,17 @@ private struct TransferSettingsView: View {
 private struct UpdateSettingsView: View {
     @Environment(ApplicationUpdater.self) private var updates
 
+    private var releaseVersion: String? {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+    }
+
     var body: some View {
         @Bindable var updates = updates
         Form {
             Section {
+                if let releaseVersion {
+                    LabeledContent("当前版本", value: releaseVersion)
+                }
                 Toggle("自动检查更新", isOn: $updates.automaticChecks)
                 Button("检查更新", action: updates.checkForUpdates)
                     .disabled(!updates.canCheck)
