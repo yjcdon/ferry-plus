@@ -66,6 +66,7 @@ struct NetdiskFilesView: View {
         model.sheet == nil && browser.context.map(isCurrent) == true
     }
     private var canUpload: Bool { canOperate && allowsUpload }
+    private var isSignedIn: Bool { loadID.account != nil }
     private var searchWidth: CGFloat { min(220, max(TaskSearchField.minimumWidth, contentWidth - 560)) }
     private var usesCompactToolbar: Bool { contentWidth < 700 }
     private var usesMinimalToolbar: Bool { contentWidth < 520 }
@@ -84,17 +85,27 @@ struct NetdiskFilesView: View {
                 }
             }
             Divider()
-            content
-                .disabled(isBusy)
-            Divider()
-            HStack {
-                if let tree = browser.tree { FileSelectionSummary(entries: tree.selectedEntries) }
-                Spacer()
-                if creation != nil {
-                    ProgressView().controlSize(.small)
-                    Text("创建中").foregroundStyle(.secondary)
-                } else if browser.isLoading { ProgressView().controlSize(.small) }
-            }.padding(.horizontal).workspaceFooter()
+            if isSignedIn {
+                content
+                    .disabled(isBusy)
+                    .focusedSceneValue(\.focusTaskSearch, { searchFocusRequest += 1 })
+                Divider()
+                HStack {
+                    if let tree = browser.tree { FileSelectionSummary(entries: tree.selectedEntries) }
+                    Spacer()
+                    if creation != nil {
+                        ProgressView().controlSize(.small)
+                        Text("创建中").foregroundStyle(.secondary)
+                    } else if browser.isLoading { ProgressView().controlSize(.small) }
+                }.padding(.horizontal).workspaceFooter()
+            } else {
+                ContentUnavailableView {
+                    Label("登录\(browser.provider.title)", systemImage: "person.crop.circle")
+                } actions: {
+                    Button("登录") { model.presentLogin(for: browser.provider) }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
         }
         .background {
             GeometryReader { proxy in
@@ -103,12 +114,11 @@ struct NetdiskFilesView: View {
                     .onChange(of: proxy.size.width) { _, width in contentWidth = width }
             }.allowsHitTesting(false)
         }
-        .toolbar { toolbar }
+        .toolbar { if isSignedIn { toolbar } }
         .task(id: loadID) { await browser.load(model: model) }
         .task(id: creation?.id) { if let creation { await createFolder(creation) } }
         .task(id: deletion?.id) { if let deletion { await delete(deletion) } }
         .task(id: renaming?.id) { if let renaming { await rename(renaming) } }
-        .focusedSceneValue(\.focusTaskSearch, { searchFocusRequest += 1 })
         .onChange(of: loadID.account) { _, _ in operationFeedback = nil; pendingRename = nil }
         .onChange(of: loadID.session) { _, _ in operationFeedback = nil; pendingRename = nil }
         .onChange(of: pendingDeletion != nil || pendingRename != nil || isBusy) { _, presented in
@@ -287,13 +297,7 @@ struct NetdiskFilesView: View {
     }
 
     @ViewBuilder private var content: some View {
-        if model.accountKey(for: browser.provider) == nil {
-            ContentUnavailableView {
-                Label("登录\(browser.provider.title)", systemImage: "person.crop.circle")
-            } description: { Text("登录后浏览和管理网盘文件。") } actions: {
-                Button("登录") { model.presentLogin(for: browser.provider) }
-            }
-        } else if let tree = browser.tree {
+        if let tree = browser.tree {
             if tree.root.children?.isEmpty == true {
                 emptyContent("此目录为空", systemImage: "folder")
             } else if browser.rootNodes.isEmpty {
