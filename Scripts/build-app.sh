@@ -76,6 +76,7 @@ cat > "$app_dir/Contents/Info.plist" <<PLIST
 <plist version="1.0"><dict>
     <key>CFBundleIdentifier</key><string>io.github.yjcdon.FerryPlus</string>
     <key>CFBundleName</key><string>Ferry Plus</string>
+    <key>CFBundleDevelopmentRegion</key><string>zh-Hans</string>
     <key>CFBundleDisplayName</key><string>Ferry Plus</string>
     <key>CFBundleExecutable</key><string>Ferry Plus</string>
     <key>CFBundlePackageType</key><string>APPL</string>
