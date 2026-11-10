@@ -166,6 +166,7 @@ type Transfers struct {
 	active        map[string]*transferWorker
 	beginActivity func() (func(), error)
 	downloadRate  *transferRate
+	downloadSlots downloadSlots
 }
 
 const transferRecordName = "transfers"
@@ -239,6 +240,7 @@ func normalizedTransferConfig(config TransferConfig) TransferConfig {
 func (t *Transfers) Configure(config TransferConfig) {
 	t.mu.Lock()
 	t.config = normalizedTransferConfig(config)
+	t.signalDownloadSlotsLocked()
 	if t.downloadRate != nil {
 		t.downloadRate.set(t.config.DownloadBytesPerSecond)
 	}

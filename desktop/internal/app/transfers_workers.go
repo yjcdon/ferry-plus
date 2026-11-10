@@ -143,61 +143,14 @@ func (t *Transfers) runDownload(ctx context.Context, worker *transferWorker) (st
 		return "勾选的目录中没有文件，不需要下载。", nil
 	}
 
-	done, total := completedTotals(items)
-	var firstErr error
-	for i, file := range req.Plan {
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-		if err := t.checkAccount(worker); err != nil {
-			return "", err
-		}
-		item := items[i]
-		if item.Remote != file.Entry.Ref || item.RelativePath != file.RelativePath || item.Size != file.Entry.Size {
-			return "", errors.New("下载任务的项目身份与原清单不一致")
-		}
-		id := fmt.Sprintf("%s-%d", worker.job.ID, i)
-		if item.Complete {
-			if !item.Directory {
-				if err := t.download.Acknowledge(id); err != nil {
-					return "", err
-				}
-			}
-			continue
-		}
-		item.Error = ""
-		err := t.downloadOne(ctx, worker, req.Folder, file, id, &item, func(n, _ int64) {
-			t.report(worker, "downloading", done+n, total)
-		})
-		if err != nil {
-			if ctx.Err() != nil || errors.Is(err, ErrDirectorySessionChanged) {
-				return "", err
-			}
-			item.Error = err.Error()
-			if firstErr == nil {
-				firstErr = fmt.Errorf("%s: %w", file.RelativePath, err)
-			}
-		} else {
-			item.Complete = true
-			done += item.Size
-		}
-		items[i] = item
-		if err := t.saveDownload(worker, req, items); err != nil {
-			return "", err
-		}
-		if item.Complete && !item.Directory {
-			if err := t.download.Acknowledge(id); err != nil {
-				return "", err
-			}
-		}
-	}
-	if firstErr != nil {
-		return "", firstErr
+	if err := t.runDownloadFiles(ctx, worker, req, items); err != nil {
+		return "", err
 	}
 	if req.Cleanup != nil && req.CleanupAfterShare {
 		if !allDownloadItemsVerified(req.Plan, items) {
 			return "没有删除网盘中的转存文件：没有全部文件的可信内容校验结果，已保留转存文件", nil
 		}
+		done, total := completedTotals(items)
 		t.report(worker, "cleanup", done, total)
 		if err := t.checkAccount(worker); err != nil {
 			return "", err
@@ -284,7 +237,7 @@ func (t *Transfers) planDownload(ctx context.Context, worker *transferWorker, ro
 }
 
 func (t *Transfers) downloadOne(ctx context.Context, worker *transferWorker, folder platform.LocalReference,
-	file DownloadTaskItem, id string, item *TransferItem, progress func(int64, int64)) error {
+	file DownloadTaskItem, id string, connections int, item *TransferItem, progress func(int64, int64)) error {
 	if file.Entry.Ref.Provider != worker.job.Provider || file.Entry.Ref.ID == "" {
 		return ErrDirectoryEntryChanged
 	}
@@ -292,10 +245,6 @@ func (t *Transfers) downloadOne(ctx context.Context, worker *transferWorker, fol
 		local, err := createDownloadDirectory(folder, file.RelativePath)
 		item.LocalPath = local
 		return err
-	}
-	connections := worker.config.BaiduConnections
-	if worker.job.Provider == Quark {
-		connections = worker.config.QuarkConnections
 	}
 	expected := file.ExpectedMD5
 	if expected == "" && worker.job.Provider == Quark {
