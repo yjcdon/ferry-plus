@@ -260,14 +260,14 @@ func (w *Workspace) transferDetails(c *ui.Context, jobs []app.TransferJob, index
 			selected = append(selected, job)
 		}
 	}
-	if len(selected) != 1 {
-		text := "选择任务查看详情"
-		if len(selected) > 1 {
-			text = fmt.Sprintf("已选择 %d 个传输任务", len(selected))
-		}
+	if len(selected) == 0 {
 		ui.Column(c).Fill().Center().Children(func() {
-			ui.Text(c, text).TextColor(c.Theme().TextMuted)
+			ui.Text(c, "选择任务查看详情").TextColor(c.Theme().TextMuted)
 		})
+		return
+	}
+	if len(selected) > 1 {
+		w.transferBatchDetails(c, selected)
 		return
 	}
 

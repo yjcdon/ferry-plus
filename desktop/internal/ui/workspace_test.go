@@ -70,3 +70,29 @@ func TestUploadSourceRecoveryAppearsForAffectedItem(t *testing.T) {
 		t.Fatal("已完成任务不应提供源文件重选")
 	}
 }
+
+func TestBatchTransferTargetsFollowVisibleScope(t *testing.T) {
+	workspace := NewWorkspace(Preferences{})
+	jobs := []app.TransferJob{
+		{ID: "active", State: app.TransferRunning},
+		{ID: "stopping", State: app.TransferRunning, Stopping: true},
+		{ID: "done", State: app.TransferCompleted},
+		{ID: "waiting", State: app.TransferWaitingAccount},
+		{ID: "duplicate", State: app.TransferPaused, DuplicateOf: "active"},
+	}
+	active := workspace.visibleTransfers(jobs, 1)
+	pause, resume := workspace.transferBatchTargets(active)
+	if len(pause) != 2 || pause[0].ID != "active" || pause[1].ID != "waiting" || len(resume) != 0 {
+		t.Fatalf("活动分类目标不符，暂停 %v，继续 %v", pause, resume)
+	}
+	pause, resume = workspace.transferBatchTargets(workspace.visibleTransfers(jobs, 2))
+	if len(pause) != 0 || len(resume) != 0 {
+		t.Fatal("已完成分类没有可以暂停或继续的任务")
+	}
+	window := ui.NewTester(func(c *ui.Context) {
+		workspace.transferBatchDetails(c, []app.TransferJob{jobs[0], jobs[2]})
+	}, 320, 200)
+	if !window.HasText("已选择 2 个传输任务") || !window.HasText("暂停") || !window.HasText("移除任务记录") {
+		t.Fatalf("多选详情缺少可用操作，界面为 %q", window.Texts())
+	}
+}

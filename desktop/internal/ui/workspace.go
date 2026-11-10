@@ -54,6 +54,8 @@ var transferPages = []struct {
 var (
 	sidebarIcon = workspaceIcon("M3 5h18v14H3z M9 5v14 M5 8h2 M5 11h2")
 	detailsIcon = workspaceIcon("M3 5h18v14H3z M15 5v14 M17 8h2 M17 11h2")
+	pauseIcon   = workspaceIcon("M9 5v14 M15 5v14")
+	resumeIcon  = workspaceIcon("M8 5l11 7-11 7z")
 )
 
 func workspaceIcon(path string) *ui.SVG {
@@ -323,6 +325,7 @@ func (w *Workspace) content(c *ui.Context, width float32, jobs []app.TransferJob
 			}
 			if index >= 0 {
 				if w.jobs != nil {
+					w.transferBatchToolbar(c, w.visibleTransfers(jobs, index))
 					if width >= 550 && ui.Button(c, "添加链接").Clicked() {
 						w.showShare()
 					}
