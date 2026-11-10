@@ -40,6 +40,18 @@ func (w *Workspace) transferBatchTargets(jobs []app.TransferJob) (pause, resume 
 	return pause, resume
 }
 
+// transferRetryTargets keeps batch retries within the same recoverable states as a single task.
+func transferRetryTargets(jobs []app.TransferJob) []app.TransferJob {
+	var retry []app.TransferJob
+	for _, job := range jobs {
+		if !job.Stopping && !job.CancellationRequested && !job.RemovalPending &&
+			(job.State == app.TransferFailed || job.State == app.TransferNeedsCheck) {
+			retry = append(retry, job)
+		}
+	}
+	return retry
+}
+
 func (w *Workspace) transferBatchCommand(command func(string) error, jobs []app.TransferJob) {
 	w.transfer.problem = ""
 	go func() {
@@ -55,6 +67,7 @@ func (w *Workspace) transferBatchCommand(command func(string) error, jobs []app.
 
 func (w *Workspace) transferBatchDetails(c *ui.Context, selected []app.TransferJob) {
 	pause, resume := w.transferBatchTargets(selected)
+	retry := transferRetryTargets(selected)
 	remove, trash := transferRemovalTargets(selected)
 	ui.Column(c).Fill().Center().Gap(8).Children(func() {
 		ui.Textf(c, "已选择 %d 个传输任务", len(selected)).TextColor(c.Theme().TextMuted)
@@ -64,6 +77,9 @@ func (w *Workspace) transferBatchDetails(c *ui.Context, selected []app.TransferJ
 		if len(resume) > 0 && ui.Button(c, "继续").Clicked() {
 			w.transferBatchCommand(w.jobs.Resume, resume)
 		}
+		if len(retry) > 0 && ui.Button(c, "重试失败项").Clicked() {
+			w.transferBatchCommand(w.jobs.RetryFailed, retry)
+		}
 		if len(remove) > 0 && ui.Button(c, "移除任务记录").Clicked() {
 			w.confirmTransferRemoval(remove, false)
 		}
@@ -71,4 +87,38 @@ func (w *Workspace) transferBatchDetails(c *ui.Context, selected []app.TransferJ
 			w.confirmTransferRemoval(trash, true)
 		}
 	})
+}
+
+// taskSelectionMenu applies a row context menu to the visible selection when it contains that row.
+func (w *Workspace) taskSelectionMenu(m *ui.Menu, clicked app.TransferJob, visible []app.TransferJob) {
+	var selected []app.TransferJob
+	if w.transfer.selection.Has(clicked.ID) {
+		for _, job := range visible {
+			if w.transfer.selection.Has(job.ID) {
+				selected = append(selected, job)
+			}
+		}
+	}
+	if len(selected) < 2 {
+		w.taskMenu(m, clicked)
+		return
+	}
+	pause, resume := w.transferBatchTargets(selected)
+	retry := transferRetryTargets(selected)
+	remove, trash := transferRemovalTargets(selected)
+	if len(pause) > 0 && m.Item("暂停").Chosen() {
+		w.transferBatchCommand(w.jobs.Pause, pause)
+	}
+	if len(resume) > 0 && m.Item("继续").Chosen() {
+		w.transferBatchCommand(w.jobs.Resume, resume)
+	}
+	if len(retry) > 0 && m.Item("重试失败项").Chosen() {
+		w.transferBatchCommand(w.jobs.RetryFailed, retry)
+	}
+	if len(remove) > 0 && m.Item("移除任务记录").Chosen() {
+		w.confirmTransferRemoval(remove, false)
+	}
+	if len(trash) > 0 && m.Item("移除并删除下载文件").Chosen() {
+		w.confirmTransferRemoval(trash, true)
+	}
 }

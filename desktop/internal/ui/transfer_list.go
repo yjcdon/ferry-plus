@@ -118,7 +118,7 @@ func (w *Workspace) transferRows(c *ui.Context, jobs []app.TransferJob, index in
 	state.list.Key = func(i int) any { return visible[i].ID }
 	state.list.Label = func(i int) string { return visible[i].Title }
 	list := ui.List(c, &state.list, len(visible), func(i int) {
-		w.transferRow(c, visible[i])
+		w.transferRow(c, visible[i], visible)
 	}).Grow(1).MinHeight(0)
 	if list.Submitted() && state.focus >= 0 && state.focus < len(visible) {
 		w.preferences.DetailsOpen = false
@@ -129,9 +129,9 @@ func (w *Workspace) transferRows(c *ui.Context, jobs []app.TransferJob, index in
 	w.transferSummary(c, visible)
 }
 
-func (w *Workspace) transferRow(c *ui.Context, job app.TransferJob) {
+func (w *Workspace) transferRow(c *ui.Context, job app.TransferJob, visible []app.TransferJob) {
 	ui.Row(c).Padding(10, 12).Gap(12).AlignItems(ui.Center).
-		ContextMenu(func(m *ui.Menu) { w.taskMenu(m, job) }).Children(func() {
+		ContextMenu(func(m *ui.Menu) { w.taskSelectionMenu(m, job, visible) }).Children(func() {
 		ui.Column(c).Grow(1).MinWidth(0).Gap(5).Children(func() {
 			ui.Text(c, job.Title).Bold().SingleLine().Tooltip(job.Title)
 			ui.Text(c, providerTitle(string(job.Provider))+" · "+job.StatusText()).
