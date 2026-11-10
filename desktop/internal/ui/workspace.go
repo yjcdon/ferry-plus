@@ -43,19 +43,21 @@ type Preferences struct {
 
 // Workspace owns the main window's navigation and local view state.
 type Workspace struct {
-	preferences    Preferences
-	allProviders   bool
-	lastTransfer   string
-	transferSearch string
-	focusSearch    bool
-	window         *mygo.Window
-	accounts       *app.Accounts
-	loginWindows   map[app.Provider]*mygo.Window
-	ctx            context.Context
-	logoutProvider app.Provider
-	confirmLogout  bool
-	accountProblem map[app.Provider]string
-	files          map[app.Provider]*directoryView
+	preferences            Preferences
+	allProviders           bool
+	lastTransfer           string
+	transferSearch         string
+	focusSearch            bool
+	window                 *mygo.Window
+	accounts               *app.Accounts
+	loginWindows           map[app.Provider]*mygo.Window
+	ctx                    context.Context
+	logoutProvider         app.Provider
+	confirmLogout          bool
+	accountProblem         map[app.Provider]string
+	files                  map[app.Provider]*directoryView
+	directoryDelete        *directoryDelete
+	confirmDirectoryDelete bool
 }
 
 // NewWorkspace restores known pages and supplies the initial split sizes.
@@ -149,6 +151,7 @@ func (w *Workspace) View(c *ui.Context) {
 		"退出后可以重新登录以继续使用该账号。", "取消", "退出登录") == 1 {
 		w.logout(w.logoutProvider)
 	}
+	w.directoryDeleteDialog(c)
 }
 
 func (w *Workspace) sidebar(c *ui.Context) {

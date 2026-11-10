@@ -21,6 +21,9 @@ type directoryView struct {
 	focus     int
 	sort      ui.SortOrder
 	query     string
+	busy      bool
+	problem   string
+	edit      *directoryEdit
 }
 
 var fileColumns = []ui.TableColumn{
@@ -39,6 +42,7 @@ func newDirectoryView(provider app.Provider, location app.DirectoryLocation) *di
 
 func (f *directoryView) resetTree() {
 	f.focus = -1
+	f.edit = nil
 	f.selection.Clear()
 	f.outline = ui.OutlineState[directoryRow]{Indent: 18}
 	f.outline.List.Selected = &f.focus
@@ -99,6 +103,7 @@ func (w *Workspace) navigateDirectory(f *directoryView, changed bool) {
 		return
 	}
 	f.query = ""
+	f.problem = ""
 	f.resetTree()
 	w.fetchDirectory(f, f.directory.Refresh())
 	w.window.Invalidate()
@@ -139,9 +144,7 @@ func (w *Workspace) directoryToolbar(c *ui.Context, f *directoryView, width floa
 		}
 		ui.Spacer(c)
 		if w.accounts.Session(d.Provider()).State == app.LoggedIn {
-			if ui.Button(c, "刷新").Disabled(d.Loading(d.Root())).Clicked() {
-				w.fetchDirectory(f, d.Refresh())
-			}
+			w.directoryActions(c, f, width)
 		}
 	})
 }
@@ -183,12 +186,15 @@ func (w *Workspace) directoryBody(c *ui.Context, f *directoryView) {
 	if err := d.LoadError(root); err != nil {
 		ui.Text(c, "更新失败："+err.Error()).Padding(8, 12).TextColor(c.Theme().Danger)
 	}
+	if f.problem != "" {
+		ui.Text(c, f.problem).Padding(8, 12).TextColor(c.Theme().Danger)
+	}
 	roots := d.Roots()
 	switch {
 	case len(roots) == 0 && strings.TrimSpace(f.query) != "":
-		w.directoryEmpty(c, "试试其他关键词")
+		w.directoryEmpty(c, "试试其他关键词").ContextMenu(func(m *ui.Menu) { w.directoryBackgroundMenu(f, m) })
 	case len(roots) == 0:
-		w.directoryEmpty(c, "此目录为空")
+		w.directoryEmpty(c, "此目录为空").ContextMenu(func(m *ui.Menu) { w.directoryBackgroundMenu(f, m) })
 	default:
 		w.directoryTable(c, f, roots)
 	}
@@ -204,8 +210,8 @@ func (w *Workspace) directoryBody(c *ui.Context, f *directoryView) {
 	}
 }
 
-func (w *Workspace) directoryEmpty(c *ui.Context, title string) {
-	ui.Column(c).Grow(1).FillWidth().Center().Children(func() {
+func (w *Workspace) directoryEmpty(c *ui.Context, title string) ui.Element {
+	return ui.Column(c).Grow(1).FillWidth().Center().Children(func() {
 		ui.Text(c, title).TextColor(c.Theme().TextMuted)
 	})
 }
@@ -213,6 +219,7 @@ func (w *Workspace) directoryEmpty(c *ui.Context, title string) {
 func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []app.RemoteEntry) {
 	d := f.directory
 	f.outline.List.Columns.Widths = w.preferences.ColumnWidths
+	f.outline.List.CellMenu = func(menu *ui.Menu, row, _ int) { w.directoryRowMenu(f, menu, row) }
 	beforeSort := f.sort
 	beforeOpen := make(map[directoryRow]bool, f.outline.Open.Len())
 	for row := range f.outline.Open.All() {
@@ -242,7 +249,7 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 					}
 					f.applySelection()
 				}
-				ui.Text(c, entry.Name).SingleLine().Tooltip(entry.Name).Grow(1)
+				w.directoryNameCell(c, f, entry)
 			})
 		case 1:
 			text := "—"
@@ -257,7 +264,8 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 			}
 			ui.Text(c, text).SingleLine().TextAlign(ui.End)
 		}
-	}).Grow(1).MinHeight(0).Dividers(1, c.Theme().Border)
+	}).Grow(1).MinHeight(0).Dividers(1, c.Theme().Border).
+		ContextMenu(func(m *ui.Menu) { w.directoryBackgroundMenu(f, m) })
 
 	w.preferences.ColumnWidths = f.outline.List.Columns.Widths
 	if f.sort != beforeSort {
@@ -287,8 +295,19 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 	if table.Changed() {
 		f.applySelection()
 	}
+	if edit := f.edit; edit != nil && edit.fresh {
+		for i := range f.outline.Rows() {
+			if row := f.outline.Item(i); row.ref == edit.selection.Items[0].Entry.Ref && !row.status {
+				f.outline.List.ScrollIntoView(i)
+				break
+			}
+		}
+	}
 	if f.focus >= 0 && f.focus < f.outline.Rows() {
 		row := f.outline.Item(f.focus)
+		if !row.status && !f.busy && f.outline.List.Shortcut(c, 0, ui.KeyF2) {
+			w.beginDirectoryEdit(f, row.ref)
+		}
 		if table.Submitted() || f.outline.List.Shortcut(c, ui.Cmd, ui.KeyDown) {
 			w.navigateDirectory(f, d.Enter(row.ref))
 		}
