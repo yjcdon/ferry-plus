@@ -6,6 +6,8 @@ import (
 )
 
 var (
+	// ErrDirectoryCreationRejected means the server explicitly refused mkdir.
+	ErrDirectoryCreationRejected = errors.New("百度未创建目录。")
 	ErrMissingBDUSS              = errors.New("请重新复制百度网盘主页的完整 Cookie 后登录。")
 	ErrMissingSTOKEN             = errors.New("请重新复制百度网盘主页的完整 Cookie 后登录。")
 	ErrLoginExpired              = errors.New("登录已失效，请重新复制网盘的 Cookie 登录。")

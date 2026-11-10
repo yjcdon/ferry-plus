@@ -15,17 +15,19 @@ import (
 const RootFID = "0"
 
 var (
-	ErrInvalidResponse   = errors.New("夸克服务响应异常，请稍后重试。")
-	ErrLoginExpired      = errors.New("夸克登录已失效，请在官方页面重新登录。")
-	ErrAccountChanged    = errors.New("返回的夸克账号与已保存账号不同，请重新登录。")
-	ErrMissingIdentity   = errors.New("登录确认失败，请重新登录。")
-	ErrMissingCredential = errors.New("请重新登录夸克网盘。")
-	ErrUnsafeRedirect    = errors.New("登录地址异常，请重新登录。")
-	ErrInvalidShareLink  = errors.New("请输入有效的夸克网盘分享链接。")
-	ErrInvalidSelection  = errors.New("夸克文件选择或目录身份无效，请重新打开文件列表。")
-	ErrShareRequiresCode = errors.New("这个夸克分享需要提取码，请填写后重试。")
-	ErrInvalidPasscode   = errors.New("夸克分享提取码不正确，请检查后重试。")
-	ErrShareUnavailable  = errors.New("请检查分享链接并重新打开。")
+	// ErrDirectoryCreationRejected means the server explicitly refused mkdir.
+	ErrDirectoryCreationRejected = errors.New("夸克未创建目录。")
+	ErrInvalidResponse           = errors.New("夸克服务响应异常，请稍后重试。")
+	ErrLoginExpired              = errors.New("夸克登录已失效，请在官方页面重新登录。")
+	ErrAccountChanged            = errors.New("返回的夸克账号与已保存账号不同，请重新登录。")
+	ErrMissingIdentity           = errors.New("登录确认失败，请重新登录。")
+	ErrMissingCredential         = errors.New("请重新登录夸克网盘。")
+	ErrUnsafeRedirect            = errors.New("登录地址异常，请重新登录。")
+	ErrInvalidShareLink          = errors.New("请输入有效的夸克网盘分享链接。")
+	ErrInvalidSelection          = errors.New("夸克文件选择或目录身份无效，请重新打开文件列表。")
+	ErrShareRequiresCode         = errors.New("这个夸克分享需要提取码，请填写后重试。")
+	ErrInvalidPasscode           = errors.New("夸克分享提取码不正确，请检查后重试。")
+	ErrShareUnavailable          = errors.New("请检查分享链接并重新打开。")
 )
 
 // ServiceError retains the service code and its original diagnostic message.

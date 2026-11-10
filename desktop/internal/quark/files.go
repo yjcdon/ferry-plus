@@ -136,9 +136,15 @@ func (c *Client) CreateDirectory(ctx context.Context, name, parentFID string) (s
 		"dir_init_lock": false, "dir_path": "", "file_name": name, "pdir_fid": parentFID,
 	})
 	if err != nil {
+		if errors.Is(err, ErrLoginExpired) {
+			return "", errors.Join(ErrDirectoryCreationRejected, err)
+		}
 		return "", err
 	}
 	if !response.driveOK() {
+		if response.Code != nil && response.code() != "0" {
+			return "", errors.Join(ErrDirectoryCreationRejected, response.err())
+		}
 		return "", response.err()
 	}
 	var data struct {

@@ -132,7 +132,7 @@ func (c *Client) CreateOwnedDirectory(ctx context.Context, directory string) (En
 
 func (c *Client) makeDirectory(ctx context.Context, directory string) (object, error) {
 	address := endpoint(pcs+"/rest/2.0/pcs/file", url.Values{"app_id": {pcsID}, "method": {"mkdir"}, "path": {directory}})
-	return c.checked(ctx, request{method: http.MethodPost, url: address, cookies: c.credential.Cookies}, "error_code", "")
+	return c.checked(ctx, request{method: http.MethodPost, url: address, cookies: c.credential.Cookies}, "error_code", "mkdir")
 }
 
 // Delete moves existing entries to the Baidu recycle bin.

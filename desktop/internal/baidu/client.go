@@ -196,7 +196,11 @@ func (c *Client) checked(ctx context.Context, r request, field, operation string
 		if field == "error_code" {
 			msg = str(j["error_msg"])
 		}
-		return nil, apiError(code, msg, operation)
+		err := apiError(code, msg, operation)
+		if operation == "mkdir" {
+			err = errors.Join(ErrDirectoryCreationRejected, err)
+		}
+		return nil, err
 	}
 	if reply.status >= 400 {
 		return nil, HTTPError(reply.status)

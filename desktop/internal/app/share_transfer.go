@@ -367,6 +367,10 @@ func (t *ShareTransfer) run(ctx context.Context, key string, record *shareTransf
 		}
 		root, err := createShareRoot(ctx, session, parent, name)
 		if err != nil {
+			if errors.Is(err, baidu.ErrDirectoryCreationRejected) || errors.Is(err, quark.ErrDirectoryCreationRejected) {
+				record.MakingRoot = false
+				return ShareDownload{}, errors.Join(err, save())
+			}
 			return ShareDownload{}, fmt.Errorf("%w %w", ErrShareTransferUnconfirmed, err)
 		}
 		if root.ID == "" || root.ID == "0" || root == parent ||
