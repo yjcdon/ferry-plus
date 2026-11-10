@@ -207,7 +207,7 @@ func (w *Workspace) shareContent(c *ui.Context, p *sharePrompt) {
 	case p.browser != nil:
 		w.shareTree(c, p)
 	case p.opening:
-		w.directoryEmpty(c, "正在打开分享")
+		w.directoryEmpty(c, "正在打开分享", nil)
 	case p.problem != "":
 		ui.Column(c).Grow(1).FillWidth().Center().Gap(8).Children(func() {
 			ui.Text(c, "分享打开失败").Bold()
@@ -244,7 +244,7 @@ func (w *Workspace) shareTree(c *ui.Context, p *sharePrompt) {
 				}
 			})
 		} else {
-			w.directoryEmpty(c, "加载中")
+			w.directoryEmpty(c, "加载中", nil)
 		}
 		return
 	}
@@ -268,7 +268,7 @@ func (w *Workspace) shareTree(c *ui.Context, p *sharePrompt) {
 		f.syncSelection()
 	}
 	if len(roots) == 0 {
-		w.directoryEmpty(c, "分享目录为空")
+		w.directoryEmpty(c, "分享目录为空", folderIcon)
 		return
 	}
 

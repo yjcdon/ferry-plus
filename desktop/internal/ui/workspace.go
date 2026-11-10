@@ -50,7 +50,7 @@ var transferPages = []struct {
 	{all, "全部", "添加传输任务", workspaceIcon("M3 14l3-8h12l3 8v5H3z M3 14h5l2 2h4l2-2h5 M8 10h8")},
 	{"transfers.active", "进行中", "等待任务开始", activeTransferIcon},
 	{"transfers.completed", "已完成", "完成的任务将显示在这里", workspaceIcon("M22 12a10 10 0 1 1-20 0 10 10 0 1 1 20 0z M7 12l3 3 7-7")},
-	{"transfers.failed", "失败", "失败的任务将显示在这里", workspaceIcon("M12 3l10 17H2z M12 9v4 M12 16v.3")},
+	{"transfers.failed", "失败", "失败的任务将显示在这里", warningIcon},
 }
 
 var (
@@ -59,6 +59,8 @@ var (
 	pauseIcon   = workspaceIcon("M9 5v14 M15 5v14")
 	resumeIcon  = workspaceIcon("M8 5l11 7-11 7z")
 	backIcon    = workspaceIcon("M14 6l-6 6 6 6")
+	warningIcon = workspaceIcon("M12 3l10 17H2z M12 9v4 M12 16v.3")
+	folderIcon  = workspaceIcon("M3 6h7l2 2h9v11H3z")
 	searchIcon  = workspaceIcon("M16 10a6 6 0 1 1-12 0 6 6 0 1 1 12 0z M14.5 14.5l5 5")
 	accountIcon = ui.MustParseSVG([]byte(`<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="9" r="3.5" fill="currentColor"/><path d="M5 19c1-3 3.5-4.5 7-4.5s6 1.5 7 4.5a10 10 0 0 1-14 0z" fill="currentColor"/></svg>`))
 )

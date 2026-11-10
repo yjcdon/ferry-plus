@@ -176,7 +176,7 @@ func (w *Workspace) directoryBody(c *ui.Context, f *directoryView) {
 	if !d.Loaded(root) {
 		if err := d.LoadError(root); err != nil {
 			ui.Column(c).Grow(1).FillWidth().Center().Gap(8).Padding(16).Children(func() {
-				ui.Text(c, "网盘读取失败").Bold()
+				workspaceEmptyLabel(c, "网盘读取失败", warningIcon)
 				ui.Text(c, err.Error()).TextColor(c.Theme().TextMuted)
 				ui.Row(c).Gap(8).Children(func() {
 					if ui.Button(c, "重试").Clicked() {
@@ -188,7 +188,7 @@ func (w *Workspace) directoryBody(c *ui.Context, f *directoryView) {
 				})
 			})
 		} else {
-			w.directoryEmpty(c, "正在读取目录")
+			w.directoryEmpty(c, "加载中", nil)
 		}
 		return
 	}
@@ -201,10 +201,10 @@ func (w *Workspace) directoryBody(c *ui.Context, f *directoryView) {
 	roots := d.Roots()
 	switch {
 	case len(roots) == 0 && strings.TrimSpace(f.query) != "":
-		empty := w.directoryEmpty(c, "试试其他关键词").ContextMenu(func(m *ui.Menu) { w.directoryBackgroundMenu(f, m) })
+		empty := w.directoryEmpty(c, "试试其他关键词", searchIcon).ContextMenu(func(m *ui.Menu) { w.directoryBackgroundMenu(f, m) })
 		w.directoryDrop(empty, f, root)
 	case len(roots) == 0:
-		empty := w.directoryEmpty(c, "此目录为空").ContextMenu(func(m *ui.Menu) { w.directoryBackgroundMenu(f, m) })
+		empty := w.directoryEmpty(c, "此目录为空", folderIcon).ContextMenu(func(m *ui.Menu) { w.directoryBackgroundMenu(f, m) })
 		w.directoryDrop(empty, f, root)
 	default:
 		w.directoryTable(c, f, roots)
@@ -221,9 +221,14 @@ func (w *Workspace) directoryBody(c *ui.Context, f *directoryView) {
 	}
 }
 
-func (w *Workspace) directoryEmpty(c *ui.Context, title string) ui.Element {
-	return ui.Column(c).Grow(1).FillWidth().Center().Children(func() {
-		ui.Text(c, title).TextColor(c.Theme().TextMuted)
+func (w *Workspace) directoryEmpty(c *ui.Context, title string, icon *ui.SVG) ui.Element {
+	return ui.Column(c).Grow(1).FillWidth().Center().Gap(8).Children(func() {
+		if icon != nil {
+			workspaceEmptyLabel(c, title, icon)
+		} else {
+			ui.Spinner(c).Label(title)
+			ui.Text(c, title).TextColor(c.Theme().TextMuted).AccessHidden(true)
+		}
 	})
 }
 
