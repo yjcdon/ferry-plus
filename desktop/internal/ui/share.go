@@ -20,6 +20,7 @@ type sharePrompt struct {
 	text, code, problem        string
 	pastedText, pastedCode     string
 	opening, saving, focusCode bool
+	composing                  bool
 	browser                    *app.ShareBrowser
 	files                      *directoryView
 	selectedInitially          bool
@@ -185,7 +186,9 @@ func (w *Workspace) shareFields(c *ui.Context, p *sharePrompt) {
 				}
 			}
 		}
-		submitted := link.Submitted() || code.Submitted()
+		wasComposing := p.composing
+		p.composing = link.Composing() || code.Composing()
+		submitted := !wasComposing && !p.composing && (link.Submitted() || code.Submitted())
 		if ui.Button(c, "打开").Disabled(disabled || strings.TrimSpace(p.text) == "").Clicked() ||
 			submitted && p.browser == nil {
 			w.openShareLink(p)
