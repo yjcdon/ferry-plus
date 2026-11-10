@@ -163,3 +163,21 @@ func TestTransferErrorCopyUsesSelectedErrors(t *testing.T) {
 		t.Fatalf("多选失败任务缺少复制错误: %v", window.Menu())
 	}
 }
+
+func TestBatchCancelOnlyOffersActiveUploads(t *testing.T) {
+	workspace := NewWorkspace(Preferences{})
+	selected := []app.TransferJob{
+		{ID: "waiting", Direction: app.TransferUpload, State: app.TransferWaitingAccount},
+		{ID: "paused", Direction: app.TransferUpload, State: app.TransferPaused},
+		{ID: "running-download", Direction: app.TransferDownload, State: app.TransferRunning},
+		{ID: "finished", Direction: app.TransferUpload, State: app.TransferCompleted},
+		{ID: "stopping", Direction: app.TransferUpload, State: app.TransferRunning, Stopping: true},
+	}
+	if got := cancelableUploads(selected); len(got) != 2 || got[0].ID != "waiting" || got[1].ID != "paused" {
+		t.Fatalf("取消上传范围错误: %v", got)
+	}
+	window := ui.NewTester(func(c *ui.Context) { workspace.transferBatchDetails(c, selected) }, 320, 250)
+	if !window.HasText("取消上传") {
+		t.Fatal("多选详情缺少取消上传")
+	}
+}

@@ -63,6 +63,22 @@ func prioritizedUploads(jobs []app.TransferJob) []app.TransferJob {
 	return queued
 }
 
+func canCancelUpload(job app.TransferJob) bool {
+	return job.Direction == app.TransferUpload && !job.Stopping && !job.CancellationRequested &&
+		(job.State == app.TransferQueued || job.State == app.TransferWaitingAccount ||
+			job.State == app.TransferRunning || job.State == app.TransferPaused)
+}
+
+func cancelableUploads(jobs []app.TransferJob) []app.TransferJob {
+	var targets []app.TransferJob
+	for _, job := range jobs {
+		if canCancelUpload(job) {
+			targets = append(targets, job)
+		}
+	}
+	return targets
+}
+
 func (w *Workspace) transferBatchCommand(command func(string) error, jobs []app.TransferJob) {
 	w.transfer.problem = ""
 	go func() {
@@ -80,6 +96,7 @@ func (w *Workspace) transferBatchDetails(c *ui.Context, selected []app.TransferJ
 	pause, resume := w.transferBatchTargets(selected)
 	retry := transferRetryTargets(selected)
 	priority := prioritizedUploads(selected)
+	cancel := cancelableUploads(selected)
 	remove, trash := transferRemovalTargets(selected)
 	ui.Column(c).Fill().Center().Gap(8).Children(func() {
 		ui.Textf(c, "已选择 %d 个传输任务", len(selected)).TextColor(c.Theme().TextMuted)
@@ -94,6 +111,9 @@ func (w *Workspace) transferBatchDetails(c *ui.Context, selected []app.TransferJ
 		}
 		if len(priority) > 0 && ui.Button(c, "优先上传").Clicked() {
 			w.transferBatchCommand(w.jobs.Prioritize, priority)
+		}
+		if len(cancel) > 0 && ui.Button(c, "取消上传").Clicked() {
+			w.transferBatchCommand(w.jobs.Cancel, cancel)
 		}
 		if text := transferErrorText(selected); text != "" && ui.Button(c, "复制错误").Clicked() {
 			go mygo.Clipboard.WriteText(text)
@@ -124,6 +144,7 @@ func (w *Workspace) taskSelectionMenu(m *ui.Menu, clicked app.TransferJob, visib
 	pause, resume := w.transferBatchTargets(selected)
 	retry := transferRetryTargets(selected)
 	priority := prioritizedUploads(selected)
+	cancel := cancelableUploads(selected)
 	remove, trash := transferRemovalTargets(selected)
 	if len(pause) > 0 && m.Item("暂停").Chosen() {
 		w.transferBatchCommand(w.jobs.Pause, pause)
@@ -136,6 +157,9 @@ func (w *Workspace) taskSelectionMenu(m *ui.Menu, clicked app.TransferJob, visib
 	}
 	if len(priority) > 0 && m.Item("优先上传").Chosen() {
 		w.transferBatchCommand(w.jobs.Prioritize, priority)
+	}
+	if len(cancel) > 0 && m.Item("取消上传").Chosen() {
+		w.transferBatchCommand(w.jobs.Cancel, cancel)
 	}
 	if text := transferErrorText(selected); text != "" && m.Item("复制错误").Chosen() {
 		go mygo.Clipboard.WriteText(text)

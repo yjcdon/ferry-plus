@@ -200,8 +200,7 @@ func (w *Workspace) taskMenu(m *ui.Menu, job app.TransferJob) {
 		m.Item("优先上传").Chosen() {
 		w.transferCommand(w.jobs.Prioritize, job.ID)
 	}
-	if job.Direction == app.TransferUpload && !terminalTransfer(job.State) &&
-		m.Item("取消上传").Disabled(job.Stopping).Chosen() {
+	if canCancelUpload(job) && m.Item("取消上传").Chosen() {
 		w.transferCommand(w.jobs.Cancel, job.ID)
 	}
 	if job.CanRetryShareCleanup && m.Item("重试清理转存文件").Disabled(job.Stopping).Chosen() {
@@ -218,10 +217,6 @@ func (w *Workspace) locateDuplicate(id string) {
 	if !w.selectTransfer(id) {
 		w.transfer.problem = "原上传任务已移除。可选择仍然上传。"
 	}
-}
-
-func terminalTransfer(state app.TransferState) bool {
-	return state == app.TransferCompleted || state == app.TransferFailed || state == app.TransferCanceled || state == app.TransferNeedsCheck
 }
 
 func (w *Workspace) transferCommand(command func(string) error, id string) {
