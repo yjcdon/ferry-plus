@@ -165,6 +165,7 @@ func (t *Transfers) runDownload(ctx context.Context, worker *transferWorker) (st
 			if ctx.Err() != nil {
 				return "", ctx.Err()
 			}
+			t.accounts.ExpireSession(worker.job.Provider, worker.session, err)
 			return "没有删除网盘中的转存文件：" + err.Error(), nil
 		}
 		req.Cleanup = nil

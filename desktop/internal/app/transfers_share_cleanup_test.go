@@ -218,3 +218,37 @@ func TestShareCleanupBlocksRemovalAndStopsWithAccountChange(t *testing.T) {
 		t.Fatalf("canceled cleanup lost its retryable completed record: %+v", snapshot)
 	}
 }
+
+func TestAutomaticCleanupExpiresAccountButKeepsCompletedDownload(t *testing.T) {
+	transport := directoryTransport(func(r *http.Request) (*http.Response, error) {
+		if r.URL.Path != "/1/clouddrive/file/sort" {
+			return nil, fmt.Errorf("清理不应调用其他端点: %s", r.URL)
+		}
+		return directoryReply(t, r, map[string]any{"status": 401, "code": 401})
+	})
+	accounts := NewAccounts(nil, nil)
+	session := AccountSession{ID: "owner", State: LoggedIn, Quark: quark.New(quark.Credential{}, &http.Client{Transport: transport})}
+	accounts.quark.current.Store(&session)
+	item, cleanup := cleanupTestPlan(session)
+	runner := downloadTestWorker{run: func(req download.Request) (download.Result, error) {
+		result, err := downloadedFixture(req)
+		result.Verified = true
+		return result, err
+	}}
+	queue, err := newTransfers(&transferTestRecords{}, accounts, nil, runner, TransferConfig{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	id, err := queue.EnqueuePreparedDownload(Quark, session, "分享", []DownloadTaskItem{item}, platform.LocalReference{Path: t.TempDir()}, &cleanup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := waitTransferState(t, queue, id, TransferCompleted)
+	if job.Warning == "" || !job.CanRetryShareCleanup {
+		t.Fatalf("清理失败应保留已完成任务及清理入口: %+v", job)
+	}
+	if got := accounts.Session(Quark); got.State != Expired || got.ID != session.ID {
+		t.Fatalf("自动清理应标记原账号已失效: %+v", got)
+	}
+}
