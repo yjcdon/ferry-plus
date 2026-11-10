@@ -160,6 +160,7 @@ type uploadRunner interface {
 type downloadRunner interface {
 	Run(context.Context, download.Request, download.Resolve, func(int64, int64)) (download.Result, error)
 	Acknowledge(string) error
+	Discard(download.Request) error
 }
 
 type Transfers struct {

@@ -61,8 +61,9 @@ func downloadedFixture(req download.Request) (download.Result, error) {
 }
 
 type downloadTestWorker struct {
-	run func(download.Request) (download.Result, error)
-	ack func(string) error
+	run     func(download.Request) (download.Result, error)
+	ack     func(string) error
+	discard func(download.Request) error
 }
 
 func (w downloadTestWorker) Run(_ context.Context, req download.Request, _ download.Resolve, _ func(int64, int64)) (download.Result, error) {
@@ -74,6 +75,13 @@ func (w downloadTestWorker) Acknowledge(id string) error {
 		return nil
 	}
 	return w.ack(id)
+}
+
+func (w downloadTestWorker) Discard(req download.Request) error {
+	if w.discard == nil {
+		return nil
+	}
+	return w.discard(req)
 }
 
 func transferTestSession(accounts *Accounts, id string) AccountSession {

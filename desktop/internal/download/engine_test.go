@@ -345,3 +345,46 @@ func TestRedirectCredentialsReturnOnlyToOriginalHost(t *testing.T) {
 		}
 	}
 }
+
+func TestDiscardRemovesOnlyRecordedPartialAndIsRetryable(t *testing.T) {
+	records := newTestRecords()
+	engine := newEngine(records, nil)
+	folder := t.TempDir()
+	req := Request{ID: "abandoned", Folder: platform.LocalReference{Path: folder}, RelativePath: "子目录/文件.txt", Size: 4}
+	parent := filepath.Join(folder, "子目录")
+	if err := os.Mkdir(parent, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	partial, candidate := ".ferry-test.part", "文件.txt"
+	for _, name := range []string{partial, candidate, ".ferry-neighbor.part"} {
+		if err := os.WriteFile(filepath.Join(parent, name), []byte(name), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	key, release, err := engine.claim(req.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	release()
+	saved := checkpoint{Target: filepath.FromSlash(req.RelativePath), Folder: folder, Size: req.Size,
+		Partial: partial, Candidate: candidate}
+	if err := records.Write(key, saved); err != nil {
+		t.Fatal(err)
+	}
+	for range 2 {
+		if err := engine.Discard(req); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(parent, partial)); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("临时文件仍存在: %v", err)
+	}
+	if err := records.Read(key, &saved); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("下载断点仍存在: %v", err)
+	}
+	for _, name := range []string{candidate, ".ferry-neighbor.part"} {
+		if bytes, err := os.ReadFile(filepath.Join(parent, name)); err != nil || string(bytes) != name {
+			t.Fatalf("相邻文件被改变: %s，%v", name, err)
+		}
+	}
+}

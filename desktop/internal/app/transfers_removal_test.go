@@ -12,6 +12,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/yjcdon/ferry-drive/desktop/internal/download"
 	"github.com/yjcdon/ferry-drive/desktop/internal/platform"
 )
 
@@ -216,5 +217,32 @@ func TestTrashRejectsReplacedAbsoluteRoot(t *testing.T) {
 	})
 	if err == nil || called {
 		t.Fatalf("旧绝对路径上的新文件不应进入系统回收站: %v", err)
+	}
+}
+
+func TestRemoveKeepsTaskUntilDownloadPartialIsDiscarded(t *testing.T) {
+	records, job := fixtureDownloadRemoval(t, "已发布.txt", "未完成.txt")
+	job.State = TransferFailed
+	job.Items[1].Complete = false
+	if err := records.Write(transferRecordName, []transferRecord{job}); err != nil {
+		t.Fatal(err)
+	}
+	queue := fixtureRemovalTransfers(t, records)
+	fail := true
+	queue.download = downloadTestWorker{discard: func(req download.Request) error {
+		if req.ID == downloadItemID(job.ID, 1) && fail {
+			return errors.New("测试临时文件暂不可用")
+		}
+		return nil
+	}}
+	if err := queue.Remove(job.ID); err == nil || len(queue.Snapshot()) != 1 {
+		t.Fatalf("临时文件清理失败后应保留任务: %v", err)
+	}
+	fail = false
+	if err := queue.Remove(job.ID); err != nil || len(queue.Snapshot()) != 0 {
+		t.Fatalf("清理完成后应移除任务: %v", err)
+	}
+	if _, err := os.Stat(job.Items[0].LocalPath); err != nil {
+		t.Fatalf("仅移除记录应保留已发布文件: %v", err)
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/yjcdon/ferry-drive/desktop/internal/download"
 	"github.com/yjcdon/ferry-drive/desktop/internal/platform"
 )
 
@@ -144,6 +145,9 @@ func (t *Transfers) removeAndTrash(id string, trash func(string) error) error {
 	if len(failed) != 0 {
 		return errors.Join(failed...)
 	}
+	if err := t.discardDownloadPartials(job); err != nil {
+		return err
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.removeRecordLocked(t.find(id))
@@ -194,5 +198,21 @@ func (t *Transfers) removeRecordLocked(index int) error {
 		return err
 	}
 	t.jobs = next
+	return nil
+}
+
+func (t *Transfers) discardDownloadPartials(job transferRecord) error {
+	if job.Download == nil || t.download == nil {
+		return nil
+	}
+	for i, item := range job.Download.Plan {
+		if item.Entry.IsDirectory {
+			continue
+		}
+		if err := t.download.Discard(download.Request{ID: downloadItemID(job.ID, i), Folder: job.Download.Folder,
+			RelativePath: item.RelativePath, Size: item.Entry.Size}); err != nil {
+			return fmt.Errorf("%s：%w", item.RelativePath, err)
+		}
+	}
 	return nil
 }

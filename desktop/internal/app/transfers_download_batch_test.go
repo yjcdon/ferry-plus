@@ -18,7 +18,8 @@ type downloadBatchRunner func(context.Context, download.Request) (download.Resul
 func (r downloadBatchRunner) Run(ctx context.Context, req download.Request, _ download.Resolve, _ func(int64, int64)) (download.Result, error) {
 	return r(ctx, req)
 }
-func (downloadBatchRunner) Acknowledge(string) error { return nil }
+func (downloadBatchRunner) Acknowledge(string) error       { return nil }
+func (downloadBatchRunner) Discard(download.Request) error { return nil }
 
 func enqueueTestDownload(t *testing.T, transfers *Transfers, session AccountSession, prefix string, count int) string {
 	t.Helper()

@@ -90,6 +90,9 @@ func (t *Transfers) Remove(id string) error {
 	if err := t.archiveDownload(job); err != nil {
 		return err
 	}
+	if err := t.discardDownloadPartials(job); err != nil {
+		return err
+	}
 	return t.removeRecordLocked(index)
 }
 
