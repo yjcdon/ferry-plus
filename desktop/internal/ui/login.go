@@ -37,6 +37,7 @@ type loginWindow struct {
 	wake   chan struct{}
 
 	loading, checking, saving bool
+	closeAfterSave            bool
 	useCookie, offerCookie    bool
 	unavailable               bool
 	seenBDUSS, diskMainAt     time.Time
@@ -44,9 +45,9 @@ type loginWindow struct {
 	loadError, loginError     string
 }
 
-func openLogin(accounts *app.Accounts, provider app.Provider, changed, closed func()) *mygo.Window {
+func openLogin(parent context.Context, accounts *app.Accounts, provider app.Provider, changed, closed func()) *mygo.Window {
 	l := &loginWindow{accounts: accounts, provider: provider, changed: changed}
-	l.ctx, l.cancel = context.WithCancel(context.Background())
+	l.ctx, l.cancel = context.WithCancel(parent)
 	opts := mygo.WindowOptions{
 		Title: "登录" + providerTitle(string(provider)),
 		Width: 800, Height: 700, MinWidth: 720, MinHeight: 600,
@@ -58,6 +59,7 @@ func openLogin(accounts *app.Accounts, provider app.Provider, changed, closed fu
 	l.window = mygo.NewWindow(opts)
 	l.window.OnClose(func(e *mygo.CloseEvent) {
 		if l.saving {
+			l.closeAfterSave = true
 			e.PreventDefault()
 		} else {
 			l.cancel()
@@ -283,6 +285,9 @@ func (l *loginWindow) save(login *app.CheckedLogin) {
 		l.saving, l.checking = false, false
 		if err != nil {
 			l.loginError = err.Error()
+			if l.closeAfterSave {
+				l.window.Close()
+			}
 			return
 		}
 		l.changed()

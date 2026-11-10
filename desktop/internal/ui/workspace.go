@@ -72,6 +72,11 @@ type Workspace struct {
 	downloadOpen           bool
 	share                  *sharePrompt
 	shareOpen              bool
+	quitting               bool
+	quitReady              func()
+	clipboardSequence      uint64
+	clipboardLink          app.ShareLink
+	notifiedStates         map[string]app.TransferState
 }
 
 // NewWorkspace restores known pages and supplies the initial split sizes.
@@ -188,6 +193,7 @@ func (w *Workspace) View(c *ui.Context) {
 	w.downloadDialog(c)
 	w.shareDialog(c)
 	w.transferRemoveDialog(c)
+	w.quitNotice(c)
 }
 
 func (w *Workspace) sidebar(c *ui.Context, jobs []app.TransferJob) {

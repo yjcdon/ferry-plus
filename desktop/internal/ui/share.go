@@ -5,7 +5,6 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
 	"github.com/yjcdon/ferry-drive/desktop/internal/app"
@@ -29,11 +28,21 @@ type sharePrompt struct {
 }
 
 func (w *Workspace) showShare() {
-	w.window.Update(func() { w.openSharePrompt(mygo.Clipboard.ReadText()) })
+	w.window.Update(func() {
+		w.openSharePrompt(app.ShareLink{})
+		p := w.share
+		if p != nil && p.text == "" {
+			w.readShareClipboard(func(link app.ShareLink, _ bool) {
+				if w.share == p && p.text == "" && link.URL != "" {
+					w.fillSharePrompt(p, link)
+				}
+			})
+		}
+	})
 }
 
-func (w *Workspace) openSharePrompt(clipboard string) {
-	if w.jobs == nil || w.shareOpen || w.downloadOpen || w.confirmDirectoryDelete || w.confirmLogout {
+func (w *Workspace) openSharePrompt(link app.ShareLink) {
+	if w.jobs == nil || w.quitting || w.shareOpen || w.downloadOpen || w.confirmDirectoryDelete || w.confirmLogout {
 		return
 	}
 	p := &sharePrompt{}
@@ -54,12 +63,16 @@ func (w *Workspace) openSharePrompt(clipboard string) {
 			}
 		})
 	}()
-	if link, err := app.ParseShareInput(clipboard, ""); err == nil {
-		p.text, p.code = link.URL, link.Passcode
-		p.pastedText, p.pastedCode = p.text, p.code
-		w.openShareLink(p)
+	if link.URL != "" {
+		w.fillSharePrompt(p, link)
 	}
 	w.window.Invalidate()
+}
+
+func (w *Workspace) fillSharePrompt(p *sharePrompt, link app.ShareLink) {
+	p.text, p.code = link.URL, link.Passcode
+	p.pastedText, p.pastedCode = p.text, p.code
+	w.openShareLink(p)
 }
 
 func (w *Workspace) openShareLink(p *sharePrompt) {

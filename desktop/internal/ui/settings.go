@@ -22,6 +22,7 @@ type SettingsWindowOptions struct {
 	AccountChanged func(app.Provider)
 	Changed        func()
 	Closed         func()
+	QuitPending    func() bool
 }
 
 type settingsWindow struct {
@@ -547,6 +548,8 @@ func (s *settingsWindow) save(work func() error, applied func(), notify bool) {
 				s.closeAfterSave = false
 				if err == nil {
 					s.window.Close()
+				} else if s.opts.QuitPending != nil && s.opts.QuitPending() {
+					s.window.Destroy()
 				}
 			}
 		})

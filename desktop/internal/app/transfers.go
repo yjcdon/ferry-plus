@@ -57,6 +57,7 @@ type TransferJob struct {
 	Direction                         TransferDirection
 	State                             TransferState
 	Stage, Error, Warning             string
+	ShareURL                          string
 	CreatedAt                         time.Time
 	Done, Total                       int64
 	Items                             []TransferItem
@@ -326,6 +327,7 @@ func (t *Transfers) EnqueueShare(selection ShareSelection, folder platform.Local
 		return "", errors.New("下载目录或所选项目无效。")
 	}
 	job := newTransferJob(selection.Provider(), selection.access.session, selection.Title(), TransferDownload)
+	job.ShareURL = selection.access.link.URL
 	if err := t.shares.Stage(job.ID, selection, transferFolder); err != nil {
 		return "", errors.Join(err, t.shares.DiscardStage(job.ID))
 	}

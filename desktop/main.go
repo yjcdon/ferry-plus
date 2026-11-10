@@ -25,6 +25,10 @@ func main() {
 }
 
 func run() (err error) {
+	mygo.App.SetName("Ferry Drive")
+	if !mygo.App.RequestSingleInstanceLock() {
+		return nil
+	}
 	data, err := store.Open()
 	if err != nil {
 		return err
@@ -46,9 +50,13 @@ func run() (err error) {
 	businessClient := &http.Client{Transport: transport, Timeout: 60 * time.Second}
 	accounts := app.NewAccounts(data, businessClient)
 	var notifyWindow atomic.Pointer[mygo.Window]
+	var notifyQueued atomic.Bool
 	transfers, err := app.NewTransfers(data, accounts, businessClient, app.TransferConfigFromSettings(settings.Values()), func() {
-		if window := notifyWindow.Load(); window != nil {
-			window.Invalidate()
+		if window := notifyWindow.Load(); window != nil && notifyQueued.CompareAndSwap(false, true) {
+			window.Update(func() {
+				notifyQueued.Store(false)
+				workspace.TransfersChanged()
+			})
 		}
 	})
 	if err != nil {
@@ -79,6 +87,7 @@ func run() (err error) {
 		go accounts.Restore(ctx, app.Baidu, func() { workspace.AccountChanged(app.Baidu) })
 		go accounts.Restore(ctx, app.Quark, func() { workspace.AccountChanged(app.Quark) })
 		mygo.App.SetMenu(workspace.Menu(window))
+		bindDesktop(window, workspace, transfers, cancel)
 	})
 	if err := mygo.App.Run(); err != nil {
 		return err

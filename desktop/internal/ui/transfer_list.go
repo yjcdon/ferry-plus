@@ -33,6 +33,7 @@ func (w *Workspace) AttachTransfers(transfers *app.Transfers) {
 	w.transfer.focus = -1
 	w.transfer.list.Selected = &w.transfer.focus
 	w.transfer.list.Selection = &w.transfer.selection
+	w.TransfersChanged()
 }
 
 func (w *Workspace) filteredTransfers() []app.TransferJob {

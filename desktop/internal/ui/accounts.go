@@ -44,13 +44,17 @@ func (w *Workspace) accountMenu(menu *ui.Menu) {
 
 func (w *Workspace) showLogin(provider app.Provider) {
 	w.window.Update(func() {
+		if w.quitting {
+			return
+		}
 		if existing := w.loginWindows[provider]; existing != nil {
 			existing.Focus()
 			return
 		}
 		delete(w.accountProblem, provider)
-		w.loginWindows[provider] = openLogin(w.accounts, provider, func() { w.AccountChanged(provider) }, func() {
+		w.loginWindows[provider] = openLogin(w.ctx, w.accounts, provider, func() { w.AccountChanged(provider) }, func() {
 			delete(w.loginWindows, provider)
+			w.finishPrepareQuit()
 		})
 	})
 }

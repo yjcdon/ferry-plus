@@ -16,6 +16,9 @@ func (w *Workspace) AttachSettings(model *app.SettingsModel, readError error, ch
 
 func (w *Workspace) showSettings() {
 	w.window.Update(func() {
+		if w.quitting {
+			return
+		}
 		if w.settingsWindow != nil {
 			w.settingsWindow.Focus()
 			return
@@ -25,7 +28,11 @@ func (w *Workspace) showSettings() {
 			ShowLogin:      w.showLogin,
 			AccountChanged: w.AccountChanged,
 			Changed:        w.settingsChanged,
-			Closed:         func() { w.settingsWindow = nil },
+			QuitPending:    func() bool { return w.quitting },
+			Closed: func() {
+				w.settingsWindow = nil
+				w.finishPrepareQuit()
+			},
 		})
 	})
 }
