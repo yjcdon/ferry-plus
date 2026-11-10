@@ -255,9 +255,30 @@ func (w *Workspace) sidebar(c *ui.Context, jobs []app.TransferJob) {
 					}
 				}
 			})
-			ui.SidebarSection(c, "传输", nil, func() {
+			theme := c.Theme()
+			ui.Column(c).Gap(theme.Space(0.5)).Shrink(0).Margin(theme.Space(3), 0, 0, 0).Children(func() {
+				ui.Row(c).AlignItems(ui.Center).MinHeight(22).Padding(0, theme.Space(2)).Children(func() {
+					ui.Text(c, "传输").FontSize(theme.FontSize - 1).FontWeight(600).TextColor(theme.TextMuted).
+						Role(ui.RoleTreeItem).Level(1).Grow(1)
+					if !w.allProviders {
+						showAll := ui.ButtonBase(c).Role(ui.RoleButton).Label("查看全部").
+							Tooltip("查看全部网盘的传输").Padding(4, 3).Radius(theme.Radius)
+						if showAll.Hovered() {
+							showAll.Background(theme.SurfaceHover)
+						}
+						showAll.Children(func() {
+							ui.Text(c, "查看全部").FontSize(theme.FontSize - 1).TextColor(theme.Accent)
+						})
+						if showAll.Clicked() {
+							w.allProviders = true
+							if transferIndex(w.preferences.Page) < 0 {
+								w.preferences.Page = w.lastTransfer
+							}
+						}
+					}
+				})
 				for index, page := range transferPages {
-					item := ui.SidebarItem(c, page.id, page.icon, page.title)
+					item := ui.SidebarItem(c, page.id, page.icon, page.title).Level(2)
 					count := 0
 					for _, job := range jobs {
 						if matchesTransferPage(job, index) {
@@ -265,13 +286,7 @@ func (w *Workspace) sidebar(c *ui.Context, jobs []app.TransferJob) {
 						}
 					}
 					if count > 0 {
-						item.Children(func() { ui.Textf(c, "%d", count).TextColor(c.Theme().TextMuted) })
-					}
-				}
-				if !w.allProviders && ui.Button(c, "查看全部").Tooltip("查看全部网盘的传输").Clicked() {
-					w.allProviders = true
-					if transferIndex(w.preferences.Page) < 0 {
-						w.preferences.Page = w.lastTransfer
+						item.Children(func() { ui.Textf(c, "%d", count).TextColor(theme.TextMuted) })
 					}
 				}
 			})
