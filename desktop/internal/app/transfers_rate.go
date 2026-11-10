@@ -73,6 +73,19 @@ func (r *transferRate) wait(ctx context.Context, size int) error {
 	}
 }
 
+// waitUpload charges large parts in small increments so cancellation and
+// configuration changes take effect while waiting for a shared budget.
+func (r *transferRate) waitUpload(ctx context.Context, size int) error {
+	for size > 0 {
+		chunk := r.readSize(size)
+		if err := r.wait(ctx, chunk); err != nil {
+			return err
+		}
+		size -= chunk
+	}
+	return ctx.Err()
+}
+
 type transferRateTransport struct {
 	base http.RoundTripper
 	rate *transferRate

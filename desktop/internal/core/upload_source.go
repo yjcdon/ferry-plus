@@ -262,12 +262,16 @@ func uploadNumberedName(name string, number int) string {
 }
 
 type uploadPacer struct {
-	rate int64
-	mu   sync.Mutex
-	next time.Time
+	shared func(context.Context, int) error
+	rate   int64
+	mu     sync.Mutex
+	next   time.Time
 }
 
 func (p *uploadPacer) wait(ctx context.Context, size int) error {
+	if p.shared != nil {
+		return p.shared(ctx, size)
+	}
 	if p.rate == 0 || size == 0 {
 		return ctx.Err()
 	}

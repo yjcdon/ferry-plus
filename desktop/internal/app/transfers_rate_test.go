@@ -98,3 +98,32 @@ func waitRateReservation(t *testing.T, rate *transferRate) {
 		}
 	}
 }
+
+func TestUploadPartsShareLiveRate(t *testing.T) {
+	rate := newTransferRate(32)
+	start := time.Now()
+	done := make(chan error, 2)
+	for range 2 {
+		go func() { done <- rate.waitUpload(t.Context(), 8) }()
+	}
+	for range 2 {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	if elapsed := time.Since(start); elapsed < 450*time.Millisecond {
+		t.Fatalf("并发上传未共享限速预算: %s", elapsed)
+	}
+	rate.set(1)
+	go func() { done <- rate.waitUpload(t.Context(), 100) }()
+	waitRateReservation(t, rate)
+	rate.set(0)
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("关闭限速后上传分片仍在等待")
+	}
+}

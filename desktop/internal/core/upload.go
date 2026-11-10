@@ -45,6 +45,7 @@ type UploadRequest struct {
 	ConflictPolicy         string
 	ParallelParts          int
 	BytesPerSecond         int64
+	WaitUploadBudget       func(context.Context, int) error `json:"-"`
 	ReadbackBytesPerSecond int64
 	// BeforeRemote receives the durable batch signature before any new cloud
 	// writes. An empty signature means an original content basis is missing.
@@ -207,7 +208,7 @@ func (u *Uploader) Run(ctx context.Context, req UploadRequest, providers UploadP
 		return UploadResult{}, errors.New("上传恢复记录与原账号、目标或选项不一致")
 	}
 	run := uploadRun{req: req, providers: providers, records: u.records, client: u.client, progress: progress,
-		upload: uploadPacer{rate: req.BytesPerSecond}, readback: uploadPacer{rate: req.ReadbackBytesPerSecond}}
+		upload: uploadPacer{rate: req.BytesPerSecond, shared: req.WaitUploadBudget}, readback: uploadPacer{rate: req.ReadbackBytesPerSecond}}
 	failed, err := run.prepareContent(ctx, &manifest, name)
 	if err != nil {
 		return UploadResult{}, err

@@ -23,6 +23,9 @@ func (t *Transfers) runUpload(ctx context.Context, worker *transferWorker) ([]Tr
 	req := *worker.job.Upload
 	req.ParallelParts = worker.config.UploadParts
 	req.BytesPerSecond = worker.config.UploadBytesPerSecond
+	if t.uploadRate != nil {
+		req.WaitUploadBudget = t.uploadRate.waitUpload
+	}
 	req.ReadbackBytesPerSecond = 0 // The content client shares one download budget.
 	req.BeforeRemote = func(signature string, canPause bool) error {
 		return t.checkUploadDuplicate(ctx, worker, signature, canPause)

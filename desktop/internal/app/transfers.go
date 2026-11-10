@@ -170,6 +170,7 @@ type Transfers struct {
 	active        map[string]*transferWorker
 	beginActivity func() (func(), error)
 	downloadRate  *transferRate
+	uploadRate    *transferRate
 	downloadSlots downloadSlots
 }
 
@@ -186,6 +187,7 @@ func NewTransfers(data *store.Store, accounts *Accounts, client *http.Client, co
 	}
 	t.beginActivity = platform.BeginTransferActivity
 	t.downloadRate = rate
+	t.uploadRate = newTransferRate(max(config.UploadBytesPerSecond, 0))
 	return t, nil
 }
 
@@ -247,6 +249,9 @@ func (t *Transfers) Configure(config TransferConfig) {
 	t.signalDownloadSlotsLocked()
 	if t.downloadRate != nil {
 		t.downloadRate.set(t.config.DownloadBytesPerSecond)
+	}
+	if t.uploadRate != nil {
+		t.uploadRate.set(t.config.UploadBytesPerSecond)
 	}
 	t.scheduleLocked()
 	t.mu.Unlock()
