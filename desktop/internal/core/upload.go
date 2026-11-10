@@ -3,7 +3,6 @@ package core
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -72,6 +71,7 @@ type UploadItemResult struct {
 	Size         int64
 	Directory    bool
 	Skipped      bool
+	CanRebind    bool
 	Error        string
 }
 
@@ -176,22 +176,15 @@ func (u *Uploader) Run(ctx context.Context, req UploadRequest, providers UploadP
 	if err := ctx.Err(); err != nil {
 		return UploadResult{}, err
 	}
-	u.mu.Lock()
-	if u.active[req.ID] {
-		u.mu.Unlock()
-		return UploadResult{}, errors.New("上传任务正在运行")
+	release, err := u.claim(req.ID)
+	if err != nil {
+		return UploadResult{}, err
 	}
-	u.active[req.ID] = true
-	u.mu.Unlock()
-	defer func() {
-		u.mu.Lock()
-		delete(u.active, req.ID)
-		u.mu.Unlock()
-	}()
+	defer release()
 
-	name := fmt.Sprintf("upload-%x", sha256.Sum256([]byte(req.ID)))
+	name := uploadJobKey(req.ID)
 	var manifest uploadManifest
-	err := u.records.Read(name, &manifest)
+	err = u.records.Read(name, &manifest)
 	if errors.Is(err, fs.ErrNotExist) {
 		sources, entries, err := scanUpload(ctx, req.Sources)
 		if err != nil {
@@ -234,16 +227,19 @@ func (u *uploadRun) run(ctx context.Context, manifest uploadManifest, name strin
 		case entry.Root < 0 || entry.Root >= len(manifest.Sources):
 			return result, errors.New("上传源恢复记录无效")
 		default:
-			key := fmt.Sprintf("%s-%x", name, sha256.Sum256([]byte(entry.Relative)))
-			// Store names are limited to 120 bytes. A combined hash binds both identities.
-			key = fmt.Sprintf("upload-item-%x", sha256.Sum256([]byte(key)))
-			state, err = u.runItem(ctx, key, entry, manifest.Sources[entry.Root], parent)
+			source := manifest.Sources[entry.Root]
+			if entry.Replacement != nil {
+				source = *entry.Replacement
+				entry.Inside = "."
+			}
+			state, err = u.runItem(ctx, uploadItemKey(name, entry.Relative), entry, source, parent)
 		}
 		item := UploadItemResult{RelativePath: entry.Relative, RemoteName: state.Name, Path: state.Remote.Path, FSID: state.Remote.FSID,
 			FID: state.Remote.FID, Size: entry.Size, Directory: entry.Directory, Skipped: state.Skipped}
 		switch {
 		case err != nil:
 			item.Error = err.Error()
+			item.CanRebind = canRebindUploadSource(entry, state)
 			if firstFailure == nil {
 				firstFailure = fmt.Errorf("%s: %w", entry.Relative, err)
 			}

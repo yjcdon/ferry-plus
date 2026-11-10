@@ -63,7 +63,7 @@ type uploadRoundTrip func(*http.Request) (*http.Response, error)
 
 func (f uploadRoundTrip) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
-func TestUploadFolderAndResumeOnlyReadback(t *testing.T) {
+func TestUploadFolderRebindAndResumeOnlyReadback(t *testing.T) {
 	base := t.TempDir()
 	root := filepath.Join(base, "资料")
 	if err := os.MkdirAll(filepath.Join(root, "空目录"), 0o700); err != nil {
@@ -74,7 +74,7 @@ func TestUploadFolderAndResumeOnlyReadback(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var create, prepare, parts, merge, finish, readback atomic.Int32
+	var create, prepare, parts, listParts, merge, finish, readback atomic.Int32
 	const fileName = "报告 (1).txt"
 	const fileID = "file"
 	transport := uploadRoundTrip(func(r *http.Request) (*http.Response, error) {
@@ -96,6 +96,10 @@ func TestUploadFolderAndResumeOnlyReadback(t *testing.T) {
 		}
 		switch r.URL.Host {
 		case "test.oss.quark.cn":
+			if r.Method == http.MethodGet {
+				listParts.Add(1)
+				return reply(fmt.Sprintf(`<ListPartsResult><Bucket>test</Bucket><Key>object</Key><UploadId>upload</UploadId><PartNumberMarker>0</PartNumberMarker><MaxParts>1000</MaxParts><IsTruncated>false</IsTruncated><Part><PartNumber>1</PartNumber><Size>3</Size><ETag>%x</ETag></Part></ListPartsResult>`, md5.Sum([]byte("hel"))))
+			}
 			if r.Method == http.MethodPost {
 				merge.Add(1)
 				return reply("<CompleteMultipartUploadResult/>")
@@ -177,10 +181,42 @@ func TestUploadFolderAndResumeOnlyReadback(t *testing.T) {
 	records := uploadFixtureRecords{make(map[string][]byte), make(map[string][]byte)}
 	client := &http.Client{Transport: transport}
 	req := UploadRequest{ID: "folder", Target: UploadTarget{Provider: "quark", AccountID: "fixture", FID: quark.RootFID},
-		Sources: []platform.LocalReference{{Path: root}, {Path: file}}, ParallelParts: 2}
+		Sources: []platform.LocalReference{{Path: root}, {Path: file}}, ParallelParts: 1}
 	providers := UploadProviders{AccountID: "fixture", Quark: quark.New(quark.Credential{}, client)}
 	uploader := newUploader(records, client)
-	result, err := uploader.Run(t.Context(), req, providers, nil)
+	const relative = "资料/报告.txt"
+	moved := file + ".moved"
+	result, err := uploader.Run(t.Context(), req, providers, func(update UploadProgress) {
+		if update.RelativePath == relative && update.Phase == "uploading" && update.Done == 3 {
+			if err := os.Rename(file, moved); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+	if !errors.Is(err, fs.ErrNotExist) || len(result.Items) != 3 || !result.Items[1].CanRebind || parts.Load() != 1 {
+		t.Fatalf("moved source result = %+v, err = %v, parts = %d", result, err, parts.Load())
+	}
+	key := uploadJobKey(req.ID)
+	originalManifest := string(records.data[key])
+	receiptKey := uploadItemKey(key, relative)
+	originalReceipt := string(records.data[receiptKey])
+	wrong := filepath.Join(base, "wrong.txt")
+	if err := os.WriteFile(wrong, []byte("HELLO"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := uploader.RebindSource(t.Context(), req.ID, relative, platform.LocalReference{Path: wrong}); !errors.Is(err, ErrUploadSourceChanged) {
+		t.Fatalf("same-size incorrect source accepted: %v", err)
+	}
+	if string(records.data[key]) != originalManifest || string(records.data[receiptKey]) != originalReceipt {
+		t.Fatal("failed reselection modified a checkpoint")
+	}
+	if err := uploader.RebindSource(t.Context(), req.ID, relative, platform.LocalReference{Path: moved}); err != nil {
+		t.Fatal(err)
+	}
+	if string(records.data[key]) == originalManifest || string(records.data[receiptKey]) != originalReceipt {
+		t.Fatal("reselection did not isolate the local manifest update")
+	}
+	result, err = newUploader(records, client).Run(t.Context(), req, providers, nil)
 	if !errors.Is(err, ErrUploadReadback) || len(result.Items) != 3 || result.Items[1].Error == "" || len(records.secrets) != 1 {
 		t.Fatalf("initial result = %+v, err = %v, secrets = %d", result, err, len(records.secrets))
 	}
@@ -190,7 +226,7 @@ func TestUploadFolderAndResumeOnlyReadback(t *testing.T) {
 		}
 	}
 	// No local file is needed once the provider's exact receipt is durable.
-	if err := os.Rename(file, file+".moved"); err != nil {
+	if err := os.Rename(moved, moved+".again"); err != nil {
 		t.Fatal(err)
 	}
 	result, err = newUploader(records, client).Run(t.Context(), req, providers, nil)
@@ -198,8 +234,8 @@ func TestUploadFolderAndResumeOnlyReadback(t *testing.T) {
 		result.Items[1].Error != "" || len(records.secrets) != 0 {
 		t.Fatalf("resumed result = %+v, err = %v, secrets = %d", result, err, len(records.secrets))
 	}
-	counts := []int32{create.Load(), prepare.Load(), parts.Load(), merge.Load(), finish.Load(), readback.Load()}
-	if !reflect.DeepEqual(counts, []int32{2, 1, 2, 1, 1, 2}) {
+	counts := []int32{create.Load(), prepare.Load(), parts.Load(), listParts.Load(), merge.Load(), finish.Load(), readback.Load()}
+	if !reflect.DeepEqual(counts, []int32{2, 1, 2, 1, 1, 1, 2}) {
 		t.Fatalf("network call counts = %v", counts)
 	}
 }

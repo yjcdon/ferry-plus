@@ -22,12 +22,13 @@ import (
 )
 
 type uploadLocalItem struct {
-	Root      int
-	Relative  string
-	Inside    string
-	Directory bool
-	Size      int64
-	Modified  time.Time
+	Root        int
+	Relative    string
+	Inside      string
+	Directory   bool
+	Size        int64
+	Modified    time.Time
+	Replacement *platform.LocalReference `json:",omitempty"`
 }
 
 func scanUpload(ctx context.Context, sources []platform.LocalReference) ([]platform.LocalReference, []uploadLocalItem, error) {
@@ -138,7 +139,7 @@ func openUploadSource(source platform.LocalReference, entry uploadLocalItem) (*u
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() || info.Size() != entry.Size || !info.ModTime().Equal(entry.Modified) {
+	if !info.Mode().IsRegular() || info.Size() != entry.Size || !entry.Modified.IsZero() && !info.ModTime().Equal(entry.Modified) {
 		return nil, ErrUploadSourceChanged
 	}
 	file.file, err = open(file.path)
