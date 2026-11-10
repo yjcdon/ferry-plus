@@ -3,6 +3,7 @@ package ui
 
 import (
 	"context"
+	_ "embed"
 	"strings"
 
 	"github.com/egoist/mygo"
@@ -18,9 +19,26 @@ const (
 	all       = "transfers.all"
 )
 
-var providers = []struct{ id, title string }{
-	{baiduPage, "百度网盘"},
-	{quarkPage, "夸克网盘"},
+//go:embed assets/BaiduNetdisk.png
+var baiduLogo []byte
+
+//go:embed assets/QuarkNetdisk.png
+var quarkLogo []byte
+
+var providers = []struct {
+	id, title string
+	logo      *ui.Bitmap
+}{
+	{baiduPage, "百度网盘", providerLogo(baiduLogo)},
+	{quarkPage, "夸克网盘", providerLogo(quarkLogo)},
+}
+
+func providerLogo(data []byte) *ui.Bitmap {
+	bitmap, err := ui.DecodeBitmap(data)
+	if err != nil {
+		panic(err)
+	}
+	return bitmap
 }
 
 var transferPages = []struct {
@@ -213,7 +231,10 @@ func (w *Workspace) sidebar(c *ui.Context, jobs []app.TransferJob) {
 		ui.Sidebar(c, &w.preferences.Page, func() {
 			ui.SidebarSection(c, "网盘", nil, func() {
 				for _, provider := range providers {
-					item := ui.SidebarItem(c, provider.id, nil, provider.title)
+					item := ui.SidebarItem(c, provider.id, nil, provider.title).Reverse()
+					item.Children(func() {
+						ui.Image(c, provider.logo).Size(16, 16).Shrink(0).AccessHidden(true)
+					})
 					if transferIndex(previous) >= 0 && !w.allProviders && w.preferences.RecentProvider == provider.id {
 						item.Description("当前传输范围").Background(c.Theme().SurfaceHover)
 					}
