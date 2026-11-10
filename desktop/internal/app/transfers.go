@@ -164,6 +164,7 @@ type Transfers struct {
 	jobs          []transferRecord
 	active        map[string]*transferWorker
 	beginActivity func() (func(), error)
+	downloadRate  *transferRate
 }
 
 const transferRecordName = "transfers"
@@ -171,11 +172,14 @@ const transferRecordName = "transfers"
 var errTransferMissing = errors.New("找不到传输任务")
 
 func NewTransfers(data *store.Store, accounts *Accounts, client *http.Client, config TransferConfig, notify func()) (*Transfers, error) {
-	t, err := newTransfers(data, accounts, core.NewUploader(data, client), download.New(data, client), config, notify)
+	rate := newTransferRate(max(config.DownloadBytesPerSecond, 0))
+	content := contentTransferClient(client, rate)
+	t, err := newTransfers(data, accounts, core.NewUploader(data, content), download.New(data, content), config, notify)
 	if err != nil {
 		return nil, err
 	}
 	t.beginActivity = platform.BeginTransferActivity
+	t.downloadRate = rate
 	return t, nil
 }
 
@@ -234,6 +238,9 @@ func normalizedTransferConfig(config TransferConfig) TransferConfig {
 func (t *Transfers) Configure(config TransferConfig) {
 	t.mu.Lock()
 	t.config = normalizedTransferConfig(config)
+	if t.downloadRate != nil {
+		t.downloadRate.set(t.config.DownloadBytesPerSecond)
+	}
 	t.scheduleLocked()
 	t.mu.Unlock()
 	t.changed()

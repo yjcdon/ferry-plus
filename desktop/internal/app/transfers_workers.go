@@ -23,7 +23,7 @@ func (t *Transfers) runUpload(ctx context.Context, worker *transferWorker) ([]Tr
 	req := *worker.job.Upload
 	req.ParallelParts = worker.config.UploadParts
 	req.BytesPerSecond = worker.config.UploadBytesPerSecond
-	req.ReadbackBytesPerSecond = worker.config.DownloadBytesPerSecond
+	req.ReadbackBytesPerSecond = 0 // The content client shares one download budget.
 	providers := core.UploadProviders{Baidu: worker.session.Baidu, Quark: worker.session.Quark, AccountID: worker.session.ID}
 	progress := make(map[string]core.UploadProgress, len(worker.job.Items))
 	var done, total int64
