@@ -46,6 +46,10 @@ type UploadRequest struct {
 	ParallelParts          int
 	BytesPerSecond         int64
 	ReadbackBytesPerSecond int64
+	// BeforeRemote receives the durable batch signature before any new cloud
+	// writes. An empty signature means an original content basis is missing.
+	// Returning an error stops the worker before those writes.
+	BeforeRemote func(signature string, canPause bool) error `json:"-"`
 }
 
 // UploadProviders holds the current account's protocol client. The caller
@@ -103,10 +107,12 @@ func newUploader(records uploadStore, client *http.Client) *Uploader {
 }
 
 type uploadManifest struct {
-	Target  UploadTarget
-	Policy  string
-	Sources []platform.LocalReference
-	Entries []uploadLocalItem
+	Target        UploadTarget
+	Policy        string
+	Sources       []platform.LocalReference
+	Entries       []uploadLocalItem
+	Signature     string `json:",omitempty"`
+	RemoteStarted bool   `json:",omitempty"`
 }
 
 type uploadItemState struct {
@@ -202,10 +208,28 @@ func (u *Uploader) Run(ctx context.Context, req UploadRequest, providers UploadP
 	}
 	run := uploadRun{req: req, providers: providers, records: u.records, client: u.client, progress: progress,
 		upload: uploadPacer{rate: req.BytesPerSecond}, readback: uploadPacer{rate: req.ReadbackBytesPerSecond}}
-	return run.run(ctx, manifest, name)
+	failed, err := run.prepareContent(ctx, &manifest, name)
+	if err != nil {
+		return UploadResult{}, err
+	}
+	if req.BeforeRemote != nil {
+		if err := req.BeforeRemote(manifest.Signature, !manifest.RemoteStarted); err != nil {
+			return UploadResult{}, err
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		return UploadResult{}, err
+	}
+	if !manifest.RemoteStarted {
+		manifest.RemoteStarted = true
+		if err := u.records.Write(name, manifest); err != nil {
+			return UploadResult{}, err
+		}
+	}
+	return run.run(ctx, manifest, name, failed)
 }
 
-func (u *uploadRun) run(ctx context.Context, manifest uploadManifest, name string) (UploadResult, error) {
+func (u *uploadRun) run(ctx context.Context, manifest uploadManifest, name string, failed map[string]error) (UploadResult, error) {
 	root := uploadRemoteItem{Directory: true, Path: u.req.Target.Path, FSID: u.req.Target.FSID, FID: u.req.Target.FID}
 	directories := map[string]uploadRemoteItem{".": root}
 	skipped := map[string]bool{}
@@ -224,13 +248,13 @@ func (u *uploadRun) run(ctx context.Context, manifest uploadManifest, name strin
 			state.Skipped = true
 		case !ok:
 			err = errors.New("上级目录尚未创建")
-		case entry.Root < 0 || entry.Root >= len(manifest.Sources):
-			return result, errors.New("上传源恢复记录无效")
+		case failed[entry.Relative] != nil:
+			err = failed[entry.Relative]
 		default:
-			source := manifest.Sources[entry.Root]
-			if entry.Replacement != nil {
-				source = *entry.Replacement
-				entry.Inside = "."
+			var source platform.LocalReference
+			source, err = uploadSourceFor(manifest, &entry)
+			if err != nil {
+				return result, err
 			}
 			state, err = u.runItem(ctx, uploadItemKey(name, entry.Relative), entry, source, parent)
 		}

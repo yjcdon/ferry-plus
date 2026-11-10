@@ -137,6 +137,9 @@ func (u *uploadRun) uploadBaidu(ctx context.Context, entry uploadLocalItem, ref 
 	}
 	baseline := state.Fingerprint
 	if state.Baidu == nil {
+		if err := open(); err != nil {
+			return err
+		}
 		hashes := make([]string, 0, len(baseline.Parts))
 		for _, part := range baseline.Parts {
 			hashes = append(hashes, part.MD5)
@@ -322,13 +325,16 @@ func (u *uploadRun) uploadQuark(ctx context.Context, key string, entry uploadLoc
 	if session.ParentFID != parent.FID || session.Size != entry.Size || session.Name != state.Name {
 		return errors.New("夸克上传会话与原任务不一致")
 	}
-	if state.Fingerprint.SHA256 == "" {
+	if state.Fingerprint.SHA256 == "" || state.Fingerprint.PartSize != session.PartSize {
 		if err := open(); err != nil {
 			return err
 		}
 		fingerprint, err := source.fingerprint(ctx, session.PartSize)
 		if err != nil {
 			return err
+		}
+		if old := state.Fingerprint; old.SHA256 != "" && !sameUploadDigest(old, fingerprint) {
+			return ErrUploadSourceChanged
 		}
 		state.Fingerprint = fingerprint
 		if err := save(); err != nil {

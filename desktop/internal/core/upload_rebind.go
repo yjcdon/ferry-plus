@@ -94,8 +94,7 @@ func (u *Uploader) RebindSource(ctx context.Context, id, relativePath string, re
 	if err != nil {
 		return err
 	}
-	if fingerprint.SHA256 != basis.SHA256 || fingerprint.MD5 != basis.MD5 || fingerprint.SHA1 != basis.SHA1 ||
-		!slices.Equal(fingerprint.Parts, basis.Parts) {
+	if !sameUploadDigest(fingerprint, basis) || !slices.Equal(fingerprint.Parts, basis.Parts) {
 		return ErrUploadSourceChanged
 	}
 	if err := ctx.Err(); err != nil {
