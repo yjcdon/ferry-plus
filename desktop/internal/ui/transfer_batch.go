@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 
 	"github.com/yjcdon/ferry-drive/desktop/internal/app"
@@ -94,6 +95,9 @@ func (w *Workspace) transferBatchDetails(c *ui.Context, selected []app.TransferJ
 		if len(priority) > 0 && ui.Button(c, "优先上传").Clicked() {
 			w.transferBatchCommand(w.jobs.Prioritize, priority)
 		}
+		if text := transferErrorText(selected); text != "" && ui.Button(c, "复制错误").Clicked() {
+			go mygo.Clipboard.WriteText(text)
+		}
 		if len(remove) > 0 && ui.Button(c, "移除任务记录").Clicked() {
 			w.confirmTransferRemoval(remove, false)
 		}
@@ -133,10 +137,23 @@ func (w *Workspace) taskSelectionMenu(m *ui.Menu, clicked app.TransferJob, visib
 	if len(priority) > 0 && m.Item("优先上传").Chosen() {
 		w.transferBatchCommand(w.jobs.Prioritize, priority)
 	}
+	if text := transferErrorText(selected); text != "" && m.Item("复制错误").Chosen() {
+		go mygo.Clipboard.WriteText(text)
+	}
 	if len(remove) > 0 && m.Item("移除任务记录").Chosen() {
 		w.confirmTransferRemoval(remove, false)
 	}
 	if len(trash) > 0 && m.Item("移除并删除下载文件").Chosen() {
 		w.confirmTransferRemoval(trash, true)
 	}
+}
+
+func transferErrorText(jobs []app.TransferJob) string {
+	var lines []string
+	for _, job := range jobs {
+		if job.Error != "" {
+			lines = append(lines, job.Title+"："+job.Error)
+		}
+	}
+	return strings.Join(lines, "\n")
 }

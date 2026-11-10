@@ -140,3 +140,26 @@ func TestBatchPriorityOnlyOffersQueuedUploads(t *testing.T) {
 		t.Fatal("选中排队上传时应显示优先上传")
 	}
 }
+
+func TestTransferErrorCopyUsesSelectedErrors(t *testing.T) {
+	jobs := []app.TransferJob{
+		{ID: "failed", Title: "下载样本", State: app.TransferFailed, Error: "连接中断"},
+		{ID: "done", Title: "完成样本", State: app.TransferCompleted},
+		{ID: "second", Title: "上传样本", State: app.TransferFailed, Error: "源文件已移动"},
+	}
+	if got := transferErrorText(jobs); got != "下载样本：连接中断\n上传样本：源文件已移动" {
+		t.Fatalf("复制文本包含错误的范围或顺序: %q", got)
+	}
+	workspace := NewWorkspace(Preferences{})
+	workspace.transfer.selection.Add("failed")
+	workspace.transfer.selection.Add("done")
+	window := ui.NewTester(func(c *ui.Context) {
+		ui.Text(c, "已选任务").ContextMenu(func(m *ui.Menu) { workspace.taskSelectionMenu(m, jobs[0], jobs) })
+	}, 320, 100)
+	if err := window.RightClick("已选任务"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(window.Menu(), "复制错误") {
+		t.Fatalf("多选失败任务缺少复制错误: %v", window.Menu())
+	}
+}

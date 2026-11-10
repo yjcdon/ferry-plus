@@ -207,6 +207,9 @@ func (w *Workspace) taskMenu(m *ui.Menu, job app.TransferJob) {
 	if job.CanRetryShareCleanup && m.Item("重试清理转存文件").Disabled(job.Stopping).Chosen() {
 		w.transferCommand(func(id string) error { return w.jobs.RetryShareCleanup(w.ctx, id) }, job.ID)
 	}
+	if text := transferErrorText([]app.TransferJob{job}); text != "" && m.Item("复制错误").Chosen() {
+		go mygo.Clipboard.WriteText(text)
+	}
 	w.transferRemovalMenu(m, job)
 }
 
