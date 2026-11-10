@@ -91,7 +91,7 @@ func (w *Workspace) TransfersChanged() {
 	for _, job := range jobs {
 		states[job.ID] = job.State
 		if w.quitting || job.Stopping || w.notifiedStates[job.ID] == job.State ||
-			w.notifiedStates == nil || w.window.IsFocused() {
+			w.notifiedStates == nil || mygo.App.IsActive() {
 			continue
 		}
 		title := ""
