@@ -68,6 +68,8 @@ type Workspace struct {
 	transfer               transferView
 	chooser                func()
 	uploadDraft            []platform.LocalReference
+	download               *downloadPrompt
+	downloadOpen           bool
 }
 
 // NewWorkspace restores known pages and supplies the initial split sizes.
@@ -178,6 +180,7 @@ func (w *Workspace) View(c *ui.Context) {
 		w.logout(w.logoutProvider)
 	}
 	w.directoryDeleteDialog(c)
+	w.downloadDialog(c)
 	w.transferRemoveDialog(c)
 }
 

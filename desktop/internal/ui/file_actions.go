@@ -25,15 +25,22 @@ func (w *Workspace) directoryActions(c *ui.Context, f *directoryView, width floa
 	d := f.directory
 	_, targetReady := d.Target(d.Root())
 	canUpload := w.jobs != nil && targetReady && !f.busy
+	canDownload := canUpload && len(d.Selection()) > 0
 	canTrash := targetReady && !f.busy && len(d.Selection()) > 0
 	canRefresh := !f.busy && !d.Loading(d.Root())
 	if width >= 520 && w.jobs != nil && ui.Button(c, "上传").Disabled(!canUpload).Clicked() {
 		w.chooseUpload(f, d.Root())
 	}
+	if width >= 520 && w.jobs != nil && ui.Button(c, "下载").Disabled(!canDownload).Clicked() {
+		w.beginDownload(f, d.Selection())
+	}
 	if width < 700 {
 		ui.MenuButton(c, "操作", func(m *ui.Menu) {
 			if width < 520 && w.jobs != nil && m.Item("上传").Disabled(!canUpload).Chosen() {
 				w.chooseUpload(f, d.Root())
+			}
+			if width < 520 && w.jobs != nil && m.Item("下载").Disabled(!canDownload).Chosen() {
+				w.beginDownload(f, d.Selection())
 			}
 			if m.Item("移到回收站").Disabled(!canTrash).Chosen() {
 				w.prepareDirectoryDelete(f, d.Selection())
@@ -72,6 +79,13 @@ func (w *Workspace) directoryRowMenu(f *directoryView, menu *ui.Menu, row int) {
 	}
 	d := f.directory
 	_, available := d.Target(d.Root())
+	refs := d.Selection()
+	if !f.selection.Has(item) || len(refs) == 0 {
+		refs = []app.RemoteRef{item.ref}
+	}
+	if w.jobs != nil && menu.Item("下载").Disabled(!available || f.busy).Chosen() {
+		w.beginDownload(f, refs)
+	}
 	if entry, ok := d.Entry(item.ref); ok && entry.IsDirectory && w.jobs != nil &&
 		menu.Item("上传到此文件夹").Disabled(!available || f.busy).Chosen() {
 		w.chooseUpload(f, item.ref)
@@ -80,10 +94,6 @@ func (w *Workspace) directoryRowMenu(f *directoryView, menu *ui.Menu, row int) {
 		w.beginDirectoryEdit(f, item.ref)
 	}
 	if menu.Item("移到回收站").Disabled(!available || f.busy).Chosen() {
-		refs := d.Selection()
-		if !f.selection.Has(item) || len(refs) == 0 {
-			refs = []app.RemoteRef{item.ref}
-		}
 		w.prepareDirectoryDelete(f, refs)
 	}
 }
