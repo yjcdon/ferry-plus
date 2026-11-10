@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"sync"
@@ -89,31 +90,70 @@ func (r *transferRate) waitUpload(ctx context.Context, size int) error {
 type transferRateTransport struct {
 	base http.RoundTripper
 	rate *transferRate
+	idle time.Duration
 }
 
+const contentIdleTimeout = 60 * time.Second
+
+var errContentIdle = errors.New("等待传输数据超时")
+
 func (t transferRateTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	res, err := t.base.RoundTrip(req)
+	ctx, cancel := context.WithCancelCause(req.Context())
+	timer := time.AfterFunc(t.idle, func() { cancel(errContentIdle) })
+	res, err := t.base.RoundTrip(req.WithContext(ctx))
+	if cause := stopContentIdle(timer, ctx, cancel); cause != nil {
+		if res != nil && res.Body != nil {
+			res.Body.Close()
+		}
+		return nil, cause
+	}
 	if err != nil || res.Body == nil {
+		cancel(nil)
 		return res, err
 	}
-	res.Body = &transferRateBody{ReadCloser: res.Body, ctx: req.Context(), rate: t.rate}
+	res.Body = &transferRateBody{ReadCloser: res.Body, ctx: ctx, cancel: cancel, timer: timer, rate: t.rate, idle: t.idle}
 	return res, nil
+}
+
+func stopContentIdle(timer *time.Timer, ctx context.Context, cancel context.CancelCauseFunc) error {
+	if !timer.Stop() {
+		// The callback may have been dispatched but has not yet run.
+		cancel(errContentIdle)
+	}
+	return context.Cause(ctx)
 }
 
 type transferRateBody struct {
 	io.ReadCloser
-	ctx  context.Context
-	rate *transferRate
+	ctx    context.Context
+	cancel context.CancelCauseFunc
+	timer  *time.Timer
+	rate   *transferRate
+	idle   time.Duration
 }
 
 func (r *transferRateBody) Read(p []byte) (int, error) {
-	n, err := r.ReadCloser.Read(p[:r.rate.readSize(len(p))])
+	if cause := context.Cause(r.ctx); cause != nil {
+		return 0, cause
+	}
+	p = p[:r.rate.readSize(len(p))]
+	r.timer.Reset(r.idle)
+	n, err := r.ReadCloser.Read(p)
+	if cause := stopContentIdle(r.timer, r.ctx, r.cancel); cause != nil {
+		return 0, cause
+	}
+	// Limiter waits deliberately happen outside the network idle window.
 	if n != 0 {
 		if limitErr := r.rate.wait(r.ctx, n); limitErr != nil {
 			return 0, limitErr
 		}
 	}
 	return n, err
+}
+
+func (r *transferRateBody) Close() error {
+	defer r.cancel(nil)
+	return r.ReadCloser.Close()
 }
 
 func contentTransferClient(base *http.Client, rate *transferRate) *http.Client {
@@ -125,9 +165,8 @@ func contentTransferClient(base *http.Client, rate *transferRate) *http.Client {
 	if transport == nil {
 		transport = http.DefaultTransport
 	}
-	client.Transport = transferRateTransport{base: transport, rate: rate}
-	// A whole-request timer would abort correct low-rate or large transfers.
-	// Worker cancellation and the underlying transport own network timeouts.
+	client.Transport = transferRateTransport{base: transport, rate: rate, idle: contentIdleTimeout}
+	// Header and body idle timing is separate from the whole transfer duration.
 	client.Timeout = 0
 	return &client
 }
