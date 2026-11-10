@@ -2,7 +2,6 @@ package ui
 
 import (
 	"cmp"
-	"runtime"
 	"slices"
 	"strings"
 
@@ -163,6 +162,11 @@ func (w *Workspace) primaryTransferAction(job app.TransferJob) (string, func(str
 		return "", nil
 	}
 	switch job.State {
+	case app.TransferCompleted:
+		if len(transferRevealPaths(job)) > 0 {
+			return transferRevealLabel(), w.revealTransfer
+		}
+		return "", nil
 	case app.TransferRunning, app.TransferQueued, app.TransferWaitingAccount:
 		return "暂停", w.jobs.Pause
 	case app.TransferPaused:
@@ -361,11 +365,7 @@ func (w *Workspace) transferDetailItem(c *ui.Context, job app.TransferJob, item 
 			}
 			ui.Text(c, status).TextColor(c.Theme().TextMuted).Grow(1).SingleLine().Tooltip(status)
 			if item.LocalPath != "" && !item.Trashed {
-				label := "在资源管理器中显示"
-				if runtime.GOOS == "darwin" {
-					label = "在访达中显示"
-				}
-				if ui.Button(c, "定位").Label(label).Clicked() {
+				if ui.Button(c, "定位").Label(transferRevealLabel()).Clicked() {
 					w.transferCommand(platform.RevealLocalItem, item.LocalPath)
 				}
 			}

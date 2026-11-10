@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"path/filepath"
 	"slices"
 	"testing"
 
@@ -19,6 +20,47 @@ func TestTransferSearchFindsBatchFiles(t *testing.T) {
 	}
 	if matchesTransferSearch(job, "不存在") {
 		t.Fatal("unrelated filename matched")
+	}
+}
+
+func TestCompletedDownloadOffersTopLevelReveal(t *testing.T) {
+	root := t.TempDir()
+	folder := filepath.Join(root, "相册")
+	file := filepath.Join(root, "笔记 (1).txt")
+	job := app.TransferJob{ID: "download", Title: "下载样本", Direction: app.TransferDownload, State: app.TransferCompleted,
+		Items: []app.TransferItem{
+			{RelativePath: "相册/一.jpg", LocalPath: filepath.Join(folder, "一.jpg"), Complete: true},
+			{RelativePath: "相册/子目录/二.jpg", LocalPath: filepath.Join(folder, "子目录", "二.jpg"), Complete: true},
+			{RelativePath: "笔记.txt", LocalPath: file, Complete: true},
+			{RelativePath: "已删除.txt", LocalPath: filepath.Join(root, "已删除.txt"), Trashed: true},
+		}}
+	if got := transferRevealPaths(job); !slices.Equal(got, []string{folder, file}) {
+		t.Fatalf("reveal must deduplicate top-level paths and keep the actual renamed file: %v", got)
+	}
+	workspace := NewWorkspace(Preferences{})
+	if label, command := workspace.primaryTransferAction(job); label != transferRevealLabel() || command == nil {
+		t.Fatalf("completed download is missing its primary reveal action: %q", label)
+	}
+	window := ui.NewTester(func(c *ui.Context) { workspace.transferRow(c, job, []app.TransferJob{job}) }, 600, 150)
+	if !window.HasText(transferRevealLabel()) {
+		t.Fatal("completed download row has no reveal button")
+	}
+	if err := window.RightClick(job.Title); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(window.Menu(), transferRevealLabel()) {
+		t.Fatalf("row menu lacks reveal: %v", window.Menu())
+	}
+	job.Direction = app.TransferUpload
+	if _, command := workspace.primaryTransferAction(job); command != nil {
+		t.Fatal("completed upload must not offer download reveal")
+	}
+	job.Direction = app.TransferDownload
+	for i := range job.Items {
+		job.Items[i].Trashed = true
+	}
+	if _, command := workspace.primaryTransferAction(job); command != nil {
+		t.Fatal("trashed download must not offer reveal")
 	}
 }
 
