@@ -18,6 +18,7 @@ type transferWorker struct {
 	config      TransferConfig
 	cancel      context.CancelFunc
 	stop        string
+	cleanupOnly bool
 	done, total int64
 	speed       int64
 	started     time.Time

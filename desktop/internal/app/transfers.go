@@ -66,6 +66,7 @@ type TransferJob struct {
 	RemovalPending                    bool   `json:",omitempty"`
 	Stopping                          bool   `json:"-"`
 	RebindingPath                     string `json:"-"`
+	CanRetryShareCleanup              bool   `json:"-"`
 	BytesPerSecond                    int64  `json:"-"`
 }
 
@@ -277,10 +278,11 @@ func (t *Transfers) Snapshot() []TransferJob {
 	result := make([]TransferJob, len(t.jobs))
 	for i, saved := range t.jobs {
 		job := saved.TransferJob
+		job.CanRetryShareCleanup = canRetryShareCleanup(saved)
 		job.Items = slices.Clone(job.Items)
 		worker := t.active[job.ID]
 		if worker != nil {
-			job.Stopping = worker.stop != "" || job.DuplicateOf != ""
+			job.Stopping = worker.stop != "" || worker.cleanupOnly || job.DuplicateOf != ""
 			job.BytesPerSecond = worker.speed
 			job.Done, job.Total = worker.done, worker.total
 		} else if job.State == TransferQueued && !t.hasAccount(job) {

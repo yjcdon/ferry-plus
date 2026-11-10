@@ -204,6 +204,9 @@ func (w *Workspace) taskMenu(m *ui.Menu, job app.TransferJob) {
 		m.Item("取消上传").Disabled(job.Stopping).Chosen() {
 		w.transferCommand(w.jobs.Cancel, job.ID)
 	}
+	if job.CanRetryShareCleanup && m.Item("重试清理转存文件").Disabled(job.Stopping).Chosen() {
+		w.transferCommand(func(id string) error { return w.jobs.RetryShareCleanup(w.ctx, id) }, job.ID)
+	}
 	w.transferRemovalMenu(m, job)
 }
 
