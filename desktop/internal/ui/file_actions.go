@@ -24,10 +24,17 @@ type directoryDelete struct {
 func (w *Workspace) directoryActions(c *ui.Context, f *directoryView, width float32) {
 	d := f.directory
 	_, targetReady := d.Target(d.Root())
+	canUpload := w.jobs != nil && targetReady && !f.busy
 	canTrash := targetReady && !f.busy && len(d.Selection()) > 0
 	canRefresh := !f.busy && !d.Loading(d.Root())
+	if width >= 520 && w.jobs != nil && ui.Button(c, "上传").Disabled(!canUpload).Clicked() {
+		w.chooseUpload(f, d.Root())
+	}
 	if width < 700 {
 		ui.MenuButton(c, "操作", func(m *ui.Menu) {
+			if width < 520 && w.jobs != nil && m.Item("上传").Disabled(!canUpload).Chosen() {
+				w.chooseUpload(f, d.Root())
+			}
 			if m.Item("移到回收站").Disabled(!canTrash).Chosen() {
 				w.prepareDirectoryDelete(f, d.Selection())
 			}
@@ -65,6 +72,10 @@ func (w *Workspace) directoryRowMenu(f *directoryView, menu *ui.Menu, row int) {
 	}
 	d := f.directory
 	_, available := d.Target(d.Root())
+	if entry, ok := d.Entry(item.ref); ok && entry.IsDirectory && w.jobs != nil &&
+		menu.Item("上传到此文件夹").Disabled(!available || f.busy).Chosen() {
+		w.chooseUpload(f, item.ref)
+	}
 	if menu.Item("重命名").Disabled(!available || f.busy).Chosen() {
 		w.beginDirectoryEdit(f, item.ref)
 	}

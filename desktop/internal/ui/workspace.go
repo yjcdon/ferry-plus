@@ -9,6 +9,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/yjcdon/ferry-drive/desktop/internal/app"
+	"github.com/yjcdon/ferry-drive/desktop/internal/platform"
 )
 
 const (
@@ -65,6 +66,8 @@ type Workspace struct {
 	aboutWindow            *mygo.Window
 	jobs                   *app.Transfers
 	transfer               transferView
+	chooser                func()
+	uploadDraft            []platform.LocalReference
 }
 
 // NewWorkspace restores known pages and supplies the initial split sizes.
@@ -130,8 +133,15 @@ func (w *Workspace) Menu(window *mygo.Window) *mygo.Menu {
 		appMenu.Submenu = append(appMenu.Submenu, command("设置…", "CmdOrCtrl+,", w.showSettings))
 	}
 	appMenu.Submenu = append(appMenu.Submenu, mygo.Separator(), &mygo.MenuItem{Role: mygo.RoleQuit})
+	fileMenu := &mygo.MenuItem{Label: "文件", Submenu: []*mygo.MenuItem{
+		{Role: mygo.RoleClose},
+	}}
+	if w.jobs != nil {
+		fileMenu.Submenu = append([]*mygo.MenuItem{command("上传", "CmdOrCtrl+U", w.uploadFromCurrent)}, fileMenu.Submenu...)
+	}
 	return mygo.NewMenu([]*mygo.MenuItem{
 		appMenu,
+		fileMenu,
 		{Role: mygo.RoleEditMenu},
 		{Label: "显示", Submenu: []*mygo.MenuItem{
 			command("搜索", "CmdOrCtrl+F", func() { w.focusSearch = true }),
@@ -149,7 +159,7 @@ func (w *Workspace) Menu(window *mygo.Window) *mygo.Menu {
 func (w *Workspace) View(c *ui.Context) {
 	width, _ := c.Size()
 	jobs := w.filteredTransfers()
-	ui.Column(c).Fill().Background(c.Theme().Background).Children(func() {
+	root := ui.Column(c).Fill().Background(c.Theme().Background).Children(func() {
 		if w.preferences.SidebarHidden {
 			w.content(c, width, jobs)
 			return
@@ -161,6 +171,7 @@ func (w *Workspace) View(c *ui.Context) {
 			w.preferences.SidebarWidth = min(max(w.preferences.SidebarWidth, 180), 300)
 		}
 	})
+	w.draftDrop(root)
 	if w.confirmLogout && ui.AlertDialog(c, &w.confirmLogout,
 		"退出"+providerTitle(string(w.logoutProvider))+"？",
 		"退出后可以重新登录以继续使用该账号。", "取消", "退出登录") == 1 {
@@ -299,6 +310,7 @@ func (w *Workspace) fileLanding(c *ui.Context, title string, width float32) {
 	f := w.files[provider]
 	if f != nil {
 		w.directoryToolbar(c, f, width)
+		w.uploadDraftBar(c, f)
 	} else {
 		ui.Toolbar(c, func() {
 			ui.Button(c, "返回").Disabled(true)

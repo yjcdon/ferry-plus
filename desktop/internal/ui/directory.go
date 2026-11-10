@@ -198,9 +198,11 @@ func (w *Workspace) directoryBody(c *ui.Context, f *directoryView) {
 	roots := d.Roots()
 	switch {
 	case len(roots) == 0 && strings.TrimSpace(f.query) != "":
-		w.directoryEmpty(c, "试试其他关键词").ContextMenu(func(m *ui.Menu) { w.directoryBackgroundMenu(f, m) })
+		empty := w.directoryEmpty(c, "试试其他关键词").ContextMenu(func(m *ui.Menu) { w.directoryBackgroundMenu(f, m) })
+		w.directoryDrop(empty, f, root)
 	case len(roots) == 0:
-		w.directoryEmpty(c, "此目录为空").ContextMenu(func(m *ui.Menu) { w.directoryBackgroundMenu(f, m) })
+		empty := w.directoryEmpty(c, "此目录为空").ContextMenu(func(m *ui.Menu) { w.directoryBackgroundMenu(f, m) })
+		w.directoryDrop(empty, f, root)
 	default:
 		w.directoryTable(c, f, roots)
 	}
@@ -245,7 +247,7 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 		}
 		switch column {
 		case 0:
-			ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
+			content := ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 				checked := f.selection.Has(row)
 				if ui.Checkbox(c, &checked, "").Label("选择 " + entry.Name).Changed() {
 					if checked {
@@ -257,6 +259,9 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 				}
 				w.directoryNameCell(c, f, entry)
 			})
+			if entry.IsDirectory {
+				w.directoryDrop(content, f, row.ref)
+			}
 		case 1:
 			text := "—"
 			if entry.ModifiedAt != nil {
@@ -272,6 +277,7 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 		}
 	}).Grow(1).MinHeight(0).Dividers(1, c.Theme().Border).
 		ContextMenu(func(m *ui.Menu) { w.directoryBackgroundMenu(f, m) })
+	w.directoryDrop(table, f, d.Root())
 
 	w.preferences.ColumnWidths = f.outline.List.Columns.Widths
 	if f.sort != beforeSort {
