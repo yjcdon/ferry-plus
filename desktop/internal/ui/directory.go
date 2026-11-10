@@ -62,6 +62,9 @@ func (f *directoryView) resetTree() {
 // AccountChanged schedules directory state synchronization on the UI thread.
 func (w *Workspace) AccountChanged(provider app.Provider) {
 	w.window.Update(func() {
+		if w.settingsWindow != nil {
+			w.settingsWindow.Invalidate()
+		}
 		f := w.files[provider]
 		session := w.accounts.Session(provider)
 		previous := f.directory.Location().AccountID

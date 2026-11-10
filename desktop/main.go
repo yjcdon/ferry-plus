@@ -13,7 +13,6 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/yjcdon/ferry-drive/desktop/internal/app"
-	"github.com/yjcdon/ferry-drive/desktop/internal/platform"
 	"github.com/yjcdon/ferry-drive/desktop/internal/store"
 	ferryui "github.com/yjcdon/ferry-drive/desktop/internal/ui"
 )
@@ -39,7 +38,9 @@ func run() (err error) {
 	workspace := ferryui.NewWorkspace(prefs)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	transport := platform.NewTransport(platform.ProxySettings{}, "")
+	settings, settingsErr := app.LoadSettings(data)
+	transport := new(businessTransport)
+	transport.configure(settings.Proxy())
 	defer transport.CloseIdleConnections()
 	accounts := app.NewAccounts(data, &http.Client{Transport: transport, Timeout: 60 * time.Second})
 	mygo.App.WhenReady(func() {
@@ -57,6 +58,7 @@ func run() (err error) {
 		}
 		window := mygo.NewWindow(opts)
 		workspace.AttachAccounts(ctx, window, accounts)
+		workspace.AttachSettings(settings, settingsErr, func() { transport.configure(settings.Proxy()) })
 		go accounts.Restore(ctx, app.Baidu, func() { workspace.AccountChanged(app.Baidu) })
 		go accounts.Restore(ctx, app.Quark, func() { workspace.AccountChanged(app.Quark) })
 		mygo.App.SetMenu(workspace.Menu(window))

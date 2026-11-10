@@ -7,6 +7,12 @@ import (
 )
 
 func (w *Workspace) accountMenu(menu *ui.Menu) {
+	if w.settings != nil {
+		if menu.Item("设置…").Chosen() {
+			w.showSettings()
+		}
+		menu.Separator()
+	}
 	for _, entry := range providers {
 		provider := app.Provider(entry.id)
 		session := w.accounts.Session(provider)

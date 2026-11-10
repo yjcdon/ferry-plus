@@ -58,6 +58,11 @@ type Workspace struct {
 	files                  map[app.Provider]*directoryView
 	directoryDelete        *directoryDelete
 	confirmDirectoryDelete bool
+	settings               *app.SettingsModel
+	settingsReadError      error
+	settingsChanged        func()
+	settingsWindow         *mygo.Window
+	aboutWindow            *mygo.Window
 }
 
 // NewWorkspace restores known pages and supplies the initial split sizes.
@@ -116,8 +121,15 @@ func (w *Workspace) Menu(window *mygo.Window) *mygo.Menu {
 			window.Update(act)
 		}}
 	}
+	appMenu := &mygo.MenuItem{Label: "Ferry Drive", Submenu: []*mygo.MenuItem{
+		command("关于 Ferry Drive", "", w.showAbout),
+	}}
+	if w.settings != nil {
+		appMenu.Submenu = append(appMenu.Submenu, command("设置…", "CmdOrCtrl+,", w.showSettings))
+	}
+	appMenu.Submenu = append(appMenu.Submenu, mygo.Separator(), &mygo.MenuItem{Role: mygo.RoleQuit})
 	return mygo.NewMenu([]*mygo.MenuItem{
-		{Role: mygo.RoleAppMenu},
+		appMenu,
 		{Role: mygo.RoleEditMenu},
 		{Label: "显示", Submenu: []*mygo.MenuItem{
 			command("搜索", "CmdOrCtrl+F", func() { w.focusSearch = true }),
