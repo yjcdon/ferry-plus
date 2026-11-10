@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"github.com/egoist/mygo/ui"
+
+	"github.com/yjcdon/ferry-drive/desktop/internal/app"
 )
 
 func TestWorkspaceNavigation(t *testing.T) {
@@ -49,5 +51,22 @@ func TestWorkspaceNavigation(t *testing.T) {
 	restored := NewWorkspace(workspace.Preferences())
 	if !reflect.DeepEqual(restored.Preferences(), workspace.Preferences()) {
 		t.Fatal("恢复后导航或分栏偏好发生变化")
+	}
+}
+
+func TestUploadSourceRecoveryAppearsForAffectedItem(t *testing.T) {
+	workspace := NewWorkspace(Preferences{})
+	job := app.TransferJob{ID: "upload", Direction: app.TransferUpload, State: app.TransferFailed}
+	item := app.TransferItem{RelativePath: "样本.txt", CanRebind: true, Error: "原文件已移动"}
+	window := ui.NewTester(func(c *ui.Context) {
+		workspace.transferDetailItem(c, job, item)
+	}, 320, 200)
+	if !window.HasText("重新选择源文件") || !window.HasText("原文件已移动") {
+		t.Fatalf("缺少恢复操作或错误，界面为 %q", window.Texts())
+	}
+	job.State = app.TransferCompleted
+	window.Frame()
+	if window.HasText("重新选择源文件") {
+		t.Fatal("已完成任务不应提供源文件重选")
 	}
 }

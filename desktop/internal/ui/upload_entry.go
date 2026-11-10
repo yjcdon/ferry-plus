@@ -1,6 +1,9 @@
 package ui
 
 import (
+	"context"
+	"errors"
+
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 
@@ -9,6 +12,30 @@ import (
 )
 
 var uploadDropOptions = transfer.DropOptions{Formats: []transfer.Format{transfer.FileList}}
+
+type uploadSourceTarget struct{ jobID, relativePath string }
+
+func (w *Workspace) chooseReplacementUploadSource(target uploadSourceTarget) {
+	w.transfer.sourceTarget, w.transfer.sourceProblem = target, ""
+	w.pickUploadItems(func(items []platform.LocalReference, err error) {
+		if err != nil {
+			w.transfer.sourceProblem = err.Error()
+		} else if len(items) > 1 {
+			w.transfer.sourceProblem = "请选择一个源文件。"
+		} else if len(items) == 1 && !w.quitting {
+			w.transfer.sourceChecking = true
+			go func() {
+				err := w.jobs.RebindUploadSource(w.ctx, target.jobID, target.relativePath, items[0])
+				w.window.Update(func() {
+					w.transfer.sourceChecking = false
+					if err != nil && !errors.Is(err, context.Canceled) {
+						w.transfer.sourceProblem = err.Error()
+					}
+				})
+			}()
+		}
+	})
+}
 
 func (w *Workspace) uploadFromCurrent() {
 	if f := w.files[app.Provider(w.preferences.Page)]; f != nil {

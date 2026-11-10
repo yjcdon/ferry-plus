@@ -60,7 +60,7 @@ func (t *Transfers) runUpload(ctx context.Context, worker *transferWorker) ([]Tr
 		unconfirmed = unconfirmed || strings.Contains(item.Error, core.ErrUploadUnconfirmed.Error())
 		items = append(items, TransferItem{
 			RelativePath: item.RelativePath, Remote: ref, Size: item.Size, Directory: item.Directory,
-			Complete: complete, Skipped: item.Skipped, Verified: complete && !item.Directory, Error: item.Error,
+			Complete: complete, Skipped: item.Skipped, Verified: complete && !item.Directory, CanRebind: item.CanRebind, Error: item.Error,
 		})
 	}
 	if unconfirmed {

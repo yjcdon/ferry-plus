@@ -68,7 +68,8 @@ func (t *Transfers) Remove(id string) error {
 		return errTransferMissing
 	}
 	job := t.jobs[index]
-	if t.active[id] != nil || job.State != TransferCompleted && job.State != TransferCanceled && job.State != TransferFailed ||
+	if t.active[id] != nil || t.rebindings[id].cancel != nil ||
+		job.State != TransferCompleted && job.State != TransferCanceled && job.State != TransferFailed ||
 		job.CancellationRequested && job.State == TransferFailed {
 		return errors.New("当前任务无法清除记录。")
 	}
@@ -122,6 +123,11 @@ func (t *Transfers) AccountsChanged() {
 			worker.cancel()
 		}
 	}
+	for _, binding := range t.rebindings {
+		if !sameDirectorySession(binding.session, t.accounts.Session(binding.provider)) {
+			binding.cancel()
+		}
+	}
 	t.scheduleLocked()
 	t.mu.Unlock()
 	t.changed()
@@ -160,6 +166,9 @@ func (t *Transfers) Suspend() {
 			worker.cancel()
 		}
 	}
+	for _, binding := range t.rebindings {
+		binding.cancel()
+	}
 	t.mu.Unlock()
 	t.changed()
 }
@@ -183,6 +192,9 @@ func (t *Transfers) Close() {
 			worker.cancel()
 		}
 	}
+	for _, binding := range t.rebindings {
+		binding.cancel()
+	}
 	t.mu.Unlock()
 	t.wg.Wait()
 }
@@ -201,6 +213,9 @@ func (t *Transfers) act(id string, apply func(*transferRecord, *transferWorker) 
 		return errTransferMissing
 	}
 	job, worker := t.jobs[index], t.active[id]
+	if t.rebindings[id].cancel != nil {
+		return errors.New("正在检查所选源文件。")
+	}
 	if err := apply(&job, worker); err != nil {
 		return err
 	}

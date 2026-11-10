@@ -15,16 +15,19 @@ import (
 )
 
 type transferView struct {
-	direction     string
-	list          ui.ListState
-	selection     ui.Selection[string]
-	focus         int
-	detailID      string
-	scrollToID    string
-	page          int
-	problem       string
-	remove        []string
-	confirmRemove bool
+	direction      string
+	list           ui.ListState
+	selection      ui.Selection[string]
+	focus          int
+	detailID       string
+	scrollToID     string
+	page           int
+	problem        string
+	sourceTarget   uploadSourceTarget
+	sourceProblem  string
+	sourceChecking bool
+	remove         []string
+	confirmRemove  bool
 }
 
 // AttachTransfers connects the persisted job coordinator to the workspace.
@@ -291,7 +294,7 @@ func (w *Workspace) transferDetails(c *ui.Context, jobs []app.TransferJob, index
 		ui.Scroll(c).Grow(1).Children(func() {
 			start := state.page * pageSize
 			for _, item := range job.Items[start:min(start+pageSize, len(job.Items))] {
-				w.transferDetailItem(c, item)
+				w.transferDetailItem(c, job, item)
 			}
 		})
 		if maxPage > 0 {
@@ -308,7 +311,9 @@ func (w *Workspace) transferDetails(c *ui.Context, jobs []app.TransferJob, index
 	})
 }
 
-func (w *Workspace) transferDetailItem(c *ui.Context, item app.TransferItem) {
+func (w *Workspace) transferDetailItem(c *ui.Context, job app.TransferJob, item app.TransferItem) {
+	target := uploadSourceTarget{job.ID, item.RelativePath}
+	sourceChecking := job.RebindingPath == item.RelativePath || w.transfer.sourceChecking && w.transfer.sourceTarget == target
 	ui.Column(c.Key(item.RelativePath)).FillWidth().Padding(6, 12).Gap(4).Children(func() {
 		ui.Text(c, item.RelativePath).SingleLine().Tooltip(item.RelativePath)
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
@@ -335,6 +340,17 @@ func (w *Workspace) transferDetailItem(c *ui.Context, item app.TransferItem) {
 		})
 		if item.Error != "" && ui.Button(c, "复制错误").Clicked() {
 			go mygo.Clipboard.WriteText(item.Error)
+		}
+		if job.Direction == app.TransferUpload && (job.State == app.TransferPaused || job.State == app.TransferFailed) && item.CanRebind {
+			if ui.Button(c, "重新选择源文件").Disabled(job.Stopping || w.transfer.sourceChecking || w.chooser != nil).Clicked() {
+				w.chooseReplacementUploadSource(target)
+			}
+		}
+		if sourceChecking {
+			ui.Text(c, "正在检查文件").TextColor(c.Theme().TextMuted)
+		}
+		if w.transfer.sourceTarget == target && w.transfer.sourceProblem != "" {
+			ui.Text(c, w.transfer.sourceProblem).TextColor(c.Theme().Danger)
 		}
 	})
 }

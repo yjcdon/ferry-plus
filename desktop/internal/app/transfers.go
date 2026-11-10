@@ -63,8 +63,9 @@ type TransferJob struct {
 	Done, Total                       int64
 	Items                             []TransferItem
 	CancellationRequested             bool
-	Stopping                          bool  `json:"-"`
-	BytesPerSecond                    int64 `json:"-"`
+	Stopping                          bool   `json:"-"`
+	RebindingPath                     string `json:"-"`
+	BytesPerSecond                    int64  `json:"-"`
 }
 
 type TransferItem struct {
@@ -76,6 +77,7 @@ type TransferItem struct {
 	Complete     bool
 	Skipped      bool
 	Verified     bool
+	CanRebind    bool `json:",omitempty"`
 	Error        string
 }
 
@@ -168,6 +170,7 @@ type Transfers struct {
 	notify        func() // Must enqueue UI work without waiting for the main thread.
 	jobs          []transferRecord
 	active        map[string]*transferWorker
+	rebindings    map[string]uploadRebinding
 	beginActivity func() (func(), error)
 	downloadRate  *transferRate
 	uploadRate    *transferRate
@@ -195,6 +198,7 @@ func newTransfers(data transferRecords, accounts *Accounts, upload uploadRunner,
 	t := &Transfers{
 		records: data, accounts: accounts, upload: upload, download: download,
 		config: normalizedTransferConfig(config), notify: notify, active: make(map[string]*transferWorker),
+		rebindings: make(map[string]uploadRebinding),
 	}
 	if shares, ok := data.(shareRecords); ok {
 		t.shares = newShareTransfer(shares, accounts)
@@ -272,6 +276,9 @@ func (t *Transfers) Snapshot() []TransferJob {
 			job.Done, job.Total = worker.done, worker.total
 		} else if job.State == TransferQueued && !t.hasAccount(job) {
 			job.State = TransferWaitingAccount
+		}
+		if binding, ok := t.rebindings[job.ID]; ok {
+			job.Stopping, job.RebindingPath = true, binding.relativePath
 		}
 		result[i] = job
 	}
