@@ -43,14 +43,14 @@ func (w *Workspace) showLogin(provider app.Provider) {
 			return
 		}
 		delete(w.accountProblem, provider)
-		w.loginWindows[provider] = openLogin(w.accounts, provider, w.window.Invalidate, func() {
+		w.loginWindows[provider] = openLogin(w.accounts, provider, func() { w.AccountChanged(provider) }, func() {
 			delete(w.loginWindows, provider)
 		})
 	})
 }
 
 func (w *Workspace) restoreAccount(provider app.Provider) {
-	go w.accounts.Restore(w.ctx, provider, w.window.Invalidate)
+	go w.accounts.Restore(w.ctx, provider, func() { w.AccountChanged(provider) })
 }
 
 func (w *Workspace) logout(provider app.Provider) {
@@ -63,6 +63,9 @@ func (w *Workspace) logout(provider app.Provider) {
 				w.preferences.Page = string(provider)
 				w.preferences.RecentProvider = string(provider)
 				w.allProviders = false
+			} else {
+				delete(w.preferences.DirectoryLocations, provider)
+				w.AccountChanged(provider)
 			}
 		})
 	}()

@@ -57,8 +57,8 @@ func run() (err error) {
 		}
 		window := mygo.NewWindow(opts)
 		workspace.AttachAccounts(ctx, window, accounts)
-		go accounts.Restore(ctx, app.Baidu, window.Invalidate)
-		go accounts.Restore(ctx, app.Quark, window.Invalidate)
+		go accounts.Restore(ctx, app.Baidu, func() { workspace.AccountChanged(app.Baidu) })
+		go accounts.Restore(ctx, app.Quark, func() { workspace.AccountChanged(app.Quark) })
 		mygo.App.SetMenu(workspace.Menu(window))
 	})
 	if err := mygo.App.Run(); err != nil {

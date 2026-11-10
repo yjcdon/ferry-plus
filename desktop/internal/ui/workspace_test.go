@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/egoist/mygo/ui"
@@ -46,7 +47,7 @@ func TestWorkspaceNavigation(t *testing.T) {
 	}
 
 	restored := NewWorkspace(workspace.Preferences())
-	if restored.Preferences() != workspace.Preferences() {
+	if !reflect.DeepEqual(restored.Preferences(), workspace.Preferences()) {
 		t.Fatal("恢复后导航或分栏偏好发生变化")
 	}
 }

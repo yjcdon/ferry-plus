@@ -31,12 +31,14 @@ var transferPages = []struct{ id, title, empty string }{
 
 // Preferences contains the navigation and layout values restored at startup.
 type Preferences struct {
-	Page           string  `json:"page"`
-	RecentProvider string  `json:"recentProvider"`
-	SidebarWidth   float32 `json:"sidebarWidth"`
-	SidebarHidden  bool    `json:"sidebarHidden"`
-	DetailsWidth   float32 `json:"detailsWidth"`
-	DetailsOpen    bool    `json:"detailsOpen"`
+	Page               string                                 `json:"page"`
+	RecentProvider     string                                 `json:"recentProvider"`
+	SidebarWidth       float32                                `json:"sidebarWidth"`
+	SidebarHidden      bool                                   `json:"sidebarHidden"`
+	DetailsWidth       float32                                `json:"detailsWidth"`
+	DetailsOpen        bool                                   `json:"detailsOpen"`
+	ColumnWidths       map[string]float32                     `json:"columnWidths,omitempty"`
+	DirectoryLocations map[app.Provider]app.DirectoryLocation `json:"directoryLocations,omitempty"`
 }
 
 // Workspace owns the main window's navigation and local view state.
@@ -53,6 +55,7 @@ type Workspace struct {
 	logoutProvider app.Provider
 	confirmLogout  bool
 	accountProblem map[app.Provider]string
+	files          map[app.Provider]*directoryView
 }
 
 // NewWorkspace restores known pages and supplies the initial split sizes.
@@ -80,13 +83,28 @@ func NewWorkspace(p Preferences) *Workspace {
 }
 
 // Preferences returns the state to save when the workspace closes.
-func (w *Workspace) Preferences() Preferences { return w.preferences }
+func (w *Workspace) Preferences() Preferences {
+	if w.preferences.DirectoryLocations == nil && len(w.files) != 0 {
+		w.preferences.DirectoryLocations = make(map[app.Provider]app.DirectoryLocation)
+	}
+	for provider, f := range w.files {
+		if location := f.directory.Location(); location.AccountID != "" {
+			w.preferences.DirectoryLocations[provider] = location
+		}
+	}
+	return w.preferences
+}
 
 // AttachAccounts enables login and account actions in the main window.
 func (w *Workspace) AttachAccounts(ctx context.Context, window *mygo.Window, accounts *app.Accounts) {
 	w.window, w.accounts, w.ctx = window, accounts, ctx
 	w.loginWindows = make(map[app.Provider]*mygo.Window)
 	w.accountProblem = make(map[app.Provider]string)
+	w.files = make(map[app.Provider]*directoryView, len(providers))
+	for _, entry := range providers {
+		p := app.Provider(entry.id)
+		w.files[p] = newDirectoryView(p, w.preferences.DirectoryLocations[p])
+	}
 }
 
 // Menu connects the native menu and platform shortcuts to workspace commands.
@@ -100,11 +118,7 @@ func (w *Workspace) Menu(window *mygo.Window) *mygo.Menu {
 		{Role: mygo.RoleAppMenu},
 		{Role: mygo.RoleEditMenu},
 		{Label: "显示", Submenu: []*mygo.MenuItem{
-			command("搜索任务", "CmdOrCtrl+F", func() {
-				if transferIndex(w.preferences.Page) >= 0 {
-					w.focusSearch = true
-				}
-			}),
+			command("搜索", "CmdOrCtrl+F", func() { w.focusSearch = true }),
 			command("切换侧边栏", "", w.toggleSidebar),
 			command("切换详情", "CmdOrCtrl+Alt+I", func() {
 				width, _ := window.ContentSize()
@@ -138,7 +152,11 @@ func (w *Workspace) View(c *ui.Context) {
 }
 
 func (w *Workspace) sidebar(c *ui.Context) {
-	ui.Column(c).Fill().Padding(max(8, c.TitleBar().Height+4), 8, 8).Children(func() {
+	top := float32(8)
+	if c.TitleBar().Height > 0 {
+		top = 44
+	}
+	ui.Column(c).Fill().Padding(top, 8, 8).Children(func() {
 		previous := w.preferences.Page
 		ui.Sidebar(c, &w.preferences.Page, func() {
 			ui.SidebarSection(c, "网盘", nil, func() {
@@ -166,9 +184,16 @@ func (w *Workspace) sidebar(c *ui.Context) {
 			ui.MenuButton(c, "账号与设置", w.accountMenu)
 		}
 		if previous != w.preferences.Page {
+			if f := w.files[app.Provider(previous)]; f != nil {
+				f.directory.SetSelection(nil)
+				f.syncSelection()
+			}
 			if providerTitle(w.preferences.Page) != "" {
 				w.preferences.RecentProvider = w.preferences.Page
 				w.allProviders = false
+				if f := w.files[app.Provider(w.preferences.Page)]; f != nil {
+					w.ensureDirectory(f)
+				}
 			} else {
 				w.lastTransfer = w.preferences.Page
 			}
@@ -200,6 +225,9 @@ func (w *Workspace) content(c *ui.Context, width float32) {
 			}
 			ui.Text(c, title).Bold().SingleLine()
 			ui.Spacer(c)
+			if f := w.files[app.Provider(w.preferences.Page)]; f != nil && w.accounts.Session(f.directory.Provider()).State == app.LoggedIn {
+				w.directorySearch(c, f)
+			}
 			if index >= 0 {
 				search := ui.TextInput(c, &w.transferSearch).Label("搜索任务").Placeholder("搜索任务").Width(160)
 				if w.focusSearch {
@@ -213,7 +241,7 @@ func (w *Workspace) content(c *ui.Context, width float32) {
 			}
 		}).Height(48).Padding(0, 8, 0, titlePadding).DragWindow()
 		if index < 0 {
-			w.fileLanding(c, title)
+			w.fileLanding(c, title, width)
 			return
 		}
 		if w.preferences.DetailsOpen && width >= 640 {
@@ -233,23 +261,29 @@ func (w *Workspace) content(c *ui.Context, width float32) {
 	})
 }
 
-func (w *Workspace) fileLanding(c *ui.Context, title string) {
-	ui.Toolbar(c, func() {
-		ui.Button(c, "返回").Disabled(true)
-		ui.Text(c, "根目录")
-	})
+func (w *Workspace) fileLanding(c *ui.Context, title string, width float32) {
 	provider := app.Provider(w.preferences.Page)
+	f := w.files[provider]
+	if f != nil {
+		w.directoryToolbar(c, f, width)
+	} else {
+		ui.Toolbar(c, func() {
+			ui.Button(c, "返回").Disabled(true)
+			ui.Text(c, "根目录")
+		})
+	}
 	session := app.AccountSession{}
 	if w.accounts != nil {
 		session = w.accounts.Session(provider)
+	}
+	if session.State == app.LoggedIn && f != nil {
+		w.directoryBody(c, f)
+		return
 	}
 	ui.Column(c).Grow(1).FillWidth().Center().Gap(8).Padding(16).Children(func() {
 		switch session.State {
 		case app.Checking:
 			ui.Text(c, "正在校验"+title).TextColor(c.Theme().TextMuted)
-		case app.LoggedIn:
-			ui.Text(c, session.Name).Bold()
-			ui.Text(c, "已登录").TextColor(c.Theme().TextMuted)
 		case app.Expired, app.AccountProblem:
 			ui.Text(c, session.Problem).TextColor(c.Theme().Danger)
 			ui.Row(c).Gap(8).Children(func() {
