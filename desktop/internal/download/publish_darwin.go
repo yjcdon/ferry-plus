@@ -8,10 +8,10 @@ import (
 	"github.com/ebitengine/purego"
 )
 
-func publishExclusive(root *os.Root, from, to string) error {
+func publishExclusive(root *os.Root, from, to string, _ *fileStamp) (*fileStamp, error) {
 	dir, err := root.Open(".")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer dir.Close()
 
@@ -24,17 +24,17 @@ func publishExclusive(root *os.Root, from, to string) error {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
 	if rename(fd, from, fd, to, renameExcl) != 0 {
-		return syscall.Errno(*errno())
+		return nil, syscall.Errno(*errno())
 	}
-	return nil
+	return nil, nil
 }
 
-func publicationStamp(info os.FileInfo) *fileStamp {
+func publicationStamp(_ *os.Root, _ string, info os.FileInfo) (*fileStamp, error) {
 	stat := info.Sys().(*syscall.Stat_t)
 	if stat.Ino == 0 {
-		return nil
+		return nil, nil
 	}
-	return &fileStamp{Inode: stat.Ino, Birth: stat.Birthtimespec.Nano(), Modified: stat.Mtimespec.Nano()}
+	return &fileStamp{Inode: stat.Ino, Birth: stat.Birthtimespec.Nano(), Modified: stat.Mtimespec.Nano()}, nil
 }
 
 func syncPublishDirectory(root *os.Root) error {

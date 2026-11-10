@@ -97,14 +97,18 @@ func (t *transfer) report(done int64) {
 // alone when the process exits before the completion receipt is written.
 type fileStamp struct {
 	Inode    uint64 `json:"inode"`
+	Volume   uint64 `json:"volume,omitempty"`
 	Birth    int64  `json:"birth"`
 	Modified int64  `json:"modified"`
 }
 
 func (t *transfer) publish(ctx context.Context, base string) (string, error) {
-	info, err := t.dir.Stat(t.record.Partial)
+	info, err := t.dir.Lstat(t.record.Partial)
 	if err != nil {
 		return "", err
+	}
+	if !info.Mode().IsRegular() || info.Size() != t.record.Size {
+		return "", errors.New("下载临时文件与发布记录不一致")
 	}
 	ext := filepath.Ext(base)
 	if ext == base || ext == "." {
@@ -122,13 +126,16 @@ func (t *transfer) publish(ctx context.Context, base string) (string, error) {
 				candidate = fmt.Sprintf("%s (%d)%s", stem, ordinal, ext)
 			}
 			t.record.Candidate = candidate
-			t.record.Stamp = publicationStamp(info)
+			t.record.Stamp, err = publicationStamp(t.dir, t.record.Partial, info)
+			if err != nil {
+				return "", err
+			}
 			if err := t.records.Write(t.name, t.record); err != nil {
 				return "", err
 			}
 		}
 
-		err := publishExclusive(t.dir, t.record.Partial, candidate)
+		stamp, err := publishExclusive(t.dir, t.record.Partial, candidate, t.record.Stamp)
 		if errors.Is(err, fs.ErrExist) {
 			existing, statErr := t.dir.Lstat(candidate)
 			if statErr != nil {
@@ -141,31 +148,33 @@ func (t *transfer) publish(ctx context.Context, base string) (string, error) {
 		} else if err != nil {
 			return "", fmt.Errorf("发布下载文件: %w", err)
 		}
-		info, err := t.publishedFileInfo()
-		if err != nil {
-			return "", err
+		if stamp == nil {
+			stamp, err = t.publishedStamp()
+			if err != nil {
+				return "", err
+			}
 		}
-		return t.completePublication(info)
+		return t.completePublication(stamp)
 	}
 }
 
 func (t *transfer) recoverPublication() (string, error) {
-	info, err := t.publishedFileInfo()
+	stamp, err := t.publishedStamp()
 	if err != nil {
 		return "", err
 	}
-	if stamp := publicationStamp(info); stamp == nil || *stamp != *t.record.Stamp {
+	if stamp == nil || *stamp != *t.record.Stamp {
 		return "", errors.New("无法确认下载文件是否已发布，已保留现有文件")
 	}
-	return t.completePublication(info)
+	return t.completePublication(stamp)
 }
 
-func (t *transfer) completePublication(info os.FileInfo) (string, error) {
+func (t *transfer) completePublication(stamp *fileStamp) (string, error) {
 	if err := syncPublishDirectory(t.dir); err != nil {
 		return "", fmt.Errorf("刷盘保存下载路径: %w", err)
 	}
 	t.record.Published = true
-	t.record.Stamp = publicationStamp(info)
+	t.record.Stamp = stamp
 	if err := t.records.Write(t.name, t.record); err != nil {
 		return "", err
 	}
@@ -178,7 +187,11 @@ func (t *transfer) finish() (string, error) {
 		return "", err
 	}
 	if stamp := t.record.Stamp; stamp != nil {
-		if actual := publicationStamp(info); actual == nil || *actual != *stamp {
+		actual, err := publicationStamp(t.dir, t.record.Candidate, info)
+		if err != nil {
+			return "", err
+		}
+		if actual == nil || *actual != *stamp {
 			return "", errors.New("已发布文件与下载记录不一致")
 		}
 	}
@@ -196,6 +209,14 @@ func (t *transfer) finish() (string, error) {
 		return "", fmt.Errorf("清理下载临时文件: %w", err)
 	}
 	return t.record.Candidate, nil
+}
+
+func (t *transfer) publishedStamp() (*fileStamp, error) {
+	info, err := t.publishedFileInfo()
+	if err != nil {
+		return nil, err
+	}
+	return publicationStamp(t.dir, t.record.Candidate, info)
 }
 
 func (t *transfer) publishedFileInfo() (os.FileInfo, error) {
