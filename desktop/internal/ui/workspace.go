@@ -23,11 +23,18 @@ var providers = []struct{ id, title string }{
 	{quarkPage, "夸克网盘"},
 }
 
-var transferPages = []struct{ id, title, empty string }{
-	{all, "全部", "添加传输任务"},
-	{"transfers.active", "进行中", "等待任务开始"},
-	{"transfers.completed", "已完成", "完成的任务将显示在这里"},
-	{"transfers.failed", "失败", "失败的任务将显示在这里"},
+var transferPages = []struct {
+	id, title, empty string
+	icon             *ui.SVG
+}{
+	{all, "全部", "添加传输任务", transferIcon("M3 14l3-8h12l3 8v5H3z M3 14h5l2 2h4l2-2h5 M8 10h8")},
+	{"transfers.active", "进行中", "等待任务开始", transferIcon("M22 12a10 10 0 1 1-20 0 10 10 0 1 1 20 0z M8 16V8l-2 2 M8 8l2 2 M16 8v8l-2-2 M16 16l2-2")},
+	{"transfers.completed", "已完成", "完成的任务将显示在这里", transferIcon("M22 12a10 10 0 1 1-20 0 10 10 0 1 1 20 0z M7 12l3 3 7-7")},
+	{"transfers.failed", "失败", "失败的任务将显示在这里", transferIcon("M12 3l10 17H2z M12 9v4 M12 16v.3")},
+}
+
+func transferIcon(path string) *ui.SVG {
+	return ui.MustParseSVG([]byte(`<svg viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="` + path + `"/></svg>`))
 }
 
 // Preferences contains the navigation and layout values restored at startup.
@@ -214,7 +221,7 @@ func (w *Workspace) sidebar(c *ui.Context, jobs []app.TransferJob) {
 			})
 			ui.SidebarSection(c, "传输", nil, func() {
 				for index, page := range transferPages {
-					item := ui.SidebarItem(c, page.id, nil, page.title)
+					item := ui.SidebarItem(c, page.id, page.icon, page.title)
 					count := 0
 					for _, job := range jobs {
 						if matchesTransferPage(job, index) {

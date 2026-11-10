@@ -97,4 +97,8 @@ Mac 验证构建关闭主窗后继续运行，再次启动只唤起原窗口。�
 
 ## T16 安装包验证
 
-在 Mac 运行 `Scripts/build-v5.sh` 生成 Apple Silicon DMG 与 Windows x64 NSIS 安装包，并写入和校验 SHA-256。DMG 完整性与应用签名通过，Windows 应用二进制确认为 x86-64。NSIS 检测 WebView2 Runtime，缺失时可打开微软下载页。Mac 使用临时签名验证打包，安装后启动与正式签名另行验收，Windows 安装和运行进入第二阶段。
+在 Mac 运行 `Scripts/build-v5.sh` 生成 Apple Silicon DMG 与 Windows x64 NSIS 安装包，并写入和校验 SHA-256。DMG 完整性与应用签名通过，Windows 应用二进制确认为 x86-64。NSIS 检测 WebView2 Runtime，缺失时可打开微软下载页。在 Mac 只读挂载 DMG，核对 Applications 链接，将应用拷到隔离目录后再次核对签名、版本和最低系统声明。以隔离配置直接启动拷出的程序，确认进程持续运行并锁定预期数据目录。签名为临时签名，Finder 安装交互、macOS 14 与 Windows 安装运行仍待对应实机验收。
+
+## T17 侧栏传输分类对照
+
+按 4.2.0 基线补齐全部、进行中、已完成、失败四个分类的图标。Mac 深色验证构建实际渲染了四个图标，辅助功能树仍用现有业务文字标记各分类。工作区测试通过，浅色、输入法和其余页面对照继续验收。
