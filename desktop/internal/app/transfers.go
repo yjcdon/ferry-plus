@@ -170,7 +170,7 @@ type Transfers struct {
 	notify        func() // Must enqueue UI work without waiting for the main thread.
 	jobs          []transferRecord
 	active        map[string]*transferWorker
-	rebindings    map[string]uploadRebinding
+	uploadChecks  map[string]uploadCheck
 	beginActivity func() (func(), error)
 	downloadRate  *transferRate
 	uploadRate    *transferRate
@@ -198,7 +198,7 @@ func newTransfers(data transferRecords, accounts *Accounts, upload uploadRunner,
 	t := &Transfers{
 		records: data, accounts: accounts, upload: upload, download: download,
 		config: normalizedTransferConfig(config), notify: notify, active: make(map[string]*transferWorker),
-		rebindings: make(map[string]uploadRebinding),
+		uploadChecks: make(map[string]uploadCheck),
 	}
 	if shares, ok := data.(shareRecords); ok {
 		t.shares = newShareTransfer(shares, accounts)
@@ -277,7 +277,7 @@ func (t *Transfers) Snapshot() []TransferJob {
 		} else if job.State == TransferQueued && !t.hasAccount(job) {
 			job.State = TransferWaitingAccount
 		}
-		if binding, ok := t.rebindings[job.ID]; ok {
+		if binding, ok := t.uploadChecks[job.ID]; ok {
 			job.Stopping, job.RebindingPath = true, binding.relativePath
 		}
 		result[i] = job

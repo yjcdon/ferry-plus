@@ -161,6 +161,11 @@ func (w *Workspace) primaryTransferAction(job app.TransferJob) (string, func(str
 		if !job.CancellationRequested {
 			return "重试", w.jobs.RetryFailed
 		}
+		if job.State == app.TransferNeedsCheck && job.Direction == app.TransferUpload {
+			return "核对云端结果", func(id string) error {
+				return w.jobs.ReconcileCanceledUpload(w.ctx, id)
+			}
+		}
 		return "", nil
 	default:
 		return "", nil
@@ -326,6 +331,11 @@ func (w *Workspace) transferDetailItem(c *ui.Context, job app.TransferJob, item 
 				status = "已校验"
 			case item.Complete:
 				status = "已完成"
+			case job.State == app.TransferCanceled:
+				status = "已取消"
+				if item.Remote.ID != "" {
+					status = "已保留在网盘"
+				}
 			}
 			ui.Text(c, status).TextColor(c.Theme().TextMuted).Grow(1).SingleLine().Tooltip(status)
 			if item.LocalPath != "" {

@@ -16,7 +16,7 @@ type uploadSourceRebinder interface {
 	RebindSource(context.Context, string, string, platform.LocalReference) error
 }
 
-type uploadRebinding struct {
+type uploadCheck struct {
 	provider     Provider
 	session      AccountSession
 	relativePath string
@@ -54,12 +54,7 @@ func (t *Transfers) RebindUploadSource(ctx context.Context, id, relativePath str
 	err = rebinder.RebindSource(ctx, id, relativePath, replacement)
 
 	t.mu.Lock()
-	defer func() {
-		delete(t.rebindings, id)
-		t.scheduleLocked()
-		t.mu.Unlock()
-		t.changed()
-	}()
+	defer t.finishUploadCheckLocked(id)
 	if err != nil {
 		return err
 	}
@@ -87,33 +82,44 @@ func (t *Transfers) RebindUploadSource(ctx context.Context, id, relativePath str
 	return t.replaceLocked(index, next)
 }
 
-func (t *Transfers) beginUploadRebinding(id, relativePath string, cancel context.CancelFunc) (uploadRebinding, error) {
+func (t *Transfers) beginUploadRebinding(id, relativePath string, cancel context.CancelFunc) (uploadCheck, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if t.closed {
-		return uploadRebinding{}, fs.ErrClosed
+		return uploadCheck{}, fs.ErrClosed
 	}
 	index := t.find(id)
 	if index < 0 {
-		return uploadRebinding{}, errTransferMissing
+		return uploadCheck{}, errTransferMissing
 	}
 	job := t.jobs[index]
-	if t.suspended || t.active[id] != nil || t.rebindings[id].cancel != nil {
-		return uploadRebinding{}, errors.New("请等待当前传输停止后再选择源文件。")
+	if t.suspended || t.active[id] != nil || t.uploadChecks[id].cancel != nil {
+		return uploadCheck{}, errors.New("请等待当前传输停止后再选择源文件。")
 	}
 	if job.Direction != TransferUpload || job.CancellationRequested ||
 		job.State != TransferFailed && job.State != TransferPaused ||
 		!slices.ContainsFunc(job.Items, func(item TransferItem) bool {
 			return item.RelativePath == relativePath && item.CanRebind && item.Error != ""
 		}) {
-		return uploadRebinding{}, core.ErrUploadSourceNotRebindable
+		return uploadCheck{}, core.ErrUploadSourceNotRebindable
 	}
+	return t.beginUploadCheckLocked(job, relativePath, cancel)
+}
+
+func (t *Transfers) beginUploadCheckLocked(job transferRecord, relativePath string, cancel context.CancelFunc) (uploadCheck, error) {
 	session := t.accounts.Session(job.Provider)
 	if session.State != LoggedIn || session.ID != job.AccountID {
-		return uploadRebinding{}, ErrDirectorySessionChanged
+		return uploadCheck{}, ErrDirectorySessionChanged
 	}
-	binding := uploadRebinding{provider: job.Provider, session: session, relativePath: relativePath, cancel: cancel}
-	t.rebindings[id] = binding
+	check := uploadCheck{provider: job.Provider, session: session, relativePath: relativePath, cancel: cancel}
+	t.uploadChecks[job.ID] = check
 	t.wg.Add(1)
-	return binding, nil
+	return check, nil
+}
+
+func (t *Transfers) finishUploadCheckLocked(id string) {
+	delete(t.uploadChecks, id)
+	t.scheduleLocked()
+	t.mu.Unlock()
+	t.changed()
 }

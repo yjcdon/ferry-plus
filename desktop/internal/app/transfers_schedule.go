@@ -68,10 +68,16 @@ func (t *Transfers) Remove(id string) error {
 		return errTransferMissing
 	}
 	job := t.jobs[index]
-	if t.active[id] != nil || t.rebindings[id].cancel != nil ||
+	if t.active[id] != nil || t.uploadChecks[id].cancel != nil ||
 		job.State != TransferCompleted && job.State != TransferCanceled && job.State != TransferFailed ||
 		job.CancellationRequested && job.State == TransferFailed {
 		return errors.New("当前任务无法清除记录。")
+	}
+	if job.CancellationRequested && job.Upload != nil {
+		if state, message := t.canceledUploadState(id, nil); state == TransferNeedsCheck {
+			job.State, job.Error = state, message
+			return errors.Join(core.ErrUploadUnconfirmed, t.replaceLocked(index, job))
+		}
 	}
 	if job.State == TransferFailed && job.Download != nil && job.Download.Share && job.Download.Plan == nil {
 		if err := t.shares.DiscardStage(id); err != nil {
@@ -91,12 +97,18 @@ func (t *Transfers) Cancel(id string) error {
 		if job.Direction != TransferUpload || job.State != TransferQueued && job.State != TransferRunning && job.State != TransferPaused {
 			return errors.New("当前任务无法取消。")
 		}
-		job.State = TransferCanceled
 		job.CancellationRequested = true
 		job.DuplicateOf = ""
-		if job.Stage == "committing" {
-			job.State = TransferNeedsCheck
-			job.Error = core.ErrUploadUnconfirmed.Error()
+		if worker != nil {
+			// Until the worker exits, a remote operation can still have a
+			// durable intent. Keep removal blocked even after a crash.
+			job.State, job.Error = TransferNeedsCheck, core.ErrUploadUnconfirmed.Error()
+		} else {
+			job.State, job.Error = t.canceledUploadState(id, nil)
+			if job.State == TransferCanceled {
+				job.Items = slices.Clone(job.Items)
+				clearCanceledUploadErrors(job)
+			}
 		}
 		return nil
 	}, "cancel")
@@ -123,7 +135,7 @@ func (t *Transfers) AccountsChanged() {
 			worker.cancel()
 		}
 	}
-	for _, binding := range t.rebindings {
+	for _, binding := range t.uploadChecks {
 		if !sameDirectorySession(binding.session, t.accounts.Session(binding.provider)) {
 			binding.cancel()
 		}
@@ -166,7 +178,7 @@ func (t *Transfers) Suspend() {
 			worker.cancel()
 		}
 	}
-	for _, binding := range t.rebindings {
+	for _, binding := range t.uploadChecks {
 		binding.cancel()
 	}
 	t.mu.Unlock()
@@ -192,7 +204,7 @@ func (t *Transfers) Close() {
 			worker.cancel()
 		}
 	}
-	for _, binding := range t.rebindings {
+	for _, binding := range t.uploadChecks {
 		binding.cancel()
 	}
 	t.mu.Unlock()
@@ -213,8 +225,8 @@ func (t *Transfers) act(id string, apply func(*transferRecord, *transferWorker) 
 		return errTransferMissing
 	}
 	job, worker := t.jobs[index], t.active[id]
-	if t.rebindings[id].cancel != nil {
-		return errors.New("正在检查所选源文件。")
+	if t.uploadChecks[id].cancel != nil {
+		return errors.New("请等待当前检查结束。")
 	}
 	if err := apply(&job, worker); err != nil {
 		return err
@@ -380,12 +392,13 @@ func (t *Transfers) run(ctx context.Context, worker *transferWorker) {
 		next.Warning = warning
 	}
 	switch {
-	case next.State == TransferNeedsCheck && worker.stop == "cancel" && err == nil:
-		next.State, next.Error = TransferCanceled, ""
-	case next.State == TransferNeedsCheck:
-	case worker.stop == "cancel" && errors.Is(err, core.ErrUploadUnconfirmed):
-		next.State, next.Error = TransferNeedsCheck, err.Error()
 	case worker.stop == "cancel":
+		next.State, next.Error = t.canceledUploadState(worker.job.ID, err)
+		if next.State == TransferCanceled {
+			next.Items = slices.Clone(next.Items)
+			clearCanceledUploadErrors(&next)
+		}
+	case next.State == TransferNeedsCheck:
 	case errors.Is(err, errDuplicateUpload):
 		// The decision is already durable. A fast confirmation may have
 		// queued the task again while this worker was releasing its claim.
