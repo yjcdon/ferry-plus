@@ -147,6 +147,21 @@ func (t DirectoryTarget) Create(ctx context.Context, accounts *Accounts, name st
 	}
 	var created RemoteEntry
 	if t.Ref.Provider == Baidu {
+		if t.Ref != Baidu.RootRef() {
+			parent := RemoteRef{Provider: Baidu, Path: path.Dir(t.Ref.Path)}
+			children, err := listRemote(ctx, session, parent)
+			if err != nil {
+				return RemoteEntry{}, err
+			}
+			if !slices.ContainsFunc(children, func(entry RemoteEntry) bool {
+				return entry.IsDirectory && entry.Ref == t.Ref
+			}) {
+				return RemoteEntry{}, ErrDirectoryEntryChanged
+			}
+			if session, err = t.Session(accounts); err != nil {
+				return RemoteEntry{}, err
+			}
+		}
 		entry, err := session.Baidu.CreateOwnedDirectory(ctx, path.Join(t.Ref.Path, name))
 		if err != nil {
 			return RemoteEntry{}, err

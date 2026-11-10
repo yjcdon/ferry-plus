@@ -142,3 +142,31 @@ func TestDirectoryRenameChecksExactSiblingAndConfirmsOnce(t *testing.T) {
 		t.Fatalf("verified rename did not preserve the row's selection: %v", err)
 	}
 }
+
+func TestCreateBaiduDirectoryRejectsReplacedParent(t *testing.T) {
+	accounts := NewAccounts(nil, nil)
+	parentID, writes := 17, 0
+	transport := directoryTransport(func(r *http.Request) (*http.Response, error) {
+		switch r.URL.Path {
+		case "/api/list":
+			return directoryList(t, r, []baiduRow{{ID: parentID, Path: "/parent", Directory: 1}})
+		case "/rest/2.0/pcs/file":
+			writes++
+			return directoryReply(t, r, map[string]any{"fs_id": 19, "path": "/parent/new"})
+		default:
+			t.Fatalf("unexpected endpoint %s", r.URL.Path)
+			return nil, errors.New("unexpected endpoint")
+		}
+	})
+	session := newDirectorySession(t, "account", transport)
+	accounts.baidu.current.Store(&session)
+	target := DirectoryTarget{Ref: RemoteRef{Provider: Baidu, ID: "17", Path: "/parent"}, AccountID: session.ID, session: session}
+	parentID = 18
+	if _, err := target.Create(t.Context(), accounts, "new"); !errors.Is(err, ErrDirectoryEntryChanged) || writes != 0 {
+		t.Fatalf("替换目录不应收到创建请求: %v，写入 %d 次", err, writes)
+	}
+	parentID = 17
+	if created, err := target.Create(t.Context(), accounts, "new"); err != nil || created.Ref.ID != "19" || writes != 1 {
+		t.Fatalf("原目录应成功创建一次: %+v，%v，写入 %d 次", created, err, writes)
+	}
+}
