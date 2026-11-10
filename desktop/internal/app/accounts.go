@@ -87,11 +87,49 @@ type accountSlot struct {
 type Accounts struct {
 	data         credentialRecords
 	http         *http.Client
+	onExpired    func(Provider)
 	baidu, quark accountSlot
 }
 
 func NewAccounts(data credentialRecords, client *http.Client) *Accounts {
 	return &Accounts{data: data, http: client}
+}
+
+// OnExpired registers the workspace callback before account requests start.
+func (a *Accounts) OnExpired(notify func(Provider)) {
+	a.onExpired = notify
+}
+
+// ExpireSession retires only the session that received an explicit
+// authentication failure. The saved identity remains available for login.
+func (a *Accounts) ExpireSession(provider Provider, session AccountSession, err error) bool {
+	if !isLoginExpired(provider, err) {
+		return false
+	}
+	slot := a.slot(provider)
+	slot.mu.Lock()
+	current := slot.current.Load()
+	if current == nil || current.State != LoggedIn || !sameDirectorySession(session, *current) {
+		slot.mu.Unlock()
+		return false
+	}
+	slot.replace(&AccountSession{State: Expired, ID: current.ID, Name: current.Name, Problem: "登录已失效，请重新登录。"})
+	slot.mu.Unlock()
+	if a.onExpired != nil {
+		a.onExpired(provider)
+	}
+	return true
+}
+
+func isLoginExpired(provider Provider, err error) bool {
+	switch provider {
+	case Baidu:
+		return errors.Is(err, baidu.ErrLoginExpired) || errors.Is(err, errBaiduAccountChanged)
+	case Quark:
+		return errors.Is(err, quark.ErrLoginExpired) || errors.Is(err, quark.ErrAccountChanged)
+	default:
+		return false
+	}
 }
 
 func (a *Accounts) slot(provider Provider) *accountSlot {
@@ -238,8 +276,7 @@ func (a *Accounts) Restore(ctx context.Context, provider Provider, notify func()
 		}
 		return
 	}
-	expired := errors.Is(err, baidu.ErrLoginExpired) || errors.Is(err, errBaiduAccountChanged) ||
-		errors.Is(err, quark.ErrLoginExpired) || errors.Is(err, quark.ErrAccountChanged)
+	expired := isLoginExpired(provider, err)
 	if err == nil {
 		err = a.install(slot, login)
 	}

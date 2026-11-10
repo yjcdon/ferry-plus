@@ -98,6 +98,7 @@ func (w *Workspace) fetchDirectory(f *directoryView, request *app.DirectoryReque
 	}
 	go func() {
 		result := request.Fetch(w.ctx)
+		request.ReportExpiredSession(w.accounts, result)
 		w.window.Update(func() {
 			if f.directory.Apply(request, result) {
 				f.syncSelection()

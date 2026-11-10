@@ -460,7 +460,8 @@ func (r *DirectoryRequest) Fetch(ctx context.Context) DirectoryResult {
 		branches[ref] = directoryBranch{children: children}
 		for _, child := range children {
 			if child.IsDirectory && r.expanded[child.Ref] {
-				if err := visit(child.Ref); errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+				if err := visit(child.Ref); errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+					isLoginExpired(ref.Provider, err) {
 					return err
 				}
 			}
@@ -469,6 +470,12 @@ func (r *DirectoryRequest) Fetch(ctx context.Context) DirectoryResult {
 	}
 	err := visit(r.ref)
 	return DirectoryResult{branches: branches, err: err}
+}
+
+// ReportExpiredSession lets a directory response retire its original login
+// without allowing a stale response to expire a replacement account.
+func (r *DirectoryRequest) ReportExpiredSession(accounts *Accounts, result DirectoryResult) {
+	accounts.ExpireSession(r.ref.Provider, r.session, result.err)
 }
 
 // Apply publishes only a result still owned by this root and session.

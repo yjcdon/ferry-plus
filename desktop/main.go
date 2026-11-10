@@ -49,6 +49,7 @@ func run() (err error) {
 	defer transport.CloseIdleConnections()
 	businessClient := &http.Client{Transport: transport, Timeout: 60 * time.Second}
 	accounts := app.NewAccounts(data, businessClient)
+	accounts.OnExpired(workspace.AccountChanged)
 	var notifyWindow atomic.Pointer[mygo.Window]
 	var notifyQueued atomic.Bool
 	transfers, err := app.NewTransfers(data, accounts, businessClient, app.TransferConfigFromSettings(settings.Values()), func() {

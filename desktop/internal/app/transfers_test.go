@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yjcdon/ferry-drive/desktop/internal/baidu"
 	"github.com/yjcdon/ferry-drive/desktop/internal/core"
 	"github.com/yjcdon/ferry-drive/desktop/internal/download"
 	"github.com/yjcdon/ferry-drive/desktop/internal/platform"
@@ -370,5 +371,28 @@ func TestTransferRestoreWaitsForSameAccountAndPreservesPause(t *testing.T) {
 	case <-starts:
 		t.Fatal("启动了手动暂停的任务")
 	default:
+	}
+}
+
+func TestTransferWaitsForAccountWhenProviderExpires(t *testing.T) {
+	accounts := NewAccounts(nil, nil)
+	session := transferTestSession(accounts, "owner")
+	queue, err := newTransfers(&transferTestRecords{}, accounts, uploadTestWorker(func(
+		context.Context, core.UploadRequest, core.UploadProviders, func(core.UploadProgress),
+	) (core.UploadResult, error) {
+		return core.UploadResult{}, fmt.Errorf("网盘请求: %w", baidu.ErrLoginExpired)
+	}), nil, TransferConfig{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer queue.Close()
+	target := DirectoryTarget{Ref: Baidu.RootRef(), AccountID: session.ID, session: session}
+	id, err := queue.EnqueueUpload(target, []platform.LocalReference{{Path: filepath.Join(t.TempDir(), "sample")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitTransferState(t, queue, id, TransferWaitingAccount)
+	if got := accounts.Session(Baidu); got.State != Expired || got.ID != session.ID {
+		t.Fatalf("网盘账号没有进入可重新登录的状态: %+v", got)
 	}
 }

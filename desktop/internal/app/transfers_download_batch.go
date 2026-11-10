@@ -100,7 +100,7 @@ func (t *Transfers) runDownloadFiles(parent context.Context, worker *transferWor
 			report(i, item.Size)
 		case ctx.Err() != nil:
 			continue
-		case errors.Is(err, ErrDirectorySessionChanged):
+		case errors.Is(err, ErrDirectorySessionChanged) || isLoginExpired(worker.job.Provider, err):
 			barrierErr = err
 			cancel()
 			continue

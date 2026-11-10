@@ -385,6 +385,10 @@ func (t *Transfers) run(ctx context.Context, worker *transferWorker) {
 		}()
 	}
 
+	if ctx.Err() == nil {
+		t.accounts.ExpireSession(worker.job.Provider, worker.session, err)
+	}
+
 	t.mu.Lock()
 	index := t.find(worker.job.ID)
 	next := t.jobs[index]

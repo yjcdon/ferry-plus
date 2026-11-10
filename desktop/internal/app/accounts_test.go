@@ -133,3 +133,30 @@ func TestAccountPersistencePrecedesPublication(t *testing.T) {
 		t.Fatal("百度的已验证账号应离线恢复，且夸克退出不影响百度")
 	}
 }
+
+func TestExpiryOnlyRetiresMatchingLiveSession(t *testing.T) {
+	accounts := NewAccounts(nil, nil)
+	previous := AccountSession{State: LoggedIn, ID: "owner", Baidu: baidu.New(baidu.Credential{}, nil)}
+	defer previous.Baidu.Revoke()
+	current := AccountSession{State: LoggedIn, ID: "owner", Baidu: baidu.New(baidu.Credential{}, nil)}
+	accounts.slot(Baidu).current.Store(&current)
+	notifications := 0
+	accounts.OnExpired(func(provider Provider) {
+		if provider != Baidu {
+			t.Errorf("通知了不同网盘: %s", provider)
+		}
+		notifications++
+	})
+	if accounts.ExpireSession(Baidu, previous, baidu.ErrLoginExpired) ||
+		accounts.ExpireSession(Baidu, current, context.DeadlineExceeded) {
+		t.Fatal("旧会话或暂时网络故障不能使当前会话失效")
+	}
+	if !accounts.ExpireSession(Baidu, current, baidu.ErrLoginExpired) ||
+		accounts.ExpireSession(Baidu, current, baidu.ErrLoginExpired) {
+		t.Fatal("当前会话应只失效一次")
+	}
+	got := accounts.Session(Baidu)
+	if got.State != Expired || got.ID != current.ID || got.Baidu != nil || notifications != 1 {
+		t.Fatalf("失效后身份、凭据或通知不符: %+v，通知 %d 次", got, notifications)
+	}
+}

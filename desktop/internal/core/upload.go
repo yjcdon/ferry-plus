@@ -281,6 +281,9 @@ func (u *uploadRun) run(ctx context.Context, manifest uploadManifest, name strin
 			u.report(entry, "completed", entry.Size)
 		}
 		result.Items = append(result.Items, item)
+		if errors.Is(err, baidu.ErrLoginExpired) || errors.Is(err, quark.ErrLoginExpired) {
+			return result, err
+		}
 	}
 	if err := ctx.Err(); err != nil {
 		return result, err
