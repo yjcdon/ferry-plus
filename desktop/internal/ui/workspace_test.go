@@ -118,3 +118,18 @@ func TestTransferDetailsShowOnlyCanonicalShareLink(t *testing.T) {
 		t.Fatal("网盘与来源不一致时不提供复制")
 	}
 }
+
+func TestTransferRemovalKeepsTrashScopedToDownloads(t *testing.T) {
+	download := app.TransferJob{ID: "download", State: app.TransferCompleted, Direction: app.TransferDownload,
+		Items: []app.TransferItem{{LocalPath: "/downloads/sample", Complete: true}}}
+	upload := app.TransferJob{ID: "upload", State: app.TransferCompleted, Direction: app.TransferUpload}
+	remove, trash := transferRemovalTargets([]app.TransferJob{download, upload})
+	if len(remove) != 2 || len(trash) != 0 {
+		t.Fatalf("混合选择只应提供移除记录，实际可移除 %d 项，可删除下载文件 %d 项", len(remove), len(trash))
+	}
+	download.RemovalPending = true
+	remove, trash = transferRemovalTargets([]app.TransferJob{download})
+	if len(remove) != 0 || len(trash) != 1 {
+		t.Fatal("部分清理后应只提供重试清理")
+	}
+}

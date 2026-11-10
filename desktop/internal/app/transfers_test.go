@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -48,6 +49,14 @@ type uploadTestWorker func(context.Context, core.UploadRequest, core.UploadProvi
 
 func (run uploadTestWorker) Run(ctx context.Context, req core.UploadRequest, providers core.UploadProviders, progress func(core.UploadProgress)) (core.UploadResult, error) {
 	return run(ctx, req, providers, progress)
+}
+
+func downloadedFixture(req download.Request) (download.Result, error) {
+	path := filepath.Join(req.Folder.Path, req.RelativePath)
+	if err := os.WriteFile(path, make([]byte, req.Size), 0o600); err != nil {
+		return download.Result{}, err
+	}
+	return download.Result{Path: path, Folder: req.Folder}, nil
 }
 
 type downloadTestWorker struct {
@@ -233,7 +242,7 @@ func TestTransferDownloadReceiptBeforeAckAndRetryKeepsSuccess(t *testing.T) {
 			if req.RelativePath == "二.txt" && attempts[req.RelativePath] == 1 {
 				return download.Result{}, errors.New("模拟断网")
 			}
-			return download.Result{Path: filepath.Join(req.Folder.Path, req.RelativePath)}, nil
+			return downloadedFixture(req)
 		},
 		ack: func(id string) error {
 			var rows []transferRecord
@@ -287,7 +296,7 @@ func TestTransferUnverifiedShareKeepsOwnedDirectory(t *testing.T) {
 		if req.ExpectedSHA256 != "" || req.ExpectedMD5 != "" {
 			t.Fatal("未知校验值被当成可信依据")
 		}
-		return download.Result{Path: filepath.Join(req.Folder.Path, req.RelativePath)}, nil
+		return downloadedFixture(req)
 	}}
 	transfers, err := newTransfers(records, accounts, nil, worker, TransferConfig{}, nil)
 	if err != nil {

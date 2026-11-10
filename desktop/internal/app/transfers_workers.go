@@ -292,6 +292,11 @@ func (t *Transfers) downloadOne(ctx context.Context, worker *transferWorker, fol
 		return err
 	}
 	item.LocalPath, item.Verified = result.Path, result.Verified
+	receipt, err := rememberDownloadFile(result.Folder, result.Path, file.Entry.Size)
+	if err != nil {
+		return fmt.Errorf("记录下载文件位置: %w", err)
+	}
+	item.LocalReceipt = receipt
 	return nil
 }
 

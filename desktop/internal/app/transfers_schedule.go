@@ -43,6 +43,9 @@ func (t *Transfers) Resume(id string) error {
 		if job.CancellationRequested {
 			return errors.New("任务已请求取消，请先核对尚未确认的网盘结果。")
 		}
+		if job.RemovalPending {
+			return errors.New("请先完成下载文件清理。")
+		}
 		if !t.hasAccount(job.TransferJob) {
 			return errors.New("请重新登录此任务所属的账号。")
 		}
@@ -68,7 +71,7 @@ func (t *Transfers) Remove(id string) error {
 		return errTransferMissing
 	}
 	job := t.jobs[index]
-	if t.active[id] != nil || t.uploadChecks[id].cancel != nil ||
+	if t.active[id] != nil || t.uploadChecks[id].cancel != nil || t.removingDownloads[id] || job.RemovalPending ||
 		job.State != TransferCompleted && job.State != TransferCanceled && job.State != TransferFailed ||
 		job.CancellationRequested && job.State == TransferFailed {
 		return errors.New("当前任务无法清除记录。")
@@ -84,12 +87,10 @@ func (t *Transfers) Remove(id string) error {
 			return err
 		}
 	}
-	next := slices.Delete(slices.Clone(t.jobs), index, index+1)
-	if err := t.records.Write(transferRecordName, next); err != nil {
+	if err := t.archiveDownload(job); err != nil {
 		return err
 	}
-	t.jobs = next
-	return nil
+	return t.removeRecordLocked(index)
 }
 
 func (t *Transfers) Cancel(id string) error {
@@ -223,6 +224,9 @@ func (t *Transfers) act(id string, apply func(*transferRecord, *transferWorker) 
 	index := t.find(id)
 	if index < 0 {
 		return errTransferMissing
+	}
+	if t.removingDownloads[id] {
+		return errors.New("正在清理下载文件。")
 	}
 	job, worker := t.jobs[index], t.active[id]
 	if t.uploadChecks[id].cancel != nil {

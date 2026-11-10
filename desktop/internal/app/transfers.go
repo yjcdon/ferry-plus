@@ -63,6 +63,7 @@ type TransferJob struct {
 	Done, Total                       int64
 	Items                             []TransferItem
 	CancellationRequested             bool
+	RemovalPending                    bool   `json:",omitempty"`
 	Stopping                          bool   `json:"-"`
 	RebindingPath                     string `json:"-"`
 	BytesPerSecond                    int64  `json:"-"`
@@ -77,11 +78,16 @@ type TransferItem struct {
 	Complete     bool
 	Skipped      bool
 	Verified     bool
-	CanRebind    bool `json:",omitempty"`
+	LocalReceipt downloadLocalReceipt `json:",omitzero"`
+	Trashed      bool                 `json:",omitempty"`
+	CanRebind    bool                 `json:",omitempty"`
 	Error        string
 }
 
 func (j TransferJob) StatusText() string {
+	if j.RemovalPending {
+		return "待完成清理"
+	}
 	switch j.State {
 	case TransferWaitingAccount:
 		return "等待账号"
@@ -157,25 +163,26 @@ type downloadRunner interface {
 }
 
 type Transfers struct {
-	mu            sync.Mutex
-	wg            sync.WaitGroup
-	closed        bool
-	suspended     bool
-	applyProxy    func()
-	records       transferRecords
-	accounts      *Accounts
-	shares        *ShareTransfer
-	upload        uploadRunner
-	download      downloadRunner
-	config        TransferConfig
-	notify        func() // Must enqueue UI work without waiting for the main thread.
-	jobs          []transferRecord
-	active        map[string]*transferWorker
-	uploadChecks  map[string]uploadCheck
-	beginActivity func() (func(), error)
-	downloadRate  *transferRate
-	uploadRate    *transferRate
-	downloadSlots downloadSlots
+	mu                sync.Mutex
+	wg                sync.WaitGroup
+	closed            bool
+	suspended         bool
+	applyProxy        func()
+	records           transferRecords
+	accounts          *Accounts
+	shares            *ShareTransfer
+	upload            uploadRunner
+	download          downloadRunner
+	config            TransferConfig
+	notify            func() // Must enqueue UI work without waiting for the main thread.
+	jobs              []transferRecord
+	active            map[string]*transferWorker
+	uploadChecks      map[string]uploadCheck
+	beginActivity     func() (func(), error)
+	downloadRate      *transferRate
+	uploadRate        *transferRate
+	downloadSlots     downloadSlots
+	removingDownloads map[string]bool
 }
 
 const transferRecordName = "transfers"
@@ -281,6 +288,7 @@ func (t *Transfers) Snapshot() []TransferJob {
 		if binding, ok := t.uploadChecks[job.ID]; ok {
 			job.Stopping, job.RebindingPath = true, binding.relativePath
 		}
+		job.Stopping = job.Stopping || t.removingDownloads[job.ID]
 		result[i] = job
 	}
 	return result

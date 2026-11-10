@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -55,7 +54,7 @@ func TestDownloadBatchSharesConfiguredFilesAndConnections(t *testing.T) {
 		started <- req.ID
 		select {
 		case <-gate:
-			return download.Result{Path: filepath.Join(req.Folder.Path, req.RelativePath)}, nil
+			return downloadedFixture(req)
 		case <-ctx.Done():
 			return download.Result{}, ctx.Err()
 		}
@@ -95,17 +94,16 @@ func TestDownloadBatchPauseRetainsCompletedResultBeforeRestart(t *testing.T) {
 	var secondRuns atomic.Int32
 	runner := downloadBatchRunner(func(ctx context.Context, req download.Request) (download.Result, error) {
 		started <- req.RelativePath
-		result := download.Result{Path: filepath.Join(req.Folder.Path, req.RelativePath)}
 		if req.RelativePath == "批次-0.txt" {
 			<-ctx.Done()
-			return result, nil // The engine had already committed this file.
+			return downloadedFixture(req) // The engine had already committed this file.
 		}
 		if secondRuns.Add(1) == 1 {
 			<-ctx.Done()
 			<-allowExit
 			return download.Result{}, ctx.Err()
 		}
-		return result, nil
+		return downloadedFixture(req)
 	})
 	transfers, err := newTransfers(records, accounts, nil, runner, TransferConfig{DownloadFiles: 2}, nil)
 	if err != nil {

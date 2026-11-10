@@ -55,13 +55,7 @@ func (w *Workspace) transferBatchCommand(command func(string) error, jobs []app.
 
 func (w *Workspace) transferBatchDetails(c *ui.Context, selected []app.TransferJob) {
 	pause, resume := w.transferBatchTargets(selected)
-	var removable []string
-	for _, job := range selected {
-		if !job.Stopping && (job.State == app.TransferCompleted || job.State == app.TransferCanceled ||
-			job.State == app.TransferFailed && !job.CancellationRequested) {
-			removable = append(removable, job.ID)
-		}
-	}
+	remove, trash := transferRemovalTargets(selected)
 	ui.Column(c).Fill().Center().Gap(8).Children(func() {
 		ui.Textf(c, "已选择 %d 个传输任务", len(selected)).TextColor(c.Theme().TextMuted)
 		if len(pause) > 0 && ui.Button(c, "暂停").Clicked() {
@@ -70,8 +64,11 @@ func (w *Workspace) transferBatchDetails(c *ui.Context, selected []app.TransferJ
 		if len(resume) > 0 && ui.Button(c, "继续").Clicked() {
 			w.transferBatchCommand(w.jobs.Resume, resume)
 		}
-		if len(removable) > 0 && ui.Button(c, "移除任务记录").Clicked() {
-			w.transfer.remove, w.transfer.confirmRemove = removable, true
+		if len(remove) > 0 && ui.Button(c, "移除任务记录").Clicked() {
+			w.confirmTransferRemoval(remove, false)
+		}
+		if len(trash) > 0 && ui.Button(c, "移除并删除下载文件").Clicked() {
+			w.confirmTransferRemoval(trash, true)
 		}
 	})
 }

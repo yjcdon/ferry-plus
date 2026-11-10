@@ -2,7 +2,6 @@ package ui
 
 import (
 	"cmp"
-	"fmt"
 	"runtime"
 	"slices"
 	"strings"
@@ -27,7 +26,8 @@ type transferView struct {
 	sourceProblem  string
 	sourceChecking bool
 	location       uploadLocationView
-	remove         []string
+	remove         []app.TransferJob
+	trashDownloads bool
 	confirmRemove  bool
 }
 
@@ -150,6 +150,9 @@ func (w *Workspace) transferRow(c *ui.Context, job app.TransferJob) {
 }
 
 func (w *Workspace) primaryTransferAction(job app.TransferJob) (string, func(string) error) {
+	if job.RemovalPending {
+		return "", nil
+	}
 	switch job.State {
 	case app.TransferRunning, app.TransferQueued, app.TransferWaitingAccount:
 		return "暂停", w.jobs.Pause
@@ -188,10 +191,7 @@ func (w *Workspace) taskMenu(m *ui.Menu, job app.TransferJob) {
 		m.Item("取消上传").Disabled(job.Stopping).Chosen() {
 		w.transferCommand(w.jobs.Cancel, job.ID)
 	}
-	if job.State != app.TransferNeedsCheck && terminalTransfer(job.State) && m.Item("移除任务记录").Chosen() {
-		w.transfer.remove = []string{job.ID}
-		w.transfer.confirmRemove = true
-	}
+	w.transferRemovalMenu(m, job)
 }
 
 func (w *Workspace) locateDuplicate(id string) {
@@ -215,22 +215,6 @@ func (w *Workspace) transferCommand(command func(string) error, id string) {
 			}
 		})
 	}()
-}
-
-func (w *Workspace) transferRemoveDialog(c *ui.Context) {
-	if !w.transfer.confirmRemove {
-		return
-	}
-	ids := w.transfer.remove
-	if ui.AlertDialog(c, &w.transfer.confirmRemove, "移除任务记录？",
-		fmt.Sprintf("将移除 %d 条传输记录。", len(ids)), "取消", "移除") == 1 {
-		for _, id := range ids {
-			w.transferCommand(w.jobs.Remove, id)
-		}
-	}
-	if !w.transfer.confirmRemove {
-		w.transfer.remove = nil
-	}
 }
 
 func (w *Workspace) transferSummary(c *ui.Context, visible []app.TransferJob) {
@@ -315,6 +299,12 @@ func (w *Workspace) transferDetails(c *ui.Context, jobs []app.TransferJob, index
 				}
 			})
 		}
+		if transferCanRemove(job) || transferCanTrash(job) {
+			ui.Toolbar(c, func() {
+				ui.Spacer(c)
+				ui.MenuButton(c, "移除", func(m *ui.Menu) { w.transferRemovalMenu(m, job) })
+			}).Padding(4, 12)
+		}
 	})
 }
 
@@ -345,6 +335,8 @@ func (w *Workspace) transferDetailItem(c *ui.Context, job app.TransferJob, item 
 		ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 			status := cmp.Or(item.Error, "等待传输")
 			switch {
+			case item.Trashed:
+				status = "已移到" + transferTrashName()
 			case item.Error != "":
 			case item.Skipped:
 				status = "已跳过"
@@ -359,7 +351,7 @@ func (w *Workspace) transferDetailItem(c *ui.Context, job app.TransferJob, item 
 				}
 			}
 			ui.Text(c, status).TextColor(c.Theme().TextMuted).Grow(1).SingleLine().Tooltip(status)
-			if item.LocalPath != "" {
+			if item.LocalPath != "" && !item.Trashed {
 				label := "在资源管理器中显示"
 				if runtime.GOOS == "darwin" {
 					label = "在访达中显示"
