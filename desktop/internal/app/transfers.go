@@ -58,6 +58,7 @@ type TransferJob struct {
 	State                             TransferState
 	Stage, Error, Warning             string
 	ShareURL                          string
+	DuplicateOf                       string `json:",omitempty"`
 	CreatedAt                         time.Time
 	Done, Total                       int64
 	Items                             []TransferItem
@@ -131,9 +132,11 @@ type savedDownload struct {
 
 type transferRecord struct {
 	TransferJob
-	Upload   *core.UploadRequest
-	Download *savedDownload
-	Priority int64
+	Upload              *core.UploadRequest
+	Download            *savedDownload
+	Priority            int64
+	UploadSignature     string   `json:",omitempty"`
+	DuplicateCandidates []string `json:",omitempty"`
 }
 
 type transferRecords interface {
@@ -258,7 +261,7 @@ func (t *Transfers) Snapshot() []TransferJob {
 		job.Items = slices.Clone(job.Items)
 		worker := t.active[job.ID]
 		if worker != nil {
-			job.Stopping = worker.stop != ""
+			job.Stopping = worker.stop != "" || job.DuplicateOf != ""
 			job.BytesPerSecond = worker.speed
 			job.Done, job.Total = worker.done, worker.total
 		} else if job.State == TransferQueued && !t.hasAccount(job) {
@@ -391,6 +394,13 @@ func (t *Transfers) enqueue(session AccountSession, job transferRecord) (string,
 	current := t.accounts.Session(job.Provider)
 	if current.State != LoggedIn || current.ID == "" || !sameDirectorySession(session, current) {
 		return "", ErrDirectorySessionChanged
+	}
+	if job.Upload != nil {
+		for _, candidate := range t.jobs {
+			if matchingUploadTarget(candidate, job) && eligibleDuplicate(candidate, false) {
+				job.DuplicateCandidates = append(job.DuplicateCandidates, candidate.ID)
+			}
+		}
 	}
 	next := append([]transferRecord{job}, t.jobs...)
 	if err := t.records.Write(transferRecordName, next); err != nil {

@@ -115,19 +115,23 @@ func (w *Workspace) TransfersChanged() {
 
 // ShowTransfer brings the exact notification task into the visible list.
 func (w *Workspace) ShowTransfer(id string) {
-	w.window.Update(func() {
-		if w.quitting {
-			return
+	w.window.Update(func() { w.selectTransfer(id) })
+}
+
+func (w *Workspace) selectTransfer(id string) bool {
+	if w.quitting || w.jobs == nil {
+		return false
+	}
+	for _, job := range w.jobs.Snapshot() {
+		if job.ID == id {
+			w.preferences.Page, w.allProviders = all, true
+			w.transferSearch, w.transfer.direction = "", "全部"
+			w.transfer.selection.Clear()
+			w.transfer.selection.Add(id)
+			w.transfer.scrollToID = id
+			w.preferences.DetailsOpen = true
+			return true
 		}
-		for _, job := range w.jobs.Snapshot() {
-			if job.ID == id {
-				w.preferences.Page, w.allProviders = all, true
-				w.transferSearch, w.transfer.direction = "", "全部"
-				w.transfer.selection.Clear()
-				w.transfer.selection.Add(id)
-				w.preferences.DetailsOpen = true
-				return
-			}
-		}
-	})
+	}
+	return false
 }

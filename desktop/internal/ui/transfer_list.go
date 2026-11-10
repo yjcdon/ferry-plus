@@ -20,6 +20,7 @@ type transferView struct {
 	selection     ui.Selection[string]
 	focus         int
 	detailID      string
+	scrollToID    string
 	page          int
 	problem       string
 	remove        []string
@@ -95,6 +96,12 @@ func (w *Workspace) transferRows(c *ui.Context, jobs []app.TransferJob, index in
 		return
 	}
 
+	if state.scrollToID != "" {
+		if row := slices.IndexFunc(visible, func(job app.TransferJob) bool { return job.ID == state.scrollToID }); row >= 0 {
+			state.list.ScrollIntoView(row)
+			state.focus, state.scrollToID = row, ""
+		}
+	}
 	state.list.Key = func(i int) any { return visible[i].ID }
 	state.list.Label = func(i int) string { return visible[i].Title }
 	list := ui.List(c, &state.list, len(visible), func(i int) {
@@ -116,6 +123,9 @@ func (w *Workspace) transferRow(c *ui.Context, job app.TransferJob) {
 			ui.Text(c, job.Title).Bold().SingleLine().Tooltip(job.Title)
 			ui.Text(c, providerTitle(string(job.Provider))+" · "+job.StatusText()).
 				TextColor(c.Theme().TextMuted).SingleLine()
+			if job.DuplicateOf != "" {
+				ui.Text(c, "已有相同内容的上传").TextColor(c.Theme().TextMuted)
+			}
 			if job.Total > 0 {
 				ui.Progress(c, min(1, float64(job.Done)/float64(job.Total))).
 					Label("传输进度").FillWidth()
@@ -123,6 +133,9 @@ func (w *Workspace) transferRow(c *ui.Context, job app.TransferJob) {
 		})
 		if job.BytesPerSecond > 0 {
 			ui.Text(c, fileSize(job.BytesPerSecond)+"/s").SingleLine()
+		}
+		if job.DuplicateOf != "" && ui.Button(c, "查看原任务").Clicked() {
+			w.locateDuplicate(job.DuplicateOf)
 		}
 		label, command := w.primaryTransferAction(job)
 		if command != nil && ui.Button(c, label).Disabled(job.Stopping).Clicked() {
@@ -137,6 +150,9 @@ func (w *Workspace) primaryTransferAction(job app.TransferJob) (string, func(str
 	case app.TransferRunning, app.TransferQueued, app.TransferWaitingAccount:
 		return "暂停", w.jobs.Pause
 	case app.TransferPaused:
+		if job.DuplicateOf != "" {
+			return "仍然上传", w.jobs.Resume
+		}
 		return "继续", w.jobs.Resume
 	case app.TransferFailed, app.TransferNeedsCheck:
 		if !job.CancellationRequested {
@@ -149,6 +165,9 @@ func (w *Workspace) primaryTransferAction(job app.TransferJob) (string, func(str
 }
 
 func (w *Workspace) taskMenu(m *ui.Menu, job app.TransferJob) {
+	if job.DuplicateOf != "" && m.Item("查看原任务").Chosen() {
+		w.locateDuplicate(job.DuplicateOf)
+	}
 	if label, command := w.primaryTransferAction(job); command != nil && m.Item(label).Disabled(job.Stopping).Chosen() {
 		w.transferCommand(command, job.ID)
 	}
@@ -163,6 +182,13 @@ func (w *Workspace) taskMenu(m *ui.Menu, job app.TransferJob) {
 	if job.State != app.TransferNeedsCheck && terminalTransfer(job.State) && m.Item("移除任务记录").Chosen() {
 		w.transfer.remove = []string{job.ID}
 		w.transfer.confirmRemove = true
+	}
+}
+
+func (w *Workspace) locateDuplicate(id string) {
+	w.transfer.problem = ""
+	if !w.selectTransfer(id) {
+		w.transfer.problem = "原上传任务已移除。可选择仍然上传。"
 	}
 }
 

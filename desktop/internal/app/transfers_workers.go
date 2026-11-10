@@ -24,6 +24,9 @@ func (t *Transfers) runUpload(ctx context.Context, worker *transferWorker) ([]Tr
 	req.ParallelParts = worker.config.UploadParts
 	req.BytesPerSecond = worker.config.UploadBytesPerSecond
 	req.ReadbackBytesPerSecond = 0 // The content client shares one download budget.
+	req.BeforeRemote = func(signature string, canPause bool) error {
+		return t.checkUploadDuplicate(ctx, worker, signature, canPause)
+	}
 	providers := core.UploadProviders{Baidu: worker.session.Baidu, Quark: worker.session.Quark, AccountID: worker.session.ID}
 	progress := make(map[string]core.UploadProgress, len(worker.job.Items))
 	var done, total int64

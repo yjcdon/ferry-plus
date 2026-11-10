@@ -46,7 +46,7 @@ func (t *Transfers) Resume(id string) error {
 		if !t.hasAccount(job.TransferJob) {
 			return errors.New("请重新登录此任务所属的账号。")
 		}
-		job.State, job.Stage, job.Error = TransferQueued, "", ""
+		job.State, job.Stage, job.Error, job.DuplicateOf = TransferQueued, "", "", ""
 		return nil
 	}, "")
 }
@@ -92,6 +92,7 @@ func (t *Transfers) Cancel(id string) error {
 		}
 		job.State = TransferCanceled
 		job.CancellationRequested = true
+		job.DuplicateOf = ""
 		if job.Stage == "committing" {
 			job.State = TransferNeedsCheck
 			job.Error = core.ErrUploadUnconfirmed.Error()
@@ -338,6 +339,9 @@ func (t *Transfers) run(ctx context.Context, worker *transferWorker) {
 	case worker.stop == "cancel" && errors.Is(err, core.ErrUploadUnconfirmed):
 		next.State, next.Error = TransferNeedsCheck, err.Error()
 	case worker.stop == "cancel":
+	case errors.Is(err, errDuplicateUpload):
+		// The decision is already durable. A fast confirmation may have
+		// queued the task again while this worker was releasing its claim.
 	case err == nil:
 		next.State, next.Error = TransferCompleted, ""
 	case worker.stop == "pause":
