@@ -2,9 +2,13 @@
   "name": "Ferry Drive",
   "identifier": "io.github.yjcdon.FerryDrive",
   "version": "5.0.0",
+  "icon": "../BaiduPCS-Swift/Assets.xcassets/AppIcon.appiconset/icon_1024.png",
   "out": "../.build/ferry-drive",
   "macos": {
     "minimumSystemVersion": "14.0",
     "entitlements": "../BaiduPCS-Swift/BaiduPCS-Swift.entitlements"
+  },
+  "windows": {
+    "installerInclude": "installer/webview2.nsh"
   }
 }
