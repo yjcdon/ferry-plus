@@ -267,8 +267,8 @@ func (w *Workspace) transferDetails(c *ui.Context, jobs []app.TransferJob, index
 		}
 	}
 	if len(selected) == 0 {
-		ui.Column(c).Fill().Center().Children(func() {
-			ui.Text(c, "选择任务查看详情").TextColor(c.Theme().TextMuted)
+		ui.Column(c).Fill().Center().Gap(8).Children(func() {
+			workspaceEmptyLabel(c, "选择任务查看详情", detailsIcon)
 		})
 		return
 	}

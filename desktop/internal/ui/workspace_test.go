@@ -7,6 +7,7 @@ import (
 	"github.com/egoist/mygo/ui"
 
 	"github.com/yjcdon/ferry-drive/desktop/internal/app"
+	"github.com/yjcdon/ferry-drive/desktop/internal/store"
 )
 
 func TestWorkspaceNavigation(t *testing.T) {
@@ -131,5 +132,37 @@ func TestTransferRemovalKeepsTrashScopedToDownloads(t *testing.T) {
 	remove, trash = transferRemovalTargets([]app.TransferJob{download})
 	if len(remove) != 0 || len(trash) != 1 {
 		t.Fatal("部分清理后应只提供重试清理")
+	}
+}
+
+func TestEmptyTransfersOfferLoginForCurrentScope(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("AppData", home)
+	data, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer data.Close()
+	workspace := NewWorkspace(Preferences{RecentProvider: quarkPage})
+	workspace.accounts = app.NewAccounts(data, nil)
+	workspace.jobs, err = app.NewTransfers(data, workspace.accounts, nil, app.TransferConfig{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer workspace.jobs.Close()
+	window := ui.NewTester(func(c *ui.Context) { workspace.transferLanding(c, 1) }, 440, 300)
+	if !window.HasText("登录夸克网盘") || window.HasText("登录百度网盘") {
+		t.Fatalf("单网盘范围应只显示该网盘登录，实际 %q", window.Texts())
+	}
+	workspace.allProviders = true
+	window.Frame()
+	if !window.HasText("登录百度网盘") || !window.HasText("登录夸克网盘") {
+		t.Fatalf("查看全部应显示两家登录，实际 %q", window.Texts())
+	}
+	workspace.transferSearch = "样本"
+	window.Frame()
+	if !window.HasText("试试其他关键词") || window.HasText("登录夸克网盘") {
+		t.Fatalf("搜索空结果应保留搜索反馈，实际 %q", window.Texts())
 	}
 }

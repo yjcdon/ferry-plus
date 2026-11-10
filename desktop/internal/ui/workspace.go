@@ -59,6 +59,7 @@ var (
 	pauseIcon   = workspaceIcon("M9 5v14 M15 5v14")
 	resumeIcon  = workspaceIcon("M8 5l11 7-11 7z")
 	backIcon    = workspaceIcon("M14 6l-6 6 6 6")
+	searchIcon  = workspaceIcon("M16 10a6 6 0 1 1-12 0 6 6 0 1 1 12 0z M14.5 14.5l5 5")
 	accountIcon = ui.MustParseSVG([]byte(`<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="9" r="3.5" fill="currentColor"/><path d="M5 19c1-3 3.5-4.5 7-4.5s6 1.5 7 4.5a10 10 0 0 1-14 0z" fill="currentColor"/></svg>`))
 )
 
@@ -436,16 +437,42 @@ func (w *Workspace) fileLanding(c *ui.Context, title string, width float32) {
 }
 
 func (w *Workspace) transferLanding(c *ui.Context, index int) {
-	title := transferPages[index].empty
-	if strings.TrimSpace(w.transferSearch) != "" {
-		title = "试试其他关键词"
+	title, icon := transferPages[index].empty, transferPages[index].icon
+	searching := strings.TrimSpace(w.transferSearch) != ""
+	logins := []app.Provider(nil)
+	if searching {
+		title, icon = "试试其他关键词", searchIcon
+	} else if w.accounts != nil && w.jobs != nil && len(w.jobs.Snapshot()) == 0 {
+		baidu := w.accounts.Session(app.Baidu)
+		quark := w.accounts.Session(app.Quark)
+		if baidu.State != app.LoggedIn && baidu.State != app.Checking &&
+			quark.State != app.LoggedIn && quark.State != app.Checking {
+			title, icon = transferPages[0].empty, transferPages[0].icon
+			logins = []app.Provider{app.Baidu, app.Quark}
+			if !w.allProviders {
+				logins = []app.Provider{app.Provider(w.preferences.RecentProvider)}
+			}
+		}
 	}
 	ui.Column(c).Grow(1).FillWidth().Center().Gap(8).Children(func() {
-		ui.Text(c, title).TextColor(c.Theme().TextMuted)
-		if w.jobs != nil && index == 0 && w.transferSearch == "" && ui.Button(c, "添加链接").Clicked() {
+		workspaceEmptyLabel(c, title, icon)
+		if len(logins) != 0 {
+			ui.Row(c).Gap(8).Children(func() {
+				for _, provider := range logins {
+					if ui.Button(c, "登录"+providerTitle(string(provider))).Clicked() {
+						w.showLogin(provider)
+					}
+				}
+			})
+		} else if w.jobs != nil && index == 0 && !searching && ui.Button(c, "添加链接").Clicked() {
 			w.showShare()
 		}
 	})
+}
+
+func workspaceEmptyLabel(c *ui.Context, title string, icon *ui.SVG) {
+	ui.Icon(c, icon).FontSize(38).TextColor(c.Theme().TextMuted).AccessHidden(true)
+	ui.Text(c, title).FontSize(15).Bold().TextColor(c.Theme().TextMuted)
 }
 
 func (w *Workspace) toggleSidebar() {
