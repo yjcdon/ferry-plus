@@ -1,0 +1,9 @@
+{
+  "name": "Ferry Drive",
+  "identifier": "io.github.yjcdon.FerryDrive",
+  "version": "5.0.0",
+  "out": "../.build/ferry-drive",
+  "macos": {
+    "minimumSystemVersion": "14.0"
+  }
+}
