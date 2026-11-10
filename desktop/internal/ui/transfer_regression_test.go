@@ -123,3 +123,20 @@ func TestBatchContextMenuKeepsUnselectedAndDuplicateTasksSeparate(t *testing.T) 
 		t.Fatalf("batch menu must not approve a duplicate upload: %v", window.Menu())
 	}
 }
+
+func TestBatchPriorityOnlyOffersQueuedUploads(t *testing.T) {
+	workspace := NewWorkspace(Preferences{})
+	selected := []app.TransferJob{
+		{ID: "upload", Direction: app.TransferUpload, State: app.TransferQueued},
+		{ID: "running", Direction: app.TransferUpload, State: app.TransferRunning},
+		{ID: "download", Direction: app.TransferDownload, State: app.TransferQueued},
+		{ID: "waiting", Direction: app.TransferUpload, State: app.TransferWaitingAccount},
+	}
+	if got := prioritizedUploads(selected); len(got) != 1 || got[0].ID != "upload" {
+		t.Fatalf("批量优先上传范围错误: %v", got)
+	}
+	window := ui.NewTester(func(c *ui.Context) { workspace.transferBatchDetails(c, selected) }, 320, 240)
+	if !window.HasText("优先上传") {
+		t.Fatal("选中排队上传时应显示优先上传")
+	}
+}

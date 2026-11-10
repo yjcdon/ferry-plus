@@ -52,6 +52,16 @@ func transferRetryTargets(jobs []app.TransferJob) []app.TransferJob {
 	return retry
 }
 
+func prioritizedUploads(jobs []app.TransferJob) []app.TransferJob {
+	var queued []app.TransferJob
+	for _, job := range jobs {
+		if job.Direction == app.TransferUpload && job.State == app.TransferQueued && !job.Stopping {
+			queued = append(queued, job)
+		}
+	}
+	return queued
+}
+
 func (w *Workspace) transferBatchCommand(command func(string) error, jobs []app.TransferJob) {
 	w.transfer.problem = ""
 	go func() {
@@ -68,6 +78,7 @@ func (w *Workspace) transferBatchCommand(command func(string) error, jobs []app.
 func (w *Workspace) transferBatchDetails(c *ui.Context, selected []app.TransferJob) {
 	pause, resume := w.transferBatchTargets(selected)
 	retry := transferRetryTargets(selected)
+	priority := prioritizedUploads(selected)
 	remove, trash := transferRemovalTargets(selected)
 	ui.Column(c).Fill().Center().Gap(8).Children(func() {
 		ui.Textf(c, "已选择 %d 个传输任务", len(selected)).TextColor(c.Theme().TextMuted)
@@ -79,6 +90,9 @@ func (w *Workspace) transferBatchDetails(c *ui.Context, selected []app.TransferJ
 		}
 		if len(retry) > 0 && ui.Button(c, "重试失败项").Clicked() {
 			w.transferBatchCommand(w.jobs.RetryFailed, retry)
+		}
+		if len(priority) > 0 && ui.Button(c, "优先上传").Clicked() {
+			w.transferBatchCommand(w.jobs.Prioritize, priority)
 		}
 		if len(remove) > 0 && ui.Button(c, "移除任务记录").Clicked() {
 			w.confirmTransferRemoval(remove, false)
@@ -105,6 +119,7 @@ func (w *Workspace) taskSelectionMenu(m *ui.Menu, clicked app.TransferJob, visib
 	}
 	pause, resume := w.transferBatchTargets(selected)
 	retry := transferRetryTargets(selected)
+	priority := prioritizedUploads(selected)
 	remove, trash := transferRemovalTargets(selected)
 	if len(pause) > 0 && m.Item("暂停").Chosen() {
 		w.transferBatchCommand(w.jobs.Pause, pause)
@@ -114,6 +129,9 @@ func (w *Workspace) taskSelectionMenu(m *ui.Menu, clicked app.TransferJob, visib
 	}
 	if len(retry) > 0 && m.Item("重试失败项").Chosen() {
 		w.transferBatchCommand(w.jobs.RetryFailed, retry)
+	}
+	if len(priority) > 0 && m.Item("优先上传").Chosen() {
+		w.transferBatchCommand(w.jobs.Prioritize, priority)
 	}
 	if len(remove) > 0 && m.Item("移除任务记录").Chosen() {
 		w.confirmTransferRemoval(remove, false)
