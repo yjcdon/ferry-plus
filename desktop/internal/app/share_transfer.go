@@ -704,7 +704,13 @@ func collectShareDownload(ctx context.Context, session AccountSession, root Remo
 				return nil, fmt.Errorf("%w 文件：%s", ErrShareTransferUnconfirmed, relative)
 			}
 			item.MD5 = want.MD5
-			result = append(result, DownloadTaskItem{Entry: item, RelativePath: relative})
+			download := DownloadTaskItem{Entry: item, RelativePath: relative}
+			if root.Provider == Quark {
+				// Quark supplies the original content MD5; Baidu metadata may
+				// contain an obfuscated digest and is not a content expectation.
+				download.ExpectedMD5 = shareMD5(want.MD5)
+			}
+			result = append(result, download)
 			delete(expected, relative)
 		}
 	}

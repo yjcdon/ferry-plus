@@ -8,10 +8,14 @@ import (
 
 	"io/fs"
 	"net/http"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/yjcdon/ferry-drive/desktop/internal/download"
+	"github.com/yjcdon/ferry-drive/desktop/internal/platform"
 	"github.com/yjcdon/ferry-drive/desktop/internal/quark"
 )
 
@@ -225,7 +229,7 @@ func TestShareTransferResumesExistingReceiptAndConfinesCleanup(t *testing.T) {
 		t.Fatalf("resumed=%+v err=%v opened=%d submitted=%d checked=%d", result, err, opened, submitted, checked)
 	}
 	item := result.Items[0]
-	if item.Entry.Ref.ID != "saved-file" || item.RelativePath != "目录/样本.txt" || item.Entry.MD5 != sourceMD5 {
+	if item.Entry.Ref.ID != "saved-file" || item.RelativePath != "目录/样本.txt" || item.Entry.MD5 != sourceMD5 || item.ExpectedMD5 != sourceMD5 {
 		t.Fatalf("download identity and original digest were not preserved: %+v", item)
 	}
 	wrongRoot = true
@@ -233,8 +237,29 @@ func TestShareTransferResumesExistingReceiptAndConfinesCleanup(t *testing.T) {
 		t.Fatalf("cleanup accepted same-named unrelated directory: %v, removed=%d", err, removed)
 	}
 	wrongRoot = false
-	if err := result.Cleanup.Cleanup(ctx, session); err != nil || removed != 1 {
-		t.Fatalf("exact cleanup failed: %v, removed=%d", err, removed)
+	worker := downloadTestWorker{run: func(req download.Request) (download.Result, error) {
+		if req.ExpectedMD5 != sourceMD5 || req.ExpectedSHA256 != "" {
+			return download.Result{}, fmt.Errorf("download lost original digest: %+v", req)
+		}
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(req.Folder.Path, req.RelativePath)), 0o700); err != nil {
+			return download.Result{}, err
+		}
+		file, err := downloadedFixture(req)
+		file.Verified = true
+		return file, err
+	}}
+	transfers, err := newTransfers(records, accounts, nil, worker, TransferConfig{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer transfers.Close()
+	id, err := transfers.EnqueuePreparedDownload(Quark, session, result.Title, result.Items, platform.LocalReference{Path: t.TempDir()}, &result.Cleanup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := waitTransferState(t, transfers, id, TransferCompleted)
+	if job.Warning != "" || !job.Items[0].Verified || removed != 1 {
+		t.Fatalf("verified share did not clean its exact staging directory: %+v, removed=%d", job, removed)
 	}
 }
 
