@@ -294,6 +294,7 @@ func (w *Workspace) transferDetails(c *ui.Context, jobs []app.TransferJob, index
 			if job.Warning != "" {
 				ui.Text(c, job.Warning).TextColor(c.Theme().TextMuted)
 			}
+			w.transferShareSource(c, job)
 		})
 		ui.Divider(c)
 		ui.Scroll(c).Grow(1).Children(func() {
@@ -312,6 +313,25 @@ func (w *Workspace) transferDetails(c *ui.Context, jobs []app.TransferJob, index
 					state.page++
 				}
 			})
+		}
+	})
+}
+
+func (w *Workspace) transferShareSource(c *ui.Context, job app.TransferJob) {
+	if job.Direction != app.TransferDownload || job.ShareURL == "" {
+		return
+	}
+	source, err := app.ParseShareInput(job.ShareURL, "")
+	if err != nil || source.Provider != job.Provider {
+		return
+	}
+	ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
+		ui.Column(c).Grow(1).MinWidth(0).Children(func() {
+			ui.Text(c, "分享链接").TextColor(c.Theme().TextMuted)
+			ui.Text(c, source.URL).SingleLine().Tooltip(source.URL)
+		})
+		if ui.Button(c, "复制链接").Clicked() {
+			go mygo.Clipboard.WriteText(source.URL)
 		}
 	})
 }

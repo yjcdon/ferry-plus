@@ -96,3 +96,25 @@ func TestBatchTransferTargetsFollowVisibleScope(t *testing.T) {
 		t.Fatalf("多选详情缺少可用操作，界面为 %q", window.Texts())
 	}
 }
+
+func TestTransferDetailsShowOnlyCanonicalShareLink(t *testing.T) {
+	workspace := NewWorkspace(Preferences{})
+	job := app.TransferJob{Direction: app.TransferDownload, Provider: app.Quark,
+		ShareURL: "https://pan.quark.cn/s/abcdef123456?pwd=1234"}
+	window := ui.NewTester(func(c *ui.Context) {
+		workspace.transferShareSource(c, job)
+	}, 320, 100)
+	if !window.HasText("https://pan.quark.cn/s/abcdef123456") || !window.HasText("复制链接") {
+		t.Fatalf("详情缺少可复制的分享来源，界面为 %q", window.Texts())
+	}
+	for _, label := range window.Texts() {
+		if label == job.ShareURL {
+			t.Fatal("详情显示了包含提取码的原始链接")
+		}
+	}
+	job.Provider = app.Baidu
+	window.Frame()
+	if window.HasText("复制链接") {
+		t.Fatal("网盘与来源不一致时不提供复制")
+	}
+}
