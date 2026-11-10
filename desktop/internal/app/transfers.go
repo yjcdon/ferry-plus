@@ -150,18 +150,20 @@ type downloadRunner interface {
 }
 
 type Transfers struct {
-	mu       sync.Mutex
-	wg       sync.WaitGroup
-	closed   bool
-	records  transferRecords
-	accounts *Accounts
-	shares   *ShareTransfer
-	upload   uploadRunner
-	download downloadRunner
-	config   TransferConfig
-	notify   func() // Must enqueue UI work without waiting for the main thread.
-	jobs     []transferRecord
-	active   map[string]*transferWorker
+	mu            sync.Mutex
+	wg            sync.WaitGroup
+	closed        bool
+	suspended     bool
+	records       transferRecords
+	accounts      *Accounts
+	shares        *ShareTransfer
+	upload        uploadRunner
+	download      downloadRunner
+	config        TransferConfig
+	notify        func() // Must enqueue UI work without waiting for the main thread.
+	jobs          []transferRecord
+	active        map[string]*transferWorker
+	beginActivity func() (func(), error)
 }
 
 const transferRecordName = "transfers"
@@ -169,7 +171,12 @@ const transferRecordName = "transfers"
 var errTransferMissing = errors.New("找不到传输任务")
 
 func NewTransfers(data *store.Store, accounts *Accounts, client *http.Client, config TransferConfig, notify func()) (*Transfers, error) {
-	return newTransfers(data, accounts, core.NewUploader(data, client), download.New(data, client), config, notify)
+	t, err := newTransfers(data, accounts, core.NewUploader(data, client), download.New(data, client), config, notify)
+	if err != nil {
+		return nil, err
+	}
+	t.beginActivity = platform.BeginTransferActivity
+	return t, nil
 }
 
 func newTransfers(data transferRecords, accounts *Accounts, upload uploadRunner, download downloadRunner, config TransferConfig, notify func()) (*Transfers, error) {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log"
 	"slices"
 	"time"
 
@@ -125,6 +126,30 @@ func (t *Transfers) AccountsChanged() {
 	t.changed()
 }
 
+// Suspend stops scheduling and lets current workers save their checkpoints.
+// System sleep leaves manual pause and cancellation intent intact.
+func (t *Transfers) Suspend() {
+	t.mu.Lock()
+	t.suspended = true
+	for _, worker := range t.active {
+		if worker.stop == "" {
+			worker.stop = "suspend"
+			worker.cancel()
+		}
+	}
+	t.mu.Unlock()
+	t.changed()
+}
+
+// Wake restarts eligible work only after each earlier worker has exited.
+func (t *Transfers) Wake() {
+	t.mu.Lock()
+	t.suspended = false
+	t.scheduleLocked()
+	t.mu.Unlock()
+	t.changed()
+}
+
 // Close stops new work and waits for every active worker to save its receipts.
 func (t *Transfers) Close() {
 	t.mu.Lock()
@@ -187,7 +212,7 @@ func (t *Transfers) replaceLocked(index int, next transferRecord) error {
 }
 
 func (t *Transfers) scheduleLocked() {
-	if t.closed {
+	if t.closed || t.suspended {
 		return
 	}
 	running := map[TransferDirection]int{}
@@ -274,13 +299,26 @@ func (t *Transfers) run(ctx context.Context, worker *transferWorker) {
 	defer worker.cancel()
 	var items []TransferItem
 	var warning string
-	err := t.checkAccount(worker)
+	err := ctx.Err()
 	if err == nil {
-		if worker.job.Direction == TransferUpload {
-			items, err = t.runUpload(ctx, worker)
-		} else {
-			warning, err = t.runDownload(ctx, worker)
-		}
+		err = t.checkAccount(worker)
+	}
+	if err == nil {
+		func() {
+			if t.beginActivity != nil {
+				release, activityErr := t.beginActivity()
+				if activityErr != nil {
+					log.Printf("保持传输期间唤醒: %v", activityErr)
+				} else {
+					defer release()
+				}
+			}
+			if worker.job.Direction == TransferUpload {
+				items, err = t.runUpload(ctx, worker)
+			} else {
+				warning, err = t.runDownload(ctx, worker)
+			}
+		}()
 	}
 
 	t.mu.Lock()
@@ -304,7 +342,8 @@ func (t *Transfers) run(ctx context.Context, worker *transferWorker) {
 		next.State, next.Error = TransferCompleted, ""
 	case worker.stop == "pause":
 		// The state may already be queued if the user clicked Continue.
-	case worker.stop == "account" || worker.stop == "close" || errors.Is(err, ErrDirectorySessionChanged) || t.checkAccount(worker) != nil:
+	case worker.stop == "account" || worker.stop == "close" || worker.stop == "suspend" ||
+		errors.Is(err, ErrDirectorySessionChanged) || t.checkAccount(worker) != nil:
 		next.State, next.Error = TransferQueued, ""
 	case errors.Is(err, core.ErrUploadUnconfirmed), errors.Is(err, ErrShareTransferUnconfirmed):
 		next.State, next.Error = TransferNeedsCheck, err.Error()
