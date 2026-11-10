@@ -234,6 +234,7 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 	beforeSort := f.sort
 	beforeOpen := captureExpanded(f)
 	rows := makeDirectoryRows(entries)
+	var dropRows []directoryDropRow
 	table := ui.OutlineTable(c, &f.outline, fileColumns, rows, f.children, func(row directoryRow, column int) {
 		if row.status {
 			if column == 0 {
@@ -252,7 +253,7 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 				w.directoryNameCell(c, f, entry)
 			})
 			if entry.IsDirectory {
-				w.directoryDrop(content, f, row.ref)
+				dropRows = append(dropRows, directoryDropRow{row.ref, directoryDropRowBounds(c, content)})
 			}
 		case 1:
 			text := "—"
@@ -269,7 +270,7 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 		}
 	}).Grow(1).MinHeight(0).Dividers(1, c.Theme().Border).
 		ContextMenu(func(m *ui.Menu) { w.directoryBackgroundMenu(f, m) })
-	w.directoryDrop(table, f, d.Root())
+	w.directoryDrop(table, f, directoryTableDropTarget(c, table, dropRows, d.Root()))
 
 	w.preferences.ColumnWidths = f.outline.List.Columns.Widths
 	if f.sort != beforeSort {
