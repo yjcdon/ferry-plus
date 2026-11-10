@@ -1,8 +1,14 @@
-# Ferry Plus 设计文档
+# Ferry Drive 设计文档
 
-Ferry Plus 是原生 SwiftUI 双网盘传输应用，仅支持 Apple Silicon Mac。3.0 提供百度、夸克上传、下载、完整内容校验与网盘文件管理。
+4.x 及更早版本使用 Ferry Plus 名称。Ferry Plus 是面向 Apple Silicon Mac 的原生 SwiftUI 双网盘应用，3.0 提供百度、夸克上传、下载、完整内容校验与网盘文件管理。
 
 [本机构建](build.md) · [更新记录](../CHANGELOG.md)
+
+## Ferry Drive 5.0 MyGo 原生 UI 跨平台迁移（方案）
+
+以当前 4.2.0 功能、界面和交互为基准，迁移为一套 MyGo 原生 UI 与 Go 业务核心，支持 macOS 与 Windows。网盘登录沿用当前流程，按全新安装交付。
+
+[产品方案](v5.0/product-proposal.md) · [技术方案](v5.0/architecture.md) · [任务清单](v5.0/tasks.md) · [测试用例](v5.0/test-cases.md)
 
 ## 4.2.0 应用内更新（方案）
 
