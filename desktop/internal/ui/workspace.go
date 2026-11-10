@@ -2,21 +2,24 @@
 package ui
 
 import (
+	"context"
 	"strings"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+
+	"github.com/yjcdon/ferry-drive/desktop/internal/app"
 )
 
 const (
-	baidu = "baidu"
-	quark = "quark"
-	all   = "transfers.all"
+	baiduPage = string(app.Baidu)
+	quarkPage = string(app.Quark)
+	all       = "transfers.all"
 )
 
 var providers = []struct{ id, title string }{
-	{baidu, "百度网盘"},
-	{quark, "夸克网盘"},
+	{baiduPage, "百度网盘"},
+	{quarkPage, "夸克网盘"},
 }
 
 var transferPages = []struct{ id, title, empty string }{
@@ -43,12 +46,19 @@ type Workspace struct {
 	lastTransfer   string
 	transferSearch string
 	focusSearch    bool
+	window         *mygo.Window
+	accounts       *app.Accounts
+	loginWindows   map[app.Provider]*mygo.Window
+	ctx            context.Context
+	logoutProvider app.Provider
+	confirmLogout  bool
+	accountProblem map[app.Provider]string
 }
 
 // NewWorkspace restores known pages and supplies the initial split sizes.
 func NewWorkspace(p Preferences) *Workspace {
 	if providerTitle(p.RecentProvider) == "" {
-		p.RecentProvider = baidu
+		p.RecentProvider = baiduPage
 	}
 	if providerTitle(p.Page) == "" && transferIndex(p.Page) < 0 {
 		p.Page = p.RecentProvider
@@ -71,6 +81,13 @@ func NewWorkspace(p Preferences) *Workspace {
 
 // Preferences returns the state to save when the workspace closes.
 func (w *Workspace) Preferences() Preferences { return w.preferences }
+
+// AttachAccounts enables login and account actions in the main window.
+func (w *Workspace) AttachAccounts(ctx context.Context, window *mygo.Window, accounts *app.Accounts) {
+	w.window, w.accounts, w.ctx = window, accounts, ctx
+	w.loginWindows = make(map[app.Provider]*mygo.Window)
+	w.accountProblem = make(map[app.Provider]string)
+}
 
 // Menu connects the native menu and platform shortcuts to workspace commands.
 func (w *Workspace) Menu(window *mygo.Window) *mygo.Menu {
@@ -113,6 +130,11 @@ func (w *Workspace) View(c *ui.Context) {
 			w.preferences.SidebarWidth = min(max(w.preferences.SidebarWidth, 180), 300)
 		}
 	})
+	if w.confirmLogout && ui.AlertDialog(c, &w.confirmLogout,
+		"退出"+providerTitle(string(w.logoutProvider))+"？",
+		"退出后可以重新登录以继续使用该账号。", "取消", "退出登录") == 1 {
+		w.logout(w.logoutProvider)
+	}
 }
 
 func (w *Workspace) sidebar(c *ui.Context) {
@@ -139,6 +161,10 @@ func (w *Workspace) sidebar(c *ui.Context) {
 				}
 			})
 		}).Grow(1).Background(c.Theme().Background)
+		if w.accounts != nil {
+			ui.Divider(c)
+			ui.MenuButton(c, "账号与设置", w.accountMenu)
+		}
 		if previous != w.preferences.Page {
 			if providerTitle(w.preferences.Page) != "" {
 				w.preferences.RecentProvider = w.preferences.Page
@@ -212,9 +238,37 @@ func (w *Workspace) fileLanding(c *ui.Context, title string) {
 		ui.Button(c, "返回").Disabled(true)
 		ui.Text(c, "根目录")
 	})
-	ui.Column(c).Grow(1).FillWidth().Center().Gap(8).Children(func() {
-		ui.Text(c, "登录"+title).Bold()
-		ui.Button(c, "登录").Disabled(true)
+	provider := app.Provider(w.preferences.Page)
+	session := app.AccountSession{}
+	if w.accounts != nil {
+		session = w.accounts.Session(provider)
+	}
+	ui.Column(c).Grow(1).FillWidth().Center().Gap(8).Padding(16).Children(func() {
+		switch session.State {
+		case app.Checking:
+			ui.Text(c, "正在校验"+title).TextColor(c.Theme().TextMuted)
+		case app.LoggedIn:
+			ui.Text(c, session.Name).Bold()
+			ui.Text(c, "已登录").TextColor(c.Theme().TextMuted)
+		case app.Expired, app.AccountProblem:
+			ui.Text(c, session.Problem).TextColor(c.Theme().Danger)
+			ui.Row(c).Gap(8).Children(func() {
+				if session.State == app.AccountProblem && ui.Button(c, "重试").Clicked() {
+					w.restoreAccount(provider)
+				}
+				if ui.Button(c, "重新登录").Clicked() {
+					w.showLogin(provider)
+				}
+			})
+		default:
+			ui.Text(c, "登录"+title).Bold()
+			if ui.Button(c, "登录").Disabled(w.accounts == nil).Clicked() {
+				w.showLogin(provider)
+			}
+		}
+		if problem := w.accountProblem[provider]; problem != "" {
+			ui.Text(c, problem).TextColor(c.Theme().Danger)
+		}
 	})
 }
 

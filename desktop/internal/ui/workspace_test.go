@@ -18,7 +18,7 @@ func TestWorkspaceNavigation(t *testing.T) {
 	}
 
 	click("夸克网盘")
-	if workspace.Preferences().RecentProvider != quark || !window.HasText("登录夸克网盘") {
+	if workspace.Preferences().RecentProvider != quarkPage || !window.HasText("登录夸克网盘") {
 		t.Fatalf("切换后未显示夸克文件页，界面为 %q", window.Texts())
 	}
 
