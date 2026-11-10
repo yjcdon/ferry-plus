@@ -56,3 +56,22 @@ func TestSettingsRateKeepsIntegerKiBWithoutOverflow(t *testing.T) {
 		}
 	}
 }
+
+func TestSettingsTabsWithIconsKeepSelection(t *testing.T) {
+	selected, changed := 0, -1
+	window := ui.NewTester(func(c *ui.Context) {
+		if settingsTabBar(c, &selected, false) {
+			changed = selected
+		}
+	}, 480, 100)
+	if err := window.Click("网络"); err != nil {
+		t.Fatal(err)
+	}
+	if selected != 2 || changed != 2 {
+		t.Fatalf("点击图标标签未报告页面切换，当前 %d，通知 %d", selected, changed)
+	}
+	window.Key(0, ui.KeyLeft)
+	if selected != 1 || changed != 1 {
+		t.Fatalf("方向键未报告页面切换，当前 %d，通知 %d", selected, changed)
+	}
+}

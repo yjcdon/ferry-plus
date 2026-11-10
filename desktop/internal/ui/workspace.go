@@ -41,12 +41,14 @@ func providerLogo(data []byte) *ui.Bitmap {
 	return bitmap
 }
 
+var activeTransferIcon = workspaceIcon("M22 12a10 10 0 1 1-20 0 10 10 0 1 1 20 0z M8 16V8l-2 2 M8 8l2 2 M16 8v8l-2-2 M16 16l2-2")
+
 var transferPages = []struct {
 	id, title, empty string
 	icon             *ui.SVG
 }{
 	{all, "全部", "添加传输任务", workspaceIcon("M3 14l3-8h12l3 8v5H3z M3 14h5l2 2h4l2-2h5 M8 10h8")},
-	{"transfers.active", "进行中", "等待任务开始", workspaceIcon("M22 12a10 10 0 1 1-20 0 10 10 0 1 1 20 0z M8 16V8l-2 2 M8 8l2 2 M16 8v8l-2-2 M16 16l2-2")},
+	{"transfers.active", "进行中", "等待任务开始", activeTransferIcon},
 	{"transfers.completed", "已完成", "完成的任务将显示在这里", workspaceIcon("M22 12a10 10 0 1 1-20 0 10 10 0 1 1 20 0z M7 12l3 3 7-7")},
 	{"transfers.failed", "失败", "失败的任务将显示在这里", workspaceIcon("M12 3l10 17H2z M12 9v4 M12 16v.3")},
 }

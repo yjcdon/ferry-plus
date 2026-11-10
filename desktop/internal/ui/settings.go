@@ -53,6 +53,16 @@ type settingsWindow struct {
 	proxyPortProblem               string
 }
 
+var settingsTabs = []struct {
+	label string
+	icon  *ui.SVG
+}{
+	{"传输", activeTransferIcon},
+	{"网盘", workspaceIcon("M7 18h12a3.5 3.5 0 0 0 0-7h-1a6 6 0 0 0-11.5-1A4 4 0 0 0 7 18z")},
+	{"网络", workspaceIcon("M22 12a10 10 0 1 1-20 0 10 10 0 1 1 20 0z M2 12h20 M12 2c6 6 6 14 0 20-6-6-6-14 0-20z M4 6.5c4 3 12 3 16 0 M4 17.5c4-3 12-3 16 0")},
+	{"账号", accountIcon},
+}
+
 // OpenSettings opens the four native settings categories in a dedicated window.
 func OpenSettings(ctx context.Context, model *app.SettingsModel, accounts *app.Accounts, options SettingsWindowOptions) *mygo.Window {
 	s := &settingsWindow{
@@ -107,11 +117,35 @@ func (s *settingsWindow) reloadDraft() {
 	s.proxyFocused, s.rateFocused = false, false
 }
 
+func settingsTabBar(c *ui.Context, selected *int, disabled bool) bool {
+	theme := c.Theme()
+	tabs := ui.TabsBase(c, selected, len(settingsTabs))
+	tabs.List.Gap(6).Disabled(disabled).Children(func() {
+		for i, entry := range settingsTabs {
+			tab := tabs.Tab(i).Width(54).Height(48).Radius(theme.Radius).Label(entry.label)
+			color := theme.TextMuted
+			if i == *selected {
+				tab.Background(theme.Surface).Border(1, theme.Border)
+				color = theme.Accent
+			} else if tab.Hovered() {
+				tab.Background(theme.SurfaceHover)
+			}
+			tab.Children(func() {
+				ui.Column(c).Fill().Center().Gap(2).Children(func() {
+					ui.Icon(c, entry.icon).FontSize(21).TextColor(color).AccessHidden(true)
+					ui.Text(c, entry.label).TextColor(color)
+				})
+			})
+		}
+	})
+	return tabs.List.Changed()
+}
+
 func (s *settingsWindow) content(c *ui.Context) {
 	ui.Column(c).Fill().Background(c.Theme().Background).Children(func() {
 		next := s.tab
 		ui.Row(c).Padding(12, 18).Justify(ui.Center).Children(func() {
-			if ui.Tabs(c, &next, "传输", "网盘", "网络", "账号").Disabled(s.saving).Changed() {
+			if settingsTabBar(c, &next, s.saving) {
 				s.flushDraft(next)
 			}
 		})
