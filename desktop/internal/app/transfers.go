@@ -158,6 +158,7 @@ type Transfers struct {
 	wg            sync.WaitGroup
 	closed        bool
 	suspended     bool
+	applyProxy    func()
 	records       transferRecords
 	accounts      *Accounts
 	shares        *ShareTransfer

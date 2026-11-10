@@ -16,14 +16,18 @@ type businessTransport struct {
 	password  string
 }
 
-func (t *businessTransport) configure(settings platform.ProxySettings, password string) {
-	if t.transport.Load() != nil && reflect.DeepEqual(t.settings, settings) && t.password == password {
-		return
+// proxyChange tracks the latest requested settings on the UI thread and
+// returns the transport swap to run once active transfers have stopped.
+func (t *businessTransport) proxyChange(settings platform.ProxySettings, password string) func() {
+	if reflect.DeepEqual(t.settings, settings) && t.password == password && t.transport.Load() != nil {
+		return nil
 	}
-	previous := t.transport.Swap(platform.NewTransport(settings, password))
 	t.settings, t.password = settings, password
-	if previous != nil {
-		previous.CloseIdleConnections()
+	return func() {
+		previous := t.transport.Swap(platform.NewTransport(settings, password))
+		if previous != nil {
+			previous.CloseIdleConnections()
+		}
 	}
 }
 

@@ -45,7 +45,7 @@ func run() (err error) {
 	defer cancel()
 	settings, settingsErr := app.LoadSettings(data)
 	transport := new(businessTransport)
-	transport.configure(settings.Proxy())
+	transport.proxyChange(settings.Proxy())()
 	defer transport.CloseIdleConnections()
 	businessClient := &http.Client{Transport: transport, Timeout: 60 * time.Second}
 	accounts := app.NewAccounts(data, businessClient)
@@ -81,7 +81,7 @@ func run() (err error) {
 		workspace.AttachAccounts(ctx, window, accounts)
 		workspace.AttachTransfers(transfers)
 		workspace.AttachSettings(settings, settingsErr, func() {
-			transport.configure(settings.Proxy())
+			transfers.ChangeProxy(transport.proxyChange(settings.Proxy()))
 			transfers.Configure(app.TransferConfigFromSettings(settings.Values()))
 		})
 		go accounts.Restore(ctx, app.Baidu, func() { workspace.AccountChanged(app.Baidu) })

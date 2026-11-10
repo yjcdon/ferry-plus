@@ -127,6 +127,28 @@ func (t *Transfers) AccountsChanged() {
 	t.changed()
 }
 
+// ChangeProxy stops active transfers and applies only the most recently
+// requested transport after their checkpoints are saved. apply must not
+// call the queue or block on the UI thread.
+func (t *Transfers) ChangeProxy(apply func()) {
+	if apply == nil {
+		return
+	}
+	t.mu.Lock()
+	if !t.closed {
+		t.applyProxy = apply
+		for _, worker := range t.active {
+			if worker.stop == "" {
+				worker.stop = "proxy"
+				worker.cancel()
+			}
+		}
+		t.scheduleLocked()
+	}
+	t.mu.Unlock()
+	t.changed()
+}
+
 // Suspend stops scheduling and lets current workers save their checkpoints.
 // System sleep leaves manual pause and cancellation intent intact.
 func (t *Transfers) Suspend() {
@@ -213,7 +235,17 @@ func (t *Transfers) replaceLocked(index int, next transferRecord) error {
 }
 
 func (t *Transfers) scheduleLocked() {
-	if t.closed || t.suspended {
+	if t.closed {
+		return
+	}
+	if t.applyProxy != nil {
+		if len(t.active) > 0 {
+			return
+		}
+		t.applyProxy()
+		t.applyProxy = nil
+	}
+	if t.suspended {
 		return
 	}
 	running := map[TransferDirection]int{}
@@ -346,7 +378,7 @@ func (t *Transfers) run(ctx context.Context, worker *transferWorker) {
 		next.State, next.Error = TransferCompleted, ""
 	case worker.stop == "pause":
 		// The state may already be queued if the user clicked Continue.
-	case worker.stop == "account" || worker.stop == "close" || worker.stop == "suspend" ||
+	case worker.stop == "account" || worker.stop == "close" || worker.stop == "suspend" || worker.stop == "proxy" ||
 		errors.Is(err, ErrDirectorySessionChanged) || t.checkAccount(worker) != nil:
 		next.State, next.Error = TransferQueued, ""
 	case errors.Is(err, core.ErrUploadUnconfirmed), errors.Is(err, ErrShareTransferUnconfirmed):
