@@ -181,6 +181,16 @@ Windows 本地下载遇到设备保留名、禁止字符或尾随点／空格等
 
 macOS 生成 `.app` 与 `.dmg`，Windows 生成 `.exe` 与 NSIS 安装包，发布到对应 GitHub Release 并提供 SHA-256。安装过程检查 Windows 登录所需 WebView2 Runtime，缺失时引导安装官方运行时。代码签名按已有可用身份处理，并记录实际签名和公证状态。[MyGo 分发](https://mygo.egoist.dev/docs/distribution)
 
+在装有 Go 和 NSIS（`makensis`）的 Mac 上，从仓库根目录运行：
+
+```sh
+Scripts/build-v5.sh
+```
+
+脚本在 `.build/ferry-drive/darwin-arm64/` 生成 DMG，在 `.build/ferry-drive/windows-amd64/` 生成 x64 安装包，并在各自目录生成 SHA-256 校验文件。默认使用 macOS 临时签名供本机验收。设置 `FERRY_CODESIGN_IDENTITY` 可选用本机已有的签名身份。公证状态单独记录。
+
+Mac 安装时打开 DMG，把 Ferry Drive 拖到 Applications，再从 Applications 启动。Windows 运行 `ferry-drive-setup-5.0.0-amd64.exe` 安装，登录前按应用提示安装 x64 WebView2 Evergreen Runtime。离线环境使用微软提供的 x64 独立安装程序。首次启动使用独立的 5.0 配置目录。
+
 Windows 10 与 Windows 11 使用同一 x64 构建。系统 API 使用前核对最低版本，较新窗口样式等可选能力做可用性检测，核心路径在 Windows 10 实际运行。Go 官方最低要求包含 Windows 10，MyGo 文档列出 Windows 10/11 的原生渲染支持，兼容性还须核对所选依赖和实际 API。[Go 系统要求](https://go.dev/wiki/MinimumRequirements) · [MyGo 平台要求](https://github.com/egoist/mygo/blob/v0.8.3/docs/README.md)
 
 安装和打开官方登录页前检测 WebView2 Runtime。缺失时原生主界面可以启动，登录入口显示运行时安装指引；安装完成后重新检测并允许重试。采用 Microsoft Evergreen Runtime，覆盖安装失败、取消、离线和仅安装 Edge 浏览器的情况。[Microsoft WebView2 分发](https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution)
