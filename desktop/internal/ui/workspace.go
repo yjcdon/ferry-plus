@@ -70,6 +70,8 @@ type Workspace struct {
 	uploadDraft            []platform.LocalReference
 	download               *downloadPrompt
 	downloadOpen           bool
+	share                  *sharePrompt
+	shareOpen              bool
 }
 
 // NewWorkspace restores known pages and supplies the initial split sizes.
@@ -139,7 +141,10 @@ func (w *Workspace) Menu(window *mygo.Window) *mygo.Menu {
 		{Role: mygo.RoleClose},
 	}}
 	if w.jobs != nil {
-		fileMenu.Submenu = append([]*mygo.MenuItem{command("上传", "CmdOrCtrl+U", w.uploadFromCurrent)}, fileMenu.Submenu...)
+		fileMenu.Submenu = append([]*mygo.MenuItem{
+			command("添加链接", "CmdOrCtrl+N", w.showShare),
+			command("上传", "CmdOrCtrl+U", w.uploadFromCurrent),
+		}, fileMenu.Submenu...)
 	}
 	return mygo.NewMenu([]*mygo.MenuItem{
 		appMenu,
@@ -181,6 +186,7 @@ func (w *Workspace) View(c *ui.Context) {
 	}
 	w.directoryDeleteDialog(c)
 	w.downloadDialog(c)
+	w.shareDialog(c)
 	w.transferRemoveDialog(c)
 }
 
@@ -272,6 +278,9 @@ func (w *Workspace) content(c *ui.Context, width float32, jobs []app.TransferJob
 			}
 			if index >= 0 {
 				if w.jobs != nil {
+					if width >= 550 && ui.Button(c, "添加链接").Clicked() {
+						w.showShare()
+					}
 					ui.Select(c, &w.transfer.direction, []string{"全部", "上传", "下载"}).Label("传输方向").Width(72)
 				}
 				searchWidth := float32(160)
@@ -359,8 +368,11 @@ func (w *Workspace) transferLanding(c *ui.Context, index int) {
 	if strings.TrimSpace(w.transferSearch) != "" {
 		title = "试试其他关键词"
 	}
-	ui.Column(c).Grow(1).FillWidth().Center().Children(func() {
+	ui.Column(c).Grow(1).FillWidth().Center().Gap(8).Children(func() {
 		ui.Text(c, title).TextColor(c.Theme().TextMuted)
+		if w.jobs != nil && index == 0 && w.transferSearch == "" && ui.Button(c, "添加链接").Clicked() {
+			w.showShare()
+		}
 	})
 }
 

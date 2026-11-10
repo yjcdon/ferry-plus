@@ -229,10 +229,7 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 	f.outline.List.Columns.Widths = w.preferences.ColumnWidths
 	f.outline.List.CellMenu = func(menu *ui.Menu, row, _ int) { w.directoryRowMenu(f, menu, row) }
 	beforeSort := f.sort
-	beforeOpen := make(map[directoryRow]bool, f.outline.Open.Len())
-	for row := range f.outline.Open.All() {
-		beforeOpen[row] = true
-	}
+	beforeOpen := captureExpanded(f)
 	rows := makeDirectoryRows(entries)
 	table := ui.OutlineTable(c, &f.outline, fileColumns, rows, f.children, func(row directoryRow, column int) {
 		if row.status {
@@ -248,15 +245,7 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 		switch column {
 		case 0:
 			content := ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
-				checked := f.selection.Has(row)
-				if ui.Checkbox(c, &checked, "").Label("选择 " + entry.Name).Changed() {
-					if checked {
-						f.selection.Add(row)
-					} else {
-						f.selection.Remove(row)
-					}
-					f.applySelection()
-				}
+				f.selectionCheckbox(c, row, entry.Name)
 				w.directoryNameCell(c, f, entry)
 			})
 			if entry.IsDirectory {
@@ -292,17 +281,7 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 		w.window.Invalidate()
 	}
 	if strings.TrimSpace(f.query) == "" {
-		for row := range f.outline.Open.All() {
-			if !beforeOpen[row] {
-				w.fetchDirectory(f, d.Expand(row.ref))
-			}
-		}
-		for row := range beforeOpen {
-			if !f.outline.Open.Has(row) {
-				d.Collapse(row.ref)
-				f.syncSelection()
-			}
-		}
+		f.applyExpansion(beforeOpen, func(ref app.RemoteRef) { w.fetchDirectory(f, d.Expand(ref)) })
 	}
 	if table.Changed() {
 		f.applySelection()
@@ -334,6 +313,40 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 			}
 			f.applySelection()
 		}
+	}
+}
+
+func captureExpanded(f *directoryView) map[directoryRow]bool {
+	open := make(map[directoryRow]bool, f.outline.Open.Len())
+	for row := range f.outline.Open.All() {
+		open[row] = true
+	}
+	return open
+}
+
+func (f *directoryView) applyExpansion(before map[directoryRow]bool, expand func(app.RemoteRef)) {
+	for row := range f.outline.Open.All() {
+		if !before[row] {
+			expand(row.ref)
+		}
+	}
+	for row := range before {
+		if !f.outline.Open.Has(row) {
+			f.directory.Collapse(row.ref)
+			f.syncSelection()
+		}
+	}
+}
+
+func (f *directoryView) selectionCheckbox(c *ui.Context, row directoryRow, name string) {
+	checked := f.selection.Has(row)
+	if ui.Checkbox(c, &checked, "").Label("选择 " + name).Changed() {
+		if checked {
+			f.selection.Add(row)
+		} else {
+			f.selection.Remove(row)
+		}
+		f.applySelection()
 	}
 }
 
