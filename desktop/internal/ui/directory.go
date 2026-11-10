@@ -313,6 +313,13 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 			}
 		}
 	}
+	if f.edit != nil {
+		return
+	}
+	if f.outline.List.Shortcut(c, ui.Cmd, ui.KeyUp) {
+		w.navigateDirectory(f, d.Up())
+		return
+	}
 	if f.focus >= 0 && f.focus < f.outline.Rows() {
 		row := f.outline.Item(f.focus)
 		if !row.status && !f.busy && f.outline.List.Shortcut(c, 0, ui.KeyF2) {
@@ -320,9 +327,7 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 		}
 		if table.Submitted() || f.outline.List.Shortcut(c, ui.Cmd, ui.KeyDown) {
 			w.navigateDirectory(f, d.Enter(row.ref))
-		}
-		if f.outline.List.Shortcut(c, ui.Cmd, ui.KeyUp) {
-			w.navigateDirectory(f, d.Up())
+			return
 		}
 		if f.outline.List.Shortcut(c, 0, ui.KeySpace) {
 			if f.selection.Has(row) {
