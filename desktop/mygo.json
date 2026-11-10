@@ -4,6 +4,7 @@
   "version": "5.0.0",
   "out": "../.build/ferry-drive",
   "macos": {
-    "minimumSystemVersion": "14.0"
+    "minimumSystemVersion": "14.0",
+    "entitlements": "../BaiduPCS-Swift/BaiduPCS-Swift.entitlements"
   }
 }

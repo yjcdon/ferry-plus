@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | T01 | 基线已采集 | 固定 4.2.0 源码与实机样本，见[行为基线](baseline.md)。真实网盘文件树和操作确认按后续功能用例补采。 |
 | T02 | 原型已验证 | Mac 上以 MyGo 自动化运行原生窗口，展开树表、输入中文、Esc 取消、Enter 确认。无窗口测试覆盖折叠及最小窗口布局。Windows x64 已交叉编译，实机 DPI 和原生输入法候选验收待对应阶段。 |
+| T03 | Mac 适配器已验证 | 系统文件面板混选和取消、目录书签恢复、系统 PAC 和认证 SOCKS5。Windows x64 已交叉编译，混选按钮与其他桌面行为在第二阶段实测。 |
 | T04 | 存储模块已验证 | 独立目录、跨进程写锁、原子替换和凭据加密通过 Mac 测试，Windows x64 测试目标已交叉编译。真实账号恢复和任务检查点随 T06、T10、T11 验收。 |
 
 ## T02 构建与验证
@@ -19,3 +20,9 @@
 Go 记录保存在系统配置目录下的 `Ferry Drive/v5`。Mac 使用 Library/Application Support，Windows 使用 AppData 下的系统用户配置目录。每个记录用版本化 JSON 保存，长凭据用 AES-GCM 加密，系统凭据命名空间为 `io.github.yjcdon.FerryDrive.v5`。
 
 Mac 的 `go test -race ./internal/store` 和 `go vet ./internal/store` 通过。测试覆盖检查点原子替换、进程退出释放锁、长凭据和损坏数据。隔离命名空间的实际钥匙串写入、读取、删除探针通过。Windows x64 测试二进制可生成。
+
+## T03 平台适配验证
+
+Mac 选取探针在同一 `NSOpenPanel` 混选一个文件和一个文件夹，返回两项有效书签。取消返回零项。用签名探针保存目录书签后移动目录，重启恢复到了新位置。定位和本地废纸篓使用 MyGo Shell。Windows 文件面板使用「上传所选项目」确认高亮的文件与文件夹，标准打开动作保留目录导航。
+
+`go test -race ./internal/platform` 与两端目标的 `go vet ./internal/platform` 通过。Mac 自动化验证 PAC 和本地 SOCKS5 认证拒绝，路径测试覆盖越界和逃逸符号链接。Windows x64 测试目标已交叉编译，WinHTTP 实机及系统文件面板验证进入第二阶段。
