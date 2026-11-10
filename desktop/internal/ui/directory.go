@@ -119,7 +119,7 @@ func (w *Workspace) directoryToolbar(c *ui.Context, f *directoryView, width floa
 	d := f.directory
 	trail := d.Trail()
 	ui.Toolbar(c, func() {
-		if ui.Button(c, "返回").Disabled(!d.CanGoUp()).Clicked() {
+		if workspaceToolbarButton(c, "返回", backIcon).Disabled(!d.CanGoUp()).Clicked() {
 			w.navigateDirectory(f, d.Up())
 		}
 		if len(trail) == 0 {

@@ -56,6 +56,8 @@ var (
 	detailsIcon = workspaceIcon("M3 5h18v14H3z M15 5v14 M17 8h2 M17 11h2")
 	pauseIcon   = workspaceIcon("M9 5v14 M15 5v14")
 	resumeIcon  = workspaceIcon("M8 5l11 7-11 7z")
+	backIcon    = workspaceIcon("M14 6l-6 6 6 6")
+	accountIcon = ui.MustParseSVG([]byte(`<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="9" r="3.5" fill="currentColor"/><path d="M5 19c1-3 3.5-4.5 7-4.5s6 1.5 7 4.5a10 10 0 0 1-14 0z" fill="currentColor"/></svg>`))
 )
 
 func workspaceIcon(path string) *ui.SVG {
@@ -377,7 +379,7 @@ func (w *Workspace) fileLanding(c *ui.Context, title string, width float32) {
 		w.uploadDraftBar(c, f)
 	} else {
 		ui.Toolbar(c, func() {
-			ui.Button(c, "返回").Disabled(true)
+			workspaceToolbarButton(c, "返回", backIcon).Disabled(true)
 			ui.Text(c, "根目录")
 		})
 	}
@@ -404,7 +406,8 @@ func (w *Workspace) fileLanding(c *ui.Context, title string, width float32) {
 				}
 			})
 		default:
-			ui.Text(c, "登录"+title).Bold()
+			ui.Icon(c, accountIcon).FontSize(40).TextColor(c.Theme().TextMuted).AccessHidden(true)
+			ui.Text(c, "登录"+title).FontSize(15).Bold().TextColor(c.Theme().TextMuted).Margin(12, 0, 0, 0)
 			if ui.Button(c, "登录").Disabled(w.accounts == nil).Clicked() {
 				w.showLogin(provider)
 			}
