@@ -61,6 +61,9 @@ func (f *directoryView) resetTree() {
 
 // AccountChanged schedules directory state synchronization on the UI thread.
 func (w *Workspace) AccountChanged(provider app.Provider) {
+	if w.jobs != nil {
+		go w.jobs.AccountsChanged()
+	}
 	w.window.Update(func() {
 		if w.settingsWindow != nil {
 			w.settingsWindow.Invalidate()

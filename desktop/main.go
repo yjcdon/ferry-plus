@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"runtime"
+	"sync/atomic"
 	"time"
 
 	"github.com/egoist/mygo"
@@ -42,7 +43,18 @@ func run() (err error) {
 	transport := new(businessTransport)
 	transport.configure(settings.Proxy())
 	defer transport.CloseIdleConnections()
-	accounts := app.NewAccounts(data, &http.Client{Transport: transport, Timeout: 60 * time.Second})
+	businessClient := &http.Client{Transport: transport, Timeout: 60 * time.Second}
+	accounts := app.NewAccounts(data, businessClient)
+	var notifyWindow atomic.Pointer[mygo.Window]
+	transfers, err := app.NewTransfers(data, accounts, businessClient, app.TransferConfigFromSettings(settings.Values()), func() {
+		if window := notifyWindow.Load(); window != nil {
+			window.Invalidate()
+		}
+	})
+	if err != nil {
+		return err
+	}
+	defer transfers.Close()
 	mygo.App.WhenReady(func() {
 		opts := mygo.WindowOptions{
 			Title:     "Ferry Drive",
@@ -57,8 +69,13 @@ func run() (err error) {
 			opts.TitleBarStyle = mygo.TitleBarHiddenInset
 		}
 		window := mygo.NewWindow(opts)
+		notifyWindow.Store(window)
 		workspace.AttachAccounts(ctx, window, accounts)
-		workspace.AttachSettings(settings, settingsErr, func() { transport.configure(settings.Proxy()) })
+		workspace.AttachTransfers(transfers)
+		workspace.AttachSettings(settings, settingsErr, func() {
+			transport.configure(settings.Proxy())
+			transfers.Configure(app.TransferConfigFromSettings(settings.Values()))
+		})
 		go accounts.Restore(ctx, app.Baidu, func() { workspace.AccountChanged(app.Baidu) })
 		go accounts.Restore(ctx, app.Quark, func() { workspace.AccountChanged(app.Quark) })
 		mygo.App.SetMenu(workspace.Menu(window))

@@ -63,6 +63,8 @@ type Workspace struct {
 	settingsChanged        func()
 	settingsWindow         *mygo.Window
 	aboutWindow            *mygo.Window
+	jobs                   *app.Transfers
+	transfer               transferView
 }
 
 // NewWorkspace restores known pages and supplies the initial split sizes.
@@ -146,13 +148,14 @@ func (w *Workspace) Menu(window *mygo.Window) *mygo.Menu {
 // View draws the workspace with solid surfaces and native input controls.
 func (w *Workspace) View(c *ui.Context) {
 	width, _ := c.Size()
+	jobs := w.filteredTransfers()
 	ui.Column(c).Fill().Background(c.Theme().Background).Children(func() {
 		if w.preferences.SidebarHidden {
-			w.content(c, width)
+			w.content(c, width, jobs)
 			return
 		}
-		split := ui.Split(c, &w.preferences.SidebarWidth, func() { w.sidebar(c) }, func() {
-			w.content(c, width-w.preferences.SidebarWidth-1)
+		split := ui.Split(c, &w.preferences.SidebarWidth, func() { w.sidebar(c, jobs) }, func() {
+			w.content(c, width-w.preferences.SidebarWidth-1, jobs)
 		}).Fill().SplitReset(200)
 		if split.Changed() {
 			w.preferences.SidebarWidth = min(max(w.preferences.SidebarWidth, 180), 300)
@@ -164,9 +167,10 @@ func (w *Workspace) View(c *ui.Context) {
 		w.logout(w.logoutProvider)
 	}
 	w.directoryDeleteDialog(c)
+	w.transferRemoveDialog(c)
 }
 
-func (w *Workspace) sidebar(c *ui.Context) {
+func (w *Workspace) sidebar(c *ui.Context, jobs []app.TransferJob) {
 	top := float32(8)
 	if c.TitleBar().Height > 0 {
 		top = 44
@@ -183,8 +187,17 @@ func (w *Workspace) sidebar(c *ui.Context) {
 				}
 			})
 			ui.SidebarSection(c, "传输", nil, func() {
-				for _, page := range transferPages {
-					ui.SidebarItem(c, page.id, nil, page.title)
+				for index, page := range transferPages {
+					item := ui.SidebarItem(c, page.id, nil, page.title)
+					count := 0
+					for _, job := range jobs {
+						if matchesTransferPage(job, index) {
+							count++
+						}
+					}
+					if count > 0 {
+						item.Children(func() { ui.Textf(c, "%d", count).TextColor(c.Theme().TextMuted) })
+					}
 				}
 				if !w.allProviders && ui.Button(c, "查看全部").Tooltip("查看全部网盘的传输").Clicked() {
 					w.allProviders = true
@@ -216,7 +229,7 @@ func (w *Workspace) sidebar(c *ui.Context) {
 	})
 }
 
-func (w *Workspace) content(c *ui.Context, width float32) {
+func (w *Workspace) content(c *ui.Context, width float32, jobs []app.TransferJob) {
 	index := transferIndex(w.preferences.Page)
 	title := providerTitle(w.preferences.Page)
 	if index >= 0 {
@@ -244,7 +257,14 @@ func (w *Workspace) content(c *ui.Context, width float32) {
 				w.directorySearch(c, f)
 			}
 			if index >= 0 {
-				search := ui.TextInput(c, &w.transferSearch).Label("搜索任务").Placeholder("搜索任务").Width(160)
+				if w.jobs != nil {
+					ui.Select(c, &w.transfer.direction, []string{"全部", "上传", "下载"}).Label("传输方向").Width(72)
+				}
+				searchWidth := float32(160)
+				if width < 540 {
+					searchWidth = 120
+				}
+				search := ui.TextInput(c, &w.transferSearch).Label("搜索任务").Placeholder("搜索任务").Width(searchWidth)
 				if w.focusSearch {
 					search.Focus()
 					w.focusSearch = false
@@ -262,16 +282,14 @@ func (w *Workspace) content(c *ui.Context, width float32) {
 		if w.preferences.DetailsOpen && width >= 640 {
 			details := min(w.preferences.DetailsWidth, width/2, width-329)
 			listWidth := width - details - 1
-			split := ui.Split(c, &listWidth, func() { w.transferLanding(c, index) }, func() {
-				ui.Column(c).Fill().Center().Children(func() {
-					ui.Text(c, "选择任务查看详情").TextColor(c.Theme().TextMuted)
-				})
+			split := ui.Split(c, &listWidth, func() { w.transferRows(c, jobs, index) }, func() {
+				w.transferDetails(c, jobs, index)
 			}).Grow(1)
 			if split.Changed() {
 				w.preferences.DetailsWidth = min(max(width-listWidth-1, 280), width/2, width-329)
 			}
 		} else {
-			w.transferLanding(c, index)
+			w.transferRows(c, jobs, index)
 		}
 	})
 }
