@@ -4,7 +4,9 @@ import (
 	"math"
 	"strconv"
 	"testing"
+	"time"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
 	"github.com/yjcdon/ferry-drive/desktop/internal/app"
 	"github.com/yjcdon/ferry-drive/desktop/internal/store"
@@ -73,5 +75,43 @@ func TestSettingsTabsWithIconsKeepSelection(t *testing.T) {
 	window.Key(0, ui.KeyLeft)
 	if selected != 1 || changed != 1 {
 		t.Fatalf("方向键未报告页面切换，当前 %d，通知 %d", selected, changed)
+	}
+}
+
+func TestTransferFolderCandidateEnterDoesNotSaveDraft(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("AppData", home)
+	data, err := store.Open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer data.Close()
+	model, err := app.LoadSettings(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := settingsWindow{model: model, window: &mygo.Window{}, tab: 1}
+	page.reloadDraft()
+	window := ui.NewTester(page.content, 480, 450)
+	if err := window.Click("百度网盘转存目录"); err != nil {
+		t.Fatal(err)
+	}
+	window.Key(ui.Cmd, ui.KeyA)
+	window.Compose("zhuancun", 8)
+	window.Key(0, ui.KeyEnter)
+	if page.saving {
+		t.Fatal("确认输入法候选时提前保存了转存目录")
+	}
+	window.Key(ui.Cmd, ui.KeyA)
+	window.Compose("zhuancun", 8)
+	window.Type("转存")
+	window.Key(0, ui.KeyEnter)
+	deadline := time.Now().Add(time.Second)
+	for model.Values().Baidu.TransferFolder != "/转存" {
+		if time.Now().After(deadline) {
+			t.Fatalf("已提交的目录未保存: %q", model.Values().Baidu.TransferFolder)
+		}
+		time.Sleep(time.Millisecond)
 	}
 }

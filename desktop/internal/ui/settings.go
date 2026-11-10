@@ -47,6 +47,7 @@ type settingsWindow struct {
 	rateProblem                    [2]string
 	rateFocused                    bool
 	baiduFolder, quarkFolder       string
+	folderComposing                bool
 	proxyMode                      platform.ProxyMode
 	host, port, username, password string
 	proxyFocused                   bool
@@ -114,7 +115,7 @@ func (s *settingsWindow) reloadDraft() {
 	if proxy.Port != nil {
 		s.port = strconv.Itoa(*proxy.Port)
 	}
-	s.proxyFocused, s.rateFocused = false, false
+	s.proxyFocused, s.rateFocused, s.folderComposing = false, false, false
 }
 
 func settingsTabBar(c *ui.Context, selected *int, disabled bool) bool {
@@ -301,6 +302,7 @@ func (s *settingsWindow) checkDirectory() {
 
 func (s *settingsWindow) netdisks(c *ui.Context) {
 	v := s.model.Values()
+	composing, submitted := false, false
 	for _, entry := range []struct {
 		provider app.Provider
 		folder   *string
@@ -312,10 +314,9 @@ func (s *settingsWindow) netdisks(c *ui.Context) {
 		title := providerTitle(string(entry.provider))
 		settingsGroup(c, title, func() {
 			settingsRow(c, "转存目录", func() {
-				if ui.TextInput(c, entry.folder).Label(title + "转存目录").Placeholder(entry.hint).Width(200).
-					Disabled(s.saving).Submitted() {
-					s.flushDraft(s.tab)
-				}
+				input := ui.TextInput(c, entry.folder).Label(title + "转存目录").Placeholder(entry.hint).Width(200).Disabled(s.saving)
+				composing = input.Composing() || composing
+				submitted = input.Submitted() || submitted
 			})
 			cleanup := cfg.CleanupAfterDownload
 			if ui.Toggle(c, &cleanup, "下载完成后清理转存文件").Label(title + "下载完成后清理转存文件").Disabled(s.saving).Changed() {
@@ -337,6 +338,11 @@ func (s *settingsWindow) netdisks(c *ui.Context) {
 				}, nil)
 			}
 		})
+	}
+	wasComposing := s.folderComposing
+	s.folderComposing = composing
+	if submitted && !wasComposing && !composing {
+		s.flushDraft(s.tab)
 	}
 }
 
