@@ -8,7 +8,7 @@
 
 以当前 4.2.0 功能、界面和交互为基准，迁移为一套 MyGo 原生 UI 与 Go 业务核心，支持 macOS 与 Windows。网盘登录沿用当前流程，按全新安装交付。
 
-[产品方案](v5.0/product-proposal.md) · [技术方案](v5.0/architecture.md) · [任务清单](v5.0/tasks.md) · [测试用例](v5.0/test-cases.md)
+[产品方案](v5.0/product-proposal.md) · [技术方案](v5.0/architecture.md) · [任务清单](v5.0/tasks.md) · [测试用例](v5.0/test-cases.md) · [行为基线](v5.0/baseline.md) · [实施与测试记录](v5.0/test-execution.md)
 
 ## 4.2.0 应用内更新（方案）
 
