@@ -56,3 +56,38 @@ func TestDirectoryParentShortcutWithoutSelectedRow(t *testing.T) {
 		t.Fatalf("上一级快捷键未返回根目录: %+v", got)
 	}
 }
+
+func TestInlineRenameWaitsForCompositionBeforeSubmit(t *testing.T) {
+	entry := app.RemoteEntry{
+		Ref:  app.RemoteRef{Provider: app.Baidu, ID: "13", Path: "/原名"},
+		Name: "原名",
+	}
+	f := newDirectoryView(app.Baidu, app.DirectoryLocation{})
+	edit := &directoryEdit{
+		selection: app.DirectorySelection{Items: []app.DirectoryItem{{Entry: entry}}},
+		text:      entry.Name, fresh: true,
+	}
+	f.edit = edit
+	workspace := NewWorkspace(Preferences{})
+	workspace.window = &mygo.Window{}
+	workspace.ctx = t.Context()
+	workspace.accounts = app.NewAccounts(nil, nil)
+	window := ui.NewTester(func(c *ui.Context) { workspace.directoryNameCell(c, f, entry) }, 380, 100)
+	window.Frame()
+	window.Compose("xinming", 7)
+	window.Key(0, ui.KeyEnter)
+	if f.edit != edit || edit.problem != "" || f.busy {
+		t.Fatalf("组合输入中的 Enter 提交了重命名: %+v", edit)
+	}
+	window.Key(ui.Cmd, ui.KeyA)
+	window.Compose("xinming", 7)
+	window.Type("新名/")
+	window.Key(0, ui.KeyEnter)
+	if f.edit != edit || edit.text != "新名/" || edit.problem != "包含非法字符" || f.busy {
+		t.Fatalf("候选提交后的 Enter 未按已提交文本校验: %+v", edit)
+	}
+	window.Key(0, ui.KeyEscape)
+	if f.edit != nil {
+		t.Fatal("结束组合输入后，Escape 应退出行内命名")
+	}
+}

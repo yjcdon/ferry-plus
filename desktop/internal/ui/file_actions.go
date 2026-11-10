@@ -14,6 +14,7 @@ type directoryEdit struct {
 	text      string
 	problem   string
 	fresh     bool
+	composing bool
 }
 
 type directoryDelete struct {
@@ -143,9 +144,13 @@ func (w *Workspace) directoryNameCell(c *ui.Context, f *directoryView, entry app
 		if input.Changed() {
 			edit.problem = ""
 		}
-		if !f.busy {
+		escape := input.Shortcut(0, ui.KeyEscape)
+		// Enter can finish a composition and report submission in the same frame.
+		wasComposing := edit.composing
+		edit.composing = input.Composing()
+		if !f.busy && !wasComposing && !edit.composing {
 			switch {
-			case input.Shortcut(0, ui.KeyEscape):
+			case escape:
 				f.edit = nil
 				w.window.Invalidate()
 			case input.Submitted(), input.FocusLeft():
