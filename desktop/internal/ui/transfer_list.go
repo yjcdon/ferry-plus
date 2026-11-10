@@ -55,13 +55,22 @@ func (w *Workspace) filteredTransfers() []app.TransferJob {
 			w.transfer.direction == "下载" && job.Direction != app.TransferDownload {
 			return true
 		}
-		return query != "" && !strings.Contains(strings.ToLower(job.Title), query) &&
-			!strings.Contains(strings.ToLower(job.AccountName), query)
+		return !matchesTransferSearch(job, query)
 	})
 	slices.SortStableFunc(jobs, func(a, b app.TransferJob) int {
 		return b.CreatedAt.Compare(a.CreatedAt)
 	})
 	return jobs
+}
+
+// matchesTransferSearch includes files inside a batch, as the original task search does.
+func matchesTransferSearch(job app.TransferJob, query string) bool {
+	if query == "" || strings.Contains(strings.ToLower(job.Title), query) || strings.Contains(strings.ToLower(job.AccountName), query) {
+		return true
+	}
+	return slices.ContainsFunc(job.Items, func(item app.TransferItem) bool {
+		return strings.Contains(strings.ToLower(item.RelativePath), query)
+	})
 }
 
 func matchesTransferPage(job app.TransferJob, index int) bool {
