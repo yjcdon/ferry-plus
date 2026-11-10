@@ -2,14 +2,11 @@ package platform
 
 import (
 	"errors"
-	"sync"
 
 	"github.com/ebitengine/purego/objc"
 )
 
-// BeginTransferActivity keeps the Mac awake through idle periods while a
-// transfer worker runs. The token is released when that activity ends.
-func BeginTransferActivity() (release func(), err error) {
+func beginTransferActivity() (release func(), err error) {
 	defer objcPool()()
 	const idleSystemSleepDisabled = uint64(1 << 20)
 	process := objcSend[objc.ID](objcClass("NSProcessInfo"), "processInfo")
@@ -19,9 +16,9 @@ func BeginTransferActivity() (release func(), err error) {
 		return nil, errors.New("无法保持系统唤醒")
 	}
 	objcSend[uintptr](token, "retain")
-	return sync.OnceFunc(func() {
+	return func() {
 		defer objcPool()()
 		objcSend[uintptr](process, "endActivity:", token)
 		objcSend[uintptr](token, "release")
-	}), nil
+	}, nil
 }

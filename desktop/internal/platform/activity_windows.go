@@ -2,7 +2,6 @@ package platform
 
 import (
 	"fmt"
-	"sync"
 	"syscall"
 	"unsafe"
 )
@@ -24,9 +23,7 @@ type powerRequestContext struct {
 	reasonStrings  uintptr
 }
 
-// BeginTransferActivity holds a Windows system power request until transfer
-// workers stop. The request belongs to its handle, so any thread can release it.
-func BeginTransferActivity() (release func(), err error) {
+func beginTransferActivity() (release func(), err error) {
 	const (
 		simpleReason   = 1
 		systemRequired = 1
@@ -44,8 +41,8 @@ func BeginTransferActivity() (release func(), err error) {
 		syscall.CloseHandle(syscall.Handle(handle))
 		return nil, fmt.Errorf("设置 Windows 唤醒请求：%w", err)
 	}
-	return sync.OnceFunc(func() {
+	return func() {
 		powerClearRequest.Call(handle, systemRequired)
 		syscall.CloseHandle(syscall.Handle(handle))
-	}), nil
+	}, nil
 }
