@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/yjcdon/ferry-drive/desktop/internal/baidu"
+	"github.com/yjcdon/ferry-drive/desktop/internal/quark"
 )
 
 func TestDirectoryMutationKeepsFrozenTargetsAndPartialFailures(t *testing.T) {
@@ -168,5 +169,50 @@ func TestCreateBaiduDirectoryRejectsReplacedParent(t *testing.T) {
 	parentID = 17
 	if created, err := target.Create(t.Context(), accounts, "new"); err != nil || created.Ref.ID != "19" || writes != 1 {
 		t.Fatalf("原目录应成功创建一次: %+v，%v，写入 %d 次", created, err, writes)
+	}
+}
+
+func TestCloudActionsExpireOnlyTheOriginalAccount(t *testing.T) {
+	for _, action := range []string{"create", "rename", "trash", "share"} {
+		t.Run(action, func(t *testing.T) {
+			calls := 0
+			transport := directoryTransport(func(r *http.Request) (*http.Response, error) {
+				calls++
+				return directoryReply(t, r, map[string]any{"status": 401, "code": 401})
+			})
+			accounts := NewAccounts(nil, nil)
+			other := transferTestSession(accounts, "baidu")
+			session := AccountSession{ID: "quark", State: LoggedIn, Quark: quark.New(quark.Credential{}, &http.Client{Transport: transport})}
+			accounts.quark.current.Store(&session)
+			root := Quark.RootRef()
+			target := DirectoryTarget{Ref: root, AccountID: session.ID, session: session}
+			item := DirectoryItem{Entry: RemoteEntry{Ref: RemoteRef{Provider: Quark, ID: "file"}, Name: "old"}, Parent: root}
+			selection := DirectorySelection{Target: target, Items: []DirectoryItem{item, item}}
+			var err error
+			switch action {
+			case "create":
+				_, err = target.Create(t.Context(), accounts, "new")
+			case "rename":
+				selection.Items = selection.Items[:1]
+				_, err = selection.Rename(t.Context(), accounts, "new")
+			case "trash":
+				result := selection.Trash(t.Context(), accounts)
+				if len(result.Failures) != 2 || len(result.Removed) != 0 {
+					t.Fatalf("批量操作失败范围不符: %+v", result)
+				}
+				err = result.Failures[0].Err
+			case "share":
+				_, err = OpenShare(t.Context(), accounts, ShareLink{Provider: Quark, URL: "https://pan.quark.cn/s/abcdef123456"})
+			}
+			if !errors.Is(err, quark.ErrLoginExpired) || calls != 1 {
+				t.Fatalf("登录失效后不应继续请求，实际 %d 次，错误 %v", calls, err)
+			}
+			if got := accounts.Session(Quark); got.State != Expired || got.ID != session.ID {
+				t.Fatalf("原账号未失效: %+v", got)
+			}
+			if got := accounts.Session(Baidu); !sameDirectorySession(got, other) {
+				t.Fatalf("其他网盘的会话变化: %+v", got)
+			}
+		})
 	}
 }

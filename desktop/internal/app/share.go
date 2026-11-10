@@ -76,8 +76,10 @@ func OpenShare(ctx context.Context, accounts *Accounts, link ShareLink) (*ShareB
 	if link.Provider != Baidu && link.Provider != Quark {
 		return nil, ErrShareLink
 	}
-	access, err := openShareAccess(ctx, accounts.Session(link.Provider), link)
+	session := accounts.Session(link.Provider)
+	access, err := openShareAccess(ctx, session, link)
 	if err != nil {
+		accounts.ExpireSession(link.Provider, session, err)
 		return nil, err
 	}
 	if !sameDirectorySession(access.session, accounts.Session(link.Provider)) {

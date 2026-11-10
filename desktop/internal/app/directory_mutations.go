@@ -137,7 +137,8 @@ func ValidateRemoteName(name string) error {
 }
 
 // Create submits a single directory request against the frozen account and parent.
-func (t DirectoryTarget) Create(ctx context.Context, accounts *Accounts, name string) (RemoteEntry, error) {
+func (t DirectoryTarget) Create(ctx context.Context, accounts *Accounts, name string) (_ RemoteEntry, err error) {
+	defer func() { accounts.ExpireSession(t.Ref.Provider, t.session, err) }()
 	if err := ValidateRemoteName(name); err != nil {
 		return RemoteEntry{}, err
 	}
@@ -182,7 +183,8 @@ func (t DirectoryTarget) Create(ctx context.Context, accounts *Accounts, name st
 
 // Rename verifies the original identity and any name collision before writing,
 // then confirms that the same object was renamed without replaying the request.
-func (s DirectorySelection) Rename(ctx context.Context, accounts *Accounts, name string) (RemoteEntry, error) {
+func (s DirectorySelection) Rename(ctx context.Context, accounts *Accounts, name string) (_ RemoteEntry, err error) {
+	defer func() { accounts.ExpireSession(s.Target.Ref.Provider, s.Target.session, err) }()
 	if err := ValidateRemoteName(name); err != nil {
 		return RemoteEntry{}, err
 	}
@@ -242,6 +244,7 @@ func (s DirectorySelection) Trash(ctx context.Context, accounts *Accounts) Direc
 	var result DirectoryTrashResult
 	for _, item := range s.Items {
 		err := s.trashItem(ctx, accounts, item)
+		accounts.ExpireSession(s.Target.Ref.Provider, s.Target.session, err)
 		if err == nil {
 			result.Removed = append(result.Removed, item)
 		} else {
