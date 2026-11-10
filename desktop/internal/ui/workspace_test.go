@@ -37,7 +37,7 @@ func TestWorkspaceNavigation(t *testing.T) {
 		t.Fatalf("搜索后未显示空结果，界面为 %q", window.Texts())
 	}
 
-	click("切换详情")
+	click("显示详情")
 	if !window.HasText("选择任务查看详情") {
 		t.Fatalf("未打开详情，界面为 %q", window.Texts())
 	}

@@ -45,13 +45,18 @@ var transferPages = []struct {
 	id, title, empty string
 	icon             *ui.SVG
 }{
-	{all, "全部", "添加传输任务", transferIcon("M3 14l3-8h12l3 8v5H3z M3 14h5l2 2h4l2-2h5 M8 10h8")},
-	{"transfers.active", "进行中", "等待任务开始", transferIcon("M22 12a10 10 0 1 1-20 0 10 10 0 1 1 20 0z M8 16V8l-2 2 M8 8l2 2 M16 8v8l-2-2 M16 16l2-2")},
-	{"transfers.completed", "已完成", "完成的任务将显示在这里", transferIcon("M22 12a10 10 0 1 1-20 0 10 10 0 1 1 20 0z M7 12l3 3 7-7")},
-	{"transfers.failed", "失败", "失败的任务将显示在这里", transferIcon("M12 3l10 17H2z M12 9v4 M12 16v.3")},
+	{all, "全部", "添加传输任务", workspaceIcon("M3 14l3-8h12l3 8v5H3z M3 14h5l2 2h4l2-2h5 M8 10h8")},
+	{"transfers.active", "进行中", "等待任务开始", workspaceIcon("M22 12a10 10 0 1 1-20 0 10 10 0 1 1 20 0z M8 16V8l-2 2 M8 8l2 2 M16 8v8l-2-2 M16 16l2-2")},
+	{"transfers.completed", "已完成", "完成的任务将显示在这里", workspaceIcon("M22 12a10 10 0 1 1-20 0 10 10 0 1 1 20 0z M7 12l3 3 7-7")},
+	{"transfers.failed", "失败", "失败的任务将显示在这里", workspaceIcon("M12 3l10 17H2z M12 9v4 M12 16v.3")},
 }
 
-func transferIcon(path string) *ui.SVG {
+var (
+	sidebarIcon = workspaceIcon("M3 5h18v14H3z M9 5v14 M5 8h2 M5 11h2")
+	detailsIcon = workspaceIcon("M3 5h18v14H3z M15 5v14 M17 8h2 M17 11h2")
+)
+
+func workspaceIcon(path string) *ui.SVG {
 	return ui.MustParseSVG([]byte(`<svg viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" d="` + path + `"/></svg>`))
 }
 
@@ -221,6 +226,12 @@ func (w *Workspace) View(c *ui.Context) {
 	w.quitNotice(c)
 }
 
+func workspaceToolbarButton(c *ui.Context, label string, icon *ui.SVG) ui.Element {
+	return ui.Button(c, "").Label(label).Tooltip(label).Children(func() {
+		ui.Icon(c, icon).FontSize(18).AccessHidden(true)
+	})
+}
+
 func (w *Workspace) sidebar(c *ui.Context, jobs []app.TransferJob) {
 	top := float32(8)
 	if c.TitleBar().Height > 0 {
@@ -302,7 +313,7 @@ func (w *Workspace) content(c *ui.Context, width float32, jobs []app.TransferJob
 			if w.preferences.SidebarHidden {
 				sidebar = "显示侧边栏"
 			}
-			if ui.Button(c, sidebar).Clicked() {
+			if workspaceToolbarButton(c, sidebar, sidebarIcon).Clicked() {
 				w.toggleSidebar()
 			}
 			ui.Text(c, title).Bold().SingleLine()
@@ -326,7 +337,11 @@ func (w *Workspace) content(c *ui.Context, width float32, jobs []app.TransferJob
 					search.Focus()
 					w.focusSearch = false
 				}
-				if ui.Button(c, "详情").Label("切换详情").Disabled(width < 640 && !w.preferences.DetailsOpen && w.preferences.SidebarHidden).Clicked() {
+				detailsLabel := "显示详情"
+				if w.preferences.DetailsOpen && width >= 640 {
+					detailsLabel = "隐藏详情"
+				}
+				if workspaceToolbarButton(c, detailsLabel, detailsIcon).Disabled(width < 640 && !w.preferences.DetailsOpen && w.preferences.SidebarHidden).Clicked() {
 					windowWidth, _ := c.Size()
 					w.toggleDetails(windowWidth)
 				}
