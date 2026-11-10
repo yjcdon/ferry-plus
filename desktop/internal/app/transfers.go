@@ -137,8 +137,9 @@ type transferRecord struct {
 	Upload              *core.UploadRequest
 	Download            *savedDownload
 	Priority            int64
-	UploadSignature     string   `json:",omitempty"`
-	DuplicateCandidates []string `json:",omitempty"`
+	UploadTrail         []RemoteEntry `json:",omitempty"`
+	UploadSignature     string        `json:",omitempty"`
+	DuplicateCandidates []string      `json:",omitempty"`
 }
 
 type transferRecords interface {
@@ -313,7 +314,7 @@ func (t *Transfers) EnqueueUpload(target DirectoryTarget, sources []platform.Loc
 	}
 	title := batchTitle(filepath.Base(ownedSources[0].Path), len(ownedSources))
 	job := newTransferJob(target.Ref.Provider, session, title, TransferUpload)
-	return t.enqueue(session, transferRecord{TransferJob: job, Upload: &core.UploadRequest{
+	return t.enqueue(session, transferRecord{TransferJob: job, UploadTrail: slices.Clone(target.Trail), Upload: &core.UploadRequest{
 		ID: job.ID, Target: dest, Sources: ownedSources, ConflictPolicy: core.UploadKeepBoth,
 	}})
 }

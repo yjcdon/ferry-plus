@@ -26,6 +26,7 @@ type transferView struct {
 	sourceTarget   uploadSourceTarget
 	sourceProblem  string
 	sourceChecking bool
+	location       uploadLocationView
 	remove         []string
 	confirmRemove  bool
 }
@@ -368,6 +369,9 @@ func (w *Workspace) transferDetailItem(c *ui.Context, job app.TransferJob, item 
 				}
 			}
 		})
+		if job.Direction == app.TransferUpload {
+			w.uploadLocationActions(c, target, item)
+		}
 		if item.Error != "" && ui.Button(c, "复制错误").Clicked() {
 			go mygo.Clipboard.WriteText(item.Error)
 		}

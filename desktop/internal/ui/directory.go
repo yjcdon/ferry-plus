@@ -15,15 +15,16 @@ type directoryRow struct {
 }
 
 type directoryView struct {
-	directory *app.Directory
-	outline   ui.OutlineState[directoryRow]
-	selection ui.Selection[directoryRow]
-	focus     int
-	sort      ui.SortOrder
-	query     string
-	busy      bool
-	problem   string
-	edit      *directoryEdit
+	directory  *app.Directory
+	outline    ui.OutlineState[directoryRow]
+	selection  ui.Selection[directoryRow]
+	focus      int
+	cloudFocus app.RemoteRef
+	sort       ui.SortOrder
+	query      string
+	busy       bool
+	problem    string
+	edit       *directoryEdit
 }
 
 var fileColumns = []ui.TableColumn{
@@ -42,6 +43,7 @@ func newDirectoryView(provider app.Provider, location app.DirectoryLocation) *di
 
 func (f *directoryView) resetTree() {
 	f.focus = -1
+	f.cloudFocus = app.RemoteRef{}
 	f.edit = nil
 	f.selection.Clear()
 	f.outline = ui.OutlineState[directoryRow]{Indent: 18}
@@ -285,6 +287,16 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 	}
 	if table.Changed() {
 		f.applySelection()
+	}
+	if f.cloudFocus.ID != "" {
+		for i := range f.outline.Rows() {
+			if row := f.outline.Item(i); !row.status && row.ref == f.cloudFocus {
+				f.focus = i
+				f.outline.List.ScrollIntoView(i)
+				break
+			}
+		}
+		f.cloudFocus = app.RemoteRef{}
 	}
 	if edit := f.edit; edit != nil && edit.fresh {
 		for i := range f.outline.Rows() {
