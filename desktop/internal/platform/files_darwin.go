@@ -3,7 +3,9 @@ package platform
 import (
 	"errors"
 	"fmt"
+	"os"
 	"runtime"
+	"syscall"
 	"unsafe"
 
 	"github.com/ebitengine/purego/objc"
@@ -89,7 +91,11 @@ func rememberURL(url objc.ID) (LocalReference, error) {
 	if err != nil {
 		return LocalReference{}, fmt.Errorf("保存文件访问权限 %q: %w", path, err)
 	}
-	return LocalReference{Path: path, Bookmark: bookmark}, nil
+	identity, err := localDirectoryIdentity(path)
+	if err != nil {
+		return LocalReference{}, err
+	}
+	return LocalReference{Path: path, Bookmark: bookmark, Directory: identity}, nil
 }
 
 func openLocalItem(ref LocalReference) (*LocalAccess, error) {
@@ -118,6 +124,17 @@ func openLocalItem(ref LocalReference) (*LocalAccess, error) {
 		objcSend[uintptr](url, "stopAccessingSecurityScopedResource")
 		objcSend[uintptr](url, "release")
 	}}
+	if ref.Directory != (directoryIdentity{}) {
+		identity, err := localDirectoryIdentity(ref.Path)
+		if err != nil {
+			access.Close()
+			return nil, err
+		}
+		if identity != ref.Directory {
+			access.Close()
+			return nil, errors.New("原文件夹已移动或被替换，请重新选择")
+		}
+	}
 	if stale {
 		bookmark, err := bookmarkForURL(url)
 		if err != nil {
@@ -127,6 +144,17 @@ func openLocalItem(ref LocalReference) (*LocalAccess, error) {
 		access.Reference.Bookmark = bookmark
 	}
 	return access, nil
+}
+
+// localDirectoryIdentity distinguishes a moved directory from a replacement at
+// its old path. Device numbers can change when a volume is remounted.
+func localDirectoryIdentity(path string) (directoryIdentity, error) {
+	info, err := os.Stat(path)
+	if err != nil || !info.IsDir() {
+		return directoryIdentity{}, err
+	}
+	stat := info.Sys().(*syscall.Stat_t)
+	return directoryIdentity{Inode: stat.Ino, Birth: stat.Birthtimespec.Nano()}, nil
 }
 
 func bookmarkForURL(url objc.ID) ([]byte, error) {

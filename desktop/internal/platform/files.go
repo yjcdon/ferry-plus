@@ -12,8 +12,14 @@ import (
 
 // LocalReference identifies a user-selected local item across launches.
 type LocalReference struct {
-	Path     string `json:"path"`
-	Bookmark []byte `json:"bookmark,omitempty"`
+	Path      string            `json:"path"`
+	Bookmark  []byte            `json:"bookmark,omitempty"`
+	Directory directoryIdentity `json:"directory,omitzero"`
+}
+
+type directoryIdentity struct {
+	Inode uint64 `json:"inode"`
+	Birth int64  `json:"birth"`
 }
 
 // LocalAccess keeps a selected path accessible until Close.
