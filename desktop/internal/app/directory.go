@@ -329,6 +329,16 @@ func (d *Directory) Selection() []RemoteRef {
 	return refs
 }
 
+// SelectedThroughParent reports whether an explicitly selected folder includes ref.
+func (d *Directory) SelectedThroughParent(ref RemoteRef) bool {
+	for parent, ok := d.parents[ref]; ok; parent, ok = d.parents[parent] {
+		if d.selected[parent] {
+			return true
+		}
+	}
+	return false
+}
+
 func (d *Directory) SelectedEntries() []RemoteEntry {
 	var selected []RemoteEntry
 	d.walkVisible(d.Roots(), func(entry RemoteEntry) bool {

@@ -381,8 +381,13 @@ func (f *directoryView) applyExpansion(before map[directoryRow]bool, expand func
 }
 
 func (f *directoryView) selectionCheckbox(c *ui.Context, row directoryRow, name string) {
-	checked := f.selection.Has(row)
-	if ui.Checkbox(c, &checked, "").Label("选择 " + name).Changed() {
+	included := f.directory.SelectedThroughParent(row.ref)
+	checked := included || f.selection.Has(row)
+	label := "选择 " + name
+	if included {
+		label = name + "，随父文件夹一起选择"
+	}
+	if ui.Checkbox(c, &checked, "").Label(label).Disabled(included).Changed() {
 		if checked {
 			f.selection.Add(row)
 		} else {

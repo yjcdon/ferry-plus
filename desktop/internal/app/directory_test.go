@@ -90,7 +90,13 @@ func TestDirectoryNavigatesSearchesAndKeepsOneSelection(t *testing.T) {
 	if !slices.Equal(directory.Selection(), []RemoteRef{folder}) {
 		t.Fatal("parent and child became duplicate operation targets")
 	}
+	if !directory.SelectedThroughParent(child) || !directory.SelectedThroughParent(file) || directory.SelectedThroughParent(folder) {
+		t.Fatal("only descendants should inherit the folder selection")
+	}
 	directory.SetSelection([]RemoteRef{file})
+	if directory.SelectedThroughParent(file) {
+		t.Fatal("an explicitly selected file should not inherit selection")
+	}
 	directory.Collapse(folder)
 	if len(directory.Selection()) != 0 {
 		t.Fatal("a hidden child stayed explicitly selected")
