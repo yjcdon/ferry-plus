@@ -128,11 +128,7 @@ func (w *Workspace) transferRows(c *ui.Context, jobs []app.TransferJob, index in
 	w.transferSummary(c, visible)
 }
 
-var (
-	transferUploadIcon   = workspaceIcon("M14 2H5v20h14V7l-5-5v5h5 M12 18v-7m-3 3 3-3 3 3")
-	transferDownloadIcon = workspaceIcon("M14 2H5v20h14V7l-5-5v5h5 M12 11v7m-3-3 3 3 3-3")
-	transferMoreIcon     = workspaceIcon("M5 12h.1m6.9 0h.1m6.9 0h.1")
-)
+var transferMoreIcon = workspaceIcon("M5 12h.1m6.9 0h.1m6.9 0h.1")
 
 func (w *Workspace) transferRow(c *ui.Context, job app.TransferJob, visible []app.TransferJob) {
 	theme := c.Theme()
@@ -141,9 +137,9 @@ func (w *Workspace) transferRow(c *ui.Context, job app.TransferJob, visible []ap
 	if selected {
 		secondaryColor, errorColor = theme.AccentText, theme.AccentText
 	}
-	icon := transferDownloadIcon
+	icon := downloadIcon
 	if job.Direction == app.TransferUpload {
-		icon = transferUploadIcon
+		icon = uploadIcon
 	}
 	ui.Row(c).Padding(6, 12).Gap(10).AlignItems(ui.Start).
 		ContextMenu(func(m *ui.Menu) { w.taskSelectionMenu(m, job, visible) }).Children(func() {
