@@ -68,16 +68,17 @@ type UploadProgress struct {
 }
 
 type UploadItemResult struct {
-	RelativePath string
-	RemoteName   string
-	Path         string
-	FSID         int64
-	FID          string
-	Size         int64
-	Directory    bool
-	Skipped      bool
-	CanRebind    bool
-	Error        string
+	RelativePath    string
+	CheckpointBytes *int64
+	RemoteName      string
+	Path            string
+	FSID            int64
+	FID             string
+	Size            int64
+	Directory       bool
+	Skipped         bool
+	CanRebind       bool
+	Error           string
 }
 
 type UploadResult struct {
@@ -244,6 +245,7 @@ func (u *uploadRun) run(ctx context.Context, manifest uploadManifest, name strin
 		parent, ok := directories[parentPath]
 		var state uploadItemState
 		var err error
+		itemKey := uploadItemKey(name, entry.Relative)
 		switch {
 		case skipped[parentPath]:
 			state.Skipped = true
@@ -257,7 +259,7 @@ func (u *uploadRun) run(ctx context.Context, manifest uploadManifest, name strin
 			if err != nil {
 				return result, err
 			}
-			state, err = u.runItem(ctx, uploadItemKey(name, entry.Relative), entry, source, parent)
+			state, err = u.runItem(ctx, itemKey, entry, source, parent)
 		}
 		item := UploadItemResult{RelativePath: entry.Relative, RemoteName: state.Name, Path: state.Remote.Path, FSID: state.Remote.FSID,
 			FID: state.Remote.FID, Size: entry.Size, Directory: entry.Directory, Skipped: state.Skipped}
@@ -265,10 +267,17 @@ func (u *uploadRun) run(ctx context.Context, manifest uploadManifest, name strin
 		case err != nil:
 			item.Error = err.Error()
 			item.CanRebind = canRebindUploadSource(entry, state)
+			var saved uploadItemState
+			if readErr := u.records.Read(itemKey, &saved); readErr == nil || errors.Is(readErr, fs.ErrNotExist) {
+				bytes := saved.confirmedBytes(entry)
+				item.CheckpointBytes = &bytes
+			}
 			if firstFailure == nil {
 				firstFailure = fmt.Errorf("%s: %w", entry.Relative, err)
 			}
-			u.report(entry, "failed", 0)
+			if item.CheckpointBytes != nil {
+				u.report(entry, "failed", *item.CheckpointBytes)
+			}
 		case state.Skipped:
 			if entry.Directory {
 				skipped[entry.Relative] = true
@@ -289,6 +298,31 @@ func (u *uploadRun) run(ctx context.Context, manifest uploadManifest, name strin
 		return result, err
 	}
 	return result, firstFailure
+}
+
+// confirmedBytes counts uploaded bytes represented by the saved provider receipts.
+func (s uploadItemState) confirmedBytes(entry uploadLocalItem) int64 {
+	if entry.Directory || s.Skipped {
+		return 0
+	}
+	if s.Complete || s.Remote.identified() {
+		return entry.Size
+	}
+	var done int64
+	if s.Baidu != nil {
+		done = entry.Size
+		for _, index := range s.Baidu.PendingParts {
+			done -= uploadPartLength(entry.Size, s.Fingerprint.PartSize, index)
+		}
+		for _, part := range s.BaiduParts {
+			done += int64(part.Size)
+		}
+	} else {
+		for _, part := range s.QuarkParts {
+			done += int64(part.Size)
+		}
+	}
+	return min(entry.Size, max(0, done))
 }
 
 func (u *uploadRun) runItem(ctx context.Context, key string, entry uploadLocalItem, source platform.LocalReference, parent uploadRemoteItem) (uploadItemState, error) {
@@ -355,7 +389,7 @@ func (u *uploadRun) runItem(ctx context.Context, key string, entry uploadLocalIt
 		return state, save()
 	}
 	if !state.Remote.identified() {
-		u.report(entry, "preparing", 0)
+		u.report(entry, "preparing", state.confirmedBytes(entry))
 		var err error
 		if u.req.Target.Provider == "baidu" {
 			err = u.uploadBaidu(ctx, entry, source, parent, &state, save)

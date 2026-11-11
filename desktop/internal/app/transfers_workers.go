@@ -32,9 +32,11 @@ func (t *Transfers) runUpload(ctx context.Context, worker *transferWorker) ([]Tr
 	}
 	providers := core.UploadProviders{Baidu: worker.session.Baidu, Quark: worker.session.Quark, AccountID: worker.session.ID}
 	progress := make(map[string]core.UploadProgress, len(worker.job.Items))
+	checkpoints := make(map[string]int64, len(worker.job.Items))
 	var done, total int64
 	for _, item := range worker.job.Items {
-		n := int64(0)
+		n := item.CheckpointBytes
+		checkpoints[item.RelativePath] = n
 		if item.Complete {
 			n = item.Size
 		}
@@ -57,9 +59,16 @@ func (t *Transfers) runUpload(ctx context.Context, worker *transferWorker) ([]Tr
 			ref.ID = strconv.FormatInt(item.FSID, 10)
 		}
 		complete := item.Error == "" && !item.Skipped
+		checkpoint := checkpoints[item.RelativePath]
+		if item.CheckpointBytes != nil {
+			checkpoint = *item.CheckpointBytes
+		}
+		if complete || item.Skipped {
+			checkpoint = 0
+		}
 		unconfirmed = unconfirmed || strings.Contains(item.Error, core.ErrUploadUnconfirmed.Error())
 		items = append(items, TransferItem{
-			RelativePath: item.RelativePath, Remote: ref, Size: item.Size, Directory: item.Directory,
+			RelativePath: item.RelativePath, Remote: ref, Size: item.Size, CheckpointBytes: checkpoint, Directory: item.Directory,
 			Complete: complete, Skipped: item.Skipped, Verified: complete && !item.Directory, CanRebind: item.CanRebind, Error: item.Error,
 		})
 	}

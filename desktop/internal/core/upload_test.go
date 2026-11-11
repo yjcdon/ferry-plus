@@ -196,6 +196,9 @@ func TestUploadFolderRebindAndResumeOnlyReadback(t *testing.T) {
 	if !errors.Is(err, fs.ErrNotExist) || len(result.Items) != 3 || !result.Items[1].CanRebind || parts.Load() != 1 {
 		t.Fatalf("moved source result = %+v, err = %v, parts = %d", result, err, parts.Load())
 	}
+	if saved := result.Items[1].CheckpointBytes; saved == nil || *saved != 3 {
+		t.Fatalf("已保存分片进度 = %v，预期 3 字节", saved)
+	}
 	key := uploadJobKey(req.ID)
 	originalManifest := string(records.data[key])
 	receiptKey := uploadItemKey(key, relative)
@@ -219,6 +222,9 @@ func TestUploadFolderRebindAndResumeOnlyReadback(t *testing.T) {
 	result, err = newUploader(records, client).Run(t.Context(), req, providers, nil)
 	if !errors.Is(err, ErrUploadReadback) || len(result.Items) != 3 || result.Items[1].Error == "" || len(records.secrets) != 1 {
 		t.Fatalf("initial result = %+v, err = %v, secrets = %d", result, err, len(records.secrets))
+	}
+	if saved := result.Items[1].CheckpointBytes; saved == nil || *saved != 5 {
+		t.Fatalf("回读失败时上传进度 = %v，预期 5 字节", saved)
 	}
 	for _, raw := range records.data {
 		if strings.Contains(string(raw), "private-auth") {
