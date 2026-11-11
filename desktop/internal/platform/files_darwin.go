@@ -18,7 +18,7 @@ const (
 	bookmarkResolveWithoutUI = uint(1 << 8)
 )
 
-func chooseLocalItems(parent *mygo.Window, folderOnly bool, done func([]LocalReference, error)) func() {
+func chooseLocalItems(parent *mygo.Window, mode localPickerMode, done func([]LocalReference, error)) func() {
 	var panel objc.ID
 	mygo.RunOnMain(func() {
 		if parent == nil || parent.NativeHandle() == 0 {
@@ -28,12 +28,12 @@ func chooseLocalItems(parent *mygo.Window, folderOnly bool, done func([]LocalRef
 		defer objcPool()()
 		panel = objcSend[objc.ID](objcClass("NSOpenPanel"), "openPanel")
 		objcSend[objc.ID](panel, "retain")
-		objcSend[uintptr](panel, "setCanChooseFiles:", !folderOnly)
-		objcSend[uintptr](panel, "setCanChooseDirectories:", true)
-		objcSend[uintptr](panel, "setAllowsMultipleSelection:", !folderOnly)
-		objcSend[uintptr](panel, "setCanCreateDirectories:", folderOnly)
+		objcSend[uintptr](panel, "setCanChooseFiles:", mode != pickDownloadFolder)
+		objcSend[uintptr](panel, "setCanChooseDirectories:", mode != pickUploadSource)
+		objcSend[uintptr](panel, "setAllowsMultipleSelection:", mode == pickUploadItems)
+		objcSend[uintptr](panel, "setCanCreateDirectories:", mode == pickDownloadFolder)
 		button := "上传"
-		if folderOnly {
+		if mode != pickUploadItems {
 			button = "选择"
 		}
 		objcSend[uintptr](panel, "setPrompt:", objcString(button))

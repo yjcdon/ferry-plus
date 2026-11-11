@@ -50,7 +50,7 @@ type pickerResult struct {
 	err   error
 }
 
-func chooseLocalItems(parent *mygo.Window, folderOnly bool, done func([]LocalReference, error)) func() {
+func chooseLocalItems(parent *mygo.Window, mode localPickerMode, done func([]LocalReference, error)) func() {
 	var dialog uintptr
 	var canceled bool
 	go mygo.RunOnMain(func() {
@@ -62,7 +62,7 @@ func chooseLocalItems(parent *mygo.Window, folderOnly bool, done func([]LocalRef
 			done(nil, fmt.Errorf("请重新打开文件选择窗口"))
 			return
 		}
-		paths, err := showLocalDialog(parent.NativeHandle(), folderOnly, &dialog)
+		paths, err := showLocalDialog(parent.NativeHandle(), mode, &dialog)
 		done(paths, err)
 	})
 	return func() {
@@ -75,7 +75,7 @@ func chooseLocalItems(parent *mygo.Window, folderOnly bool, done func([]LocalRef
 	}
 }
 
-func showLocalDialog(owner uintptr, folderOnly bool, dialog *uintptr) ([]LocalReference, error) {
+func showLocalDialog(owner uintptr, mode localPickerMode, dialog *uintptr) ([]LocalReference, error) {
 	hr, _, _ := pickerCreate.Call(uintptr(unsafe.Pointer(&classFileOpen)), 0, 1,
 		uintptr(unsafe.Pointer(&iidFileOpen)), uintptr(unsafe.Pointer(dialog)))
 	if err := pickerError("打开文件选择器", hr); err != nil {
@@ -91,8 +91,10 @@ func showLocalDialog(owner uintptr, folderOnly bool, dialog *uintptr) ([]LocalRe
 		return nil, err
 	}
 	options |= fileDialogForceFileSystem
-	if folderOnly {
+	if mode == pickDownloadFolder {
 		options |= fileDialogPickFolders
+	}
+	if mode != pickUploadItems {
 		label, _ := syscall.UTF16PtrFromString("选择")
 		if err := pickerError("设置选择按钮", pickerCall(*dialog, fileDialogSetButtonLabel, uintptr(unsafe.Pointer(label)))); err != nil {
 			return nil, err
@@ -105,7 +107,7 @@ func showLocalDialog(owner uintptr, folderOnly bool, dialog *uintptr) ([]LocalRe
 	}
 
 	var selection pickerResult
-	if !folderOnly {
+	if mode == pickUploadItems {
 		remove, err := addMixedSelection(*dialog, &selection)
 		if err != nil {
 			return nil, err

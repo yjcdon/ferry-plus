@@ -35,16 +35,29 @@ func (a *LocalAccess) Close() {
 	}
 }
 
+type localPickerMode uint8
+
+const (
+	pickUploadItems localPickerMode = iota
+	pickUploadSource
+	pickDownloadFolder
+)
+
 // ChooseUploadItems opens one system picker for files and folders. Cancellation
 // calls done with no items and no error. The returned function closes the picker.
 func ChooseUploadItems(parent *mygo.Window, done func([]LocalReference, error)) func() {
-	return chooseLocalItems(parent, false, done)
+	return chooseLocalItems(parent, pickUploadItems, done)
+}
+
+// ChooseUploadSource selects one replacement file for an existing upload.
+func ChooseUploadSource(parent *mygo.Window, done func([]LocalReference, error)) func() {
+	return chooseLocalItems(parent, pickUploadSource, done)
 }
 
 // ChooseDownloadFolder opens the system folder picker. Cancellation calls done
 // with a zero reference and no error.
 func ChooseDownloadFolder(parent *mygo.Window, done func(LocalReference, error)) func() {
-	return chooseLocalItems(parent, true, func(items []LocalReference, err error) {
+	return chooseLocalItems(parent, pickDownloadFolder, func(items []LocalReference, err error) {
 		if len(items) == 0 || err != nil {
 			done(LocalReference{}, err)
 			return

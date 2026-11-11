@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 
@@ -17,12 +18,10 @@ type uploadSourceTarget struct{ jobID, relativePath string }
 
 func (w *Workspace) chooseReplacementUploadSource(target uploadSourceTarget) {
 	w.transfer.sourceTarget, w.transfer.sourceProblem = target, ""
-	w.pickUploadItems(func(items []platform.LocalReference, err error) {
+	w.pickLocalItems(platform.ChooseUploadSource, func(items []platform.LocalReference, err error) {
 		if err != nil {
 			w.transfer.sourceProblem = err.Error()
-		} else if len(items) > 1 {
-			w.transfer.sourceProblem = "请选择一个源文件。"
-		} else if len(items) == 1 && !w.quitting {
+		} else if len(items) != 0 && !w.quitting {
 			w.transfer.sourceChecking = true
 			go func() {
 				err := w.jobs.RebindUploadSource(w.ctx, target.jobID, target.relativePath, items[0])
@@ -44,7 +43,7 @@ func (w *Workspace) uploadFromCurrent() {
 			return
 		}
 	}
-	w.pickUploadItems(func(items []platform.LocalReference, err error) {
+	w.pickLocalItems(platform.ChooseUploadItems, func(items []platform.LocalReference, err error) {
 		if err != nil {
 			w.transfer.problem = err.Error()
 		} else if len(items) != 0 {
@@ -59,7 +58,7 @@ func (w *Workspace) chooseUpload(f *directoryView, ref app.RemoteRef) {
 		return
 	}
 	f.problem = ""
-	w.pickUploadItems(func(items []platform.LocalReference, err error) {
+	w.pickLocalItems(platform.ChooseUploadItems, func(items []platform.LocalReference, err error) {
 		if err != nil {
 			f.problem = err.Error()
 		} else if len(items) != 0 {
@@ -68,12 +67,12 @@ func (w *Workspace) chooseUpload(f *directoryView, ref app.RemoteRef) {
 	})
 }
 
-func (w *Workspace) pickUploadItems(done func([]platform.LocalReference, error)) {
+func (w *Workspace) pickLocalItems(choose func(*mygo.Window, func([]platform.LocalReference, error)) func(), done func([]platform.LocalReference, error)) {
 	w.window.Update(func() {
 		if w.chooser != nil {
 			return
 		}
-		w.chooser = platform.ChooseUploadItems(w.window, func(items []platform.LocalReference, err error) {
+		w.chooser = choose(w.window, func(items []platform.LocalReference, err error) {
 			w.window.Update(func() {
 				w.chooser = nil
 				done(items, err)
