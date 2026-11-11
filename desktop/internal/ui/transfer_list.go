@@ -242,7 +242,7 @@ func (w *Workspace) transferSummary(c *ui.Context, visible []app.TransferJob) {
 			selected++
 		}
 	}
-	ui.Toolbar(c, func() {
+	workspaceStatusBar(c, func() {
 		ui.Textf(c, "%d 个任务", len(visible))
 		if selected > 0 {
 			ui.Textf(c, "已选择 %d 个传输任务", selected)

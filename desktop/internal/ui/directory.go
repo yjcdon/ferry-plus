@@ -225,7 +225,7 @@ func (w *Workspace) directoryBody(c *ui.Context, f *directoryView) {
 		w.directoryTable(c, f, roots)
 	}
 	if items := d.SelectedEntries(); len(items) > 0 || d.Loading(root) {
-		ui.Toolbar(c, func() {
+		workspaceStatusBar(c, func() {
 			if d.Loading(root) {
 				ui.Text(c, "正在刷新").TextColor(c.Theme().TextMuted)
 			}

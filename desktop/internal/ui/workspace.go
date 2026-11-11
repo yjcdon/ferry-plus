@@ -17,6 +17,8 @@ const (
 	baiduPage = string(app.Baidu)
 	quarkPage = string(app.Quark)
 	all       = "transfers.all"
+
+	workspaceFooterHeight = 44
 )
 
 //go:embed assets/BaiduNetdisk.png
@@ -246,7 +248,7 @@ func (w *Workspace) sidebar(c *ui.Context, jobs []app.TransferJob) {
 	if c.TitleBar().Height > 0 {
 		top = 44
 	}
-	ui.Column(c).Fill().Padding(top, 8, 8).Children(func() {
+	ui.Column(c).Fill().Padding(top, 8, 0).Children(func() {
 		previous := w.preferences.Page
 		ui.Sidebar(c, &w.preferences.Page, func() {
 			ui.SidebarSection(c, "网盘", nil, func() {
@@ -299,7 +301,7 @@ func (w *Workspace) sidebar(c *ui.Context, jobs []app.TransferJob) {
 		if w.accounts != nil {
 			ui.Divider(c)
 			ui.ButtonBase(c).Menu(w.accountMenu).Label("账号与设置").
-				FillWidth().Height(44).Padding(0, 12).Gap(8).Tooltip("百度与夸克账号").Children(func() {
+				FillWidth().Height(workspaceFooterHeight).Padding(0, 12).Gap(8).Tooltip("百度与夸克账号").Children(func() {
 				ui.Icon(c, accountIcon).FontSize(20).AccessHidden(true)
 				ui.Text(c, "账号与设置").SingleLine()
 			})
@@ -320,6 +322,12 @@ func (w *Workspace) sidebar(c *ui.Context, jobs []app.TransferJob) {
 			}
 		}
 	})
+}
+
+// workspaceStatusBar aligns the content footer with the account button.
+func workspaceStatusBar(c *ui.Context, content func()) {
+	ui.Divider(c)
+	ui.Toolbar(c, content).Height(workspaceFooterHeight)
 }
 
 func (w *Workspace) content(c *ui.Context, width float32, jobs []app.TransferJob) {
