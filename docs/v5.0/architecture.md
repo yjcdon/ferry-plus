@@ -227,3 +227,15 @@ Windows 10 与 Windows 11 使用同一 x64 构建。系统 API 使用前核对�
 以上结论属于文档审查及源码对照。Windows 10 1809 是最低构建实施假设，混合选择器适配、真实网盘登录和两端运行结果保留为对应任务的实际验收门槛。
 
 后续范围调整于 2026-11-10 按用户要求同步到四份文档。第一阶段仅执行 Mac 运行验收，Windows 的构建检查在 Mac 上完成，运行验收归第二阶段。T02、T16、T18、阶段门槛及用例执行规则已同步调整，前述 Windows 验收门槛适用于第二阶段。
+
+### Ferry Drive 更新发布
+
+Go 应用通过 MyGo 的更新模块按平台读取 GitHub Release 清单，使用内置 Ed25519 公钥验证更新归档。macOS 和 Windows 都使用原生更新界面。自动检查可在设置关闭，安装须经确认。正在传输时保留下载好的更新，完成后从「检查更新…」重启。重启前复用传输保存屏障并释放 5.0 数据目录锁。
+
+发布版本以 `desktop/mygo.json` 为准，并在 `CHANGELOG.md` 写入对应版本。发布机提供与 `updates.publicKey` 配对的 `MYGO_UPDATER_PRIVATE_KEY`，私钥保存在受保护的发布环境中。本地签名构建用 `bash Scripts/build-v5.sh`。发布时，在 `desktop/` 使用以下命令生成两端产物并上传草稿：
+
+```sh
+go tool mygo build -platform darwin/arm64,windows/amd64 -skip-dmg -sign "$FERRY_CODESIGN_IDENTITY" -upload
+```
+
+核对草稿包含两端 `update-*.json`、对应签名归档及 Windows 安装器，再发布 `drive-v<版本>` 标签对应的 Release，GitHub Latest 继续用于旧版 Sparkle 渠道。macOS 初次安装可解压归档取得 `.app`。

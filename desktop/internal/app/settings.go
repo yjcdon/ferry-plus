@@ -33,16 +33,17 @@ type DiskSettings struct {
 }
 
 type SettingsValues struct {
-	DownloadDirectory      platform.LocalReference `json:"downloadDirectory"`
-	MaxConcurrentFiles     int                     `json:"maxConcurrentFiles"`
-	MaxConcurrentUploads   int                     `json:"maxConcurrentUploads"`
-	UploadPartsPerFile     int                     `json:"uploadPartsPerFile"`
-	UploadBytesPerSecond   int64                   `json:"uploadBytesPerSecond"`
-	DownloadBytesPerSecond int64                   `json:"downloadBytesPerSecond"`
-	DetectsCopiedLinks     bool                    `json:"detectsCopiedLinks"`
-	Baidu                  DiskSettings            `json:"baidu"`
-	Quark                  DiskSettings            `json:"quark"`
-	SelectedTab            int                     `json:"selectedTab"`
+	DownloadDirectory            platform.LocalReference `json:"downloadDirectory"`
+	MaxConcurrentFiles           int                     `json:"maxConcurrentFiles"`
+	MaxConcurrentUploads         int                     `json:"maxConcurrentUploads"`
+	UploadPartsPerFile           int                     `json:"uploadPartsPerFile"`
+	UploadBytesPerSecond         int64                   `json:"uploadBytesPerSecond"`
+	DownloadBytesPerSecond       int64                   `json:"downloadBytesPerSecond"`
+	DetectsCopiedLinks           bool                    `json:"detectsCopiedLinks"`
+	DisableAutomaticUpdateChecks bool                    `json:"disableAutomaticUpdateChecks,omitempty"`
+	Baidu                        DiskSettings            `json:"baidu"`
+	Quark                        DiskSettings            `json:"quark"`
+	SelectedTab                  int                     `json:"selectedTab"`
 }
 
 func DefaultSettings() SettingsValues {
@@ -78,7 +79,7 @@ func (s *SettingsValues) normalize() {
 	s.DownloadBytesPerSecond = max(0, s.DownloadBytesPerSecond)
 	s.Baidu.TransferFolder = normalizeTransferFolder(s.Baidu.TransferFolder, "/Ferry")
 	s.Quark.TransferFolder = normalizeTransferFolder(s.Quark.TransferFolder, "/Ferry Plus")
-	if s.SelectedTab < 0 || s.SelectedTab >= 4 {
+	if s.SelectedTab < 0 || s.SelectedTab >= 5 {
 		s.SelectedTab = 0
 	}
 }

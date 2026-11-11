@@ -17,12 +17,13 @@ import (
 // SettingsWindowOptions connects the settings window to the workspace's
 // existing account actions and notifies the app of committed settings.
 type SettingsWindowOptions struct {
-	InitialError   error
-	ShowLogin      func(app.Provider)
-	AccountChanged func(app.Provider)
-	Changed        func()
-	Closed         func()
-	QuitPending    func() bool
+	InitialError    error
+	ShowLogin       func(app.Provider)
+	AccountChanged  func(app.Provider)
+	Changed         func()
+	Closed          func()
+	QuitPending     func() bool
+	CheckForUpdates func()
 }
 
 type settingsWindow struct {
@@ -62,9 +63,10 @@ var settingsTabs = []struct {
 	{"网盘", workspaceIcon("M7 18h12a3.5 3.5 0 0 0 0-7h-1a6 6 0 0 0-11.5-1A4 4 0 0 0 7 18z")},
 	{"网络", workspaceIcon("M22 12a10 10 0 1 1-20 0 10 10 0 1 1 20 0z M2 12h20 M12 2c6 6 6 14 0 20-6-6-6-14 0-20z M4 6.5c4 3 12 3 16 0 M4 17.5c4-3 12-3 16 0")},
 	{"账号", accountIcon},
+	{"更新", refreshIcon},
 }
 
-// OpenSettings opens the four native settings categories in a dedicated window.
+// OpenSettings opens the native settings window.
 func OpenSettings(ctx context.Context, model *app.SettingsModel, accounts *app.Accounts, options SettingsWindowOptions) *mygo.Window {
 	s := &settingsWindow{
 		model: model, accounts: accounts, opts: options, tab: model.Values().SelectedTab,
@@ -162,6 +164,8 @@ func (s *settingsWindow) content(c *ui.Context) {
 					s.network(c)
 				case 3:
 					s.accountSettings(c)
+				case 4:
+					s.updateSettings(c)
 				}
 				if s.problem != "" {
 					ui.Text(c, s.problem).TextColor(c.Theme().Danger)
@@ -173,6 +177,19 @@ func (s *settingsWindow) content(c *ui.Context) {
 		"退出"+providerTitle(string(s.logoutProvider))+"？",
 		"退出后可以重新登录以继续使用该账号。", "取消", "退出登录") == 1 {
 		s.logout(s.logoutProvider)
+	}
+}
+
+func (s *settingsWindow) updateSettings(c *ui.Context) {
+	settingsRow(c, "当前版本", func() { ui.Text(c, mygo.App.Version()) })
+	automatic := !s.model.Values().DisableAutomaticUpdateChecks
+	if ui.Checkbox(c, &automatic, "自动检查更新").Disabled(s.saving).Changed() {
+		s.save(func() error {
+			return s.model.Update(func(v *app.SettingsValues) { v.DisableAutomaticUpdateChecks = !automatic })
+		}, nil, false)
+	}
+	if s.opts.CheckForUpdates != nil && ui.Button(c, "检查更新…").Clicked() {
+		s.opts.CheckForUpdates()
 	}
 }
 

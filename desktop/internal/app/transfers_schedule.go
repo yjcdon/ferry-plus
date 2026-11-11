@@ -199,6 +199,13 @@ func (t *Transfers) Wake() {
 	t.changed()
 }
 
+// HasActiveWork reports whether a transfer or upload check is still running.
+func (t *Transfers) HasActiveWork() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.active) != 0 || len(t.uploadChecks) != 0
+}
+
 // Close stops new work and waits for every active worker to save its receipts.
 func (t *Transfers) Close() {
 	t.mu.Lock()

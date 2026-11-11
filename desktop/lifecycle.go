@@ -9,7 +9,7 @@ import (
 	ferryui "github.com/yjcdon/ferry-drive/desktop/internal/ui"
 )
 
-func bindDesktop(window *mygo.Window, workspace *ferryui.Workspace, transfers *app.Transfers, cancel func()) {
+func bindDesktop(window *mygo.Window, workspace *ferryui.Workspace, transfers *app.Transfers, cancel, beforeRestart func()) (restart func()) {
 	quitting, ready := false, false
 	show := func() {
 		if !quitting {
@@ -48,11 +48,7 @@ func bindDesktop(window *mygo.Window, workspace *ferryui.Workspace, transfers *a
 		})
 		tray, _ = mygo.NewTray(mygo.TrayOptions{ID: "main", ToolTip: "Ferry Drive", Menu: menu})
 	}
-	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
-		if ready {
-			return
-		}
-		e.PreventDefault()
+	prepareExit := func(finish func()) {
 		if quitting {
 			return
 		}
@@ -66,9 +62,21 @@ func bindDesktop(window *mygo.Window, workspace *ferryui.Workspace, transfers *a
 						tray.Destroy()
 					}
 					ready = true
-					mygo.App.Quit()
+					finish()
 				})
 			}()
 		})
+	}
+	mygo.App.OnBeforeQuit(func(e *mygo.QuitEvent) {
+		if !ready {
+			e.PreventDefault()
+			prepareExit(mygo.App.Quit)
+		}
 	})
+	return func() {
+		prepareExit(func() {
+			beforeRestart()
+			mygo.App.Relaunch()
+		})
+	}
 }

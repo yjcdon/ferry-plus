@@ -24,11 +24,12 @@ func (w *Workspace) showSettings() {
 			return
 		}
 		w.settingsWindow = OpenSettings(w.ctx, w.settings, w.accounts, SettingsWindowOptions{
-			InitialError:   w.settingsReadError,
-			ShowLogin:      w.showLogin,
-			AccountChanged: w.AccountChanged,
-			Changed:        w.settingsChanged,
-			QuitPending:    func() bool { return w.quitting },
+			InitialError:    w.settingsReadError,
+			ShowLogin:       w.showLogin,
+			AccountChanged:  w.AccountChanged,
+			Changed:         w.settingsChanged,
+			QuitPending:     func() bool { return w.quitting },
+			CheckForUpdates: w.checkForUpdates,
 			Closed: func() {
 				w.settingsWindow = nil
 				w.finishPrepareQuit()

@@ -64,6 +64,8 @@ func run() (err error) {
 		return err
 	}
 	defer transfers.Close()
+	var restartSaveErr error
+	savedForRestart := false
 	mygo.App.WhenReady(func() {
 		opts := mygo.WindowOptions{
 			Title:     "Ferry Drive",
@@ -87,11 +89,16 @@ func run() (err error) {
 		})
 		go accounts.Restore(ctx, app.Baidu, func() { workspace.AccountChanged(app.Baidu) })
 		go accounts.Restore(ctx, app.Quark, func() { workspace.AccountChanged(app.Quark) })
-		mygo.App.SetMenu(workspace.Menu(window))
-		bindDesktop(window, workspace, transfers, cancel)
+		restart := bindDesktop(window, workspace, transfers, cancel, func() {
+			restartSaveErr = errors.Join(data.Write("workspace", workspace.Preferences()), data.Close())
+			savedForRestart = true
+		})
+		mygo.App.SetMenu(workspace.Menu(window, updateCommand(ctx, window, restart, transfers.HasActiveWork, func() bool {
+			return !settings.Values().DisableAutomaticUpdateChecks
+		})))
 	})
-	if err := mygo.App.Run(); err != nil {
-		return err
+	if err := mygo.App.Run(); err != nil || savedForRestart {
+		return errors.Join(err, restartSaveErr)
 	}
 	return data.Write("workspace", workspace.Preferences())
 }

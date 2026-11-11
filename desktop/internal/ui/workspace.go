@@ -92,6 +92,7 @@ type Workspace struct {
 	transferSearch         string
 	focusSearch            bool
 	window                 *mygo.Window
+	checkForUpdates        func()
 	accounts               *app.Accounts
 	loginWindows           map[app.Provider]*mygo.Window
 	ctx                    context.Context
@@ -171,7 +172,8 @@ func (w *Workspace) AttachAccounts(ctx context.Context, window *mygo.Window, acc
 }
 
 // Menu connects the native menu and platform shortcuts to workspace commands.
-func (w *Workspace) Menu(window *mygo.Window) *mygo.Menu {
+func (w *Workspace) Menu(window *mygo.Window, checkForUpdates func()) *mygo.Menu {
+	w.checkForUpdates = checkForUpdates
 	command := func(label, accelerator string, act func()) *mygo.MenuItem {
 		return &mygo.MenuItem{Label: label, Accelerator: accelerator, Click: func(*mygo.MenuItem, *mygo.Window) {
 			window.Update(act)
@@ -179,6 +181,7 @@ func (w *Workspace) Menu(window *mygo.Window) *mygo.Menu {
 	}
 	appMenu := &mygo.MenuItem{Label: "Ferry Drive", Submenu: []*mygo.MenuItem{
 		command("关于 Ferry Drive", "", w.showAbout),
+		command("检查更新…", "", checkForUpdates),
 	}}
 	if w.settings != nil {
 		appMenu.Submenu = append(appMenu.Submenu, command("设置…", "CmdOrCtrl+,", w.showSettings))
