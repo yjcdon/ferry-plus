@@ -1,6 +1,6 @@
 # Ferry Drive
 
-Ferry Drive is an open-source desktop client for Baidu Netdisk and Quark Drive. Browse and manage files, transfer folders, and download shared links in one native app. Built with Go and MyGo, it runs on Apple Silicon Macs and offers a Windows x64 preview. The app interface is in Chinese.
+Ferry Drive is an open-source desktop client for Baidu Netdisk and Quark Drive. Browse and manage files, transfer folders, and download shared links in one native app. Built with Go and MyGo, it runs on Apple Silicon Macs and Windows 10 or 11 x64. The app interface is in Chinese.
 
 [Download 5.0.0](https://github.com/yjcdon/ferry-drive/releases/tag/v5.0.0) · [简体中文](README.md) · [Changelog](CHANGELOG.md)
 
@@ -16,7 +16,7 @@ Ferry Drive is an open-source desktop client for Baidu Netdisk and Quark Drive. 
 | Platform | Download and install |
 | --- | --- |
 | macOS 14 or later, Apple Silicon | Extract `ferry-drive-5.0.0-darwin-arm64.tar.gz` and move **Ferry Drive.app** to Applications. This release uses an Apple Development signature and is awaiting Apple notarization. |
-| Windows 10 or 11 x64, preview | Run `ferry-drive-setup-5.0.0-amd64.exe`, or extract `ferry-drive-5.0.0-windows-amd64-portable.zip` and run **Ferry Drive.exe**. Web sign-in requires the Microsoft Edge WebView2 Runtime. Testing on Windows hardware is pending. |
+| Windows 10 or 11 x64 | Run `ferry-drive-setup-5.0.0-amd64.exe`, or extract `ferry-drive-5.0.0-windows-amd64-portable.zip` and run **Ferry Drive.exe**. Web sign-in requires the Microsoft Edge WebView2 Runtime. |
 
 Open the account menu and sign in on the provider’s web page. Select a drive to transfer files, and open Transfers to track progress.
 
@@ -29,7 +29,7 @@ brew install --cask yjcdon/ferry-drive/ferry-drive
 
 If you installed `ferry-plus` from the old tap, run `brew update` and `brew migrate --cask yjcdon/ferry-plus/ferry-plus`, then run `brew upgrade --cask --greedy yjcdon/ferry-plus/ferry-drive`.
 
-Use the Ferry Drive menu to check for updates, or set automatic checks on the Update tab in Settings. The app verifies the update package signature before installation. Ferry Drive uses its own account and task data, so it can be installed alongside Ferry Plus 4.2.
+Download new versions from GitHub Releases and install them manually. Ferry Drive uses its own account and task data, so it can be installed alongside Ferry Plus 4.2.
 
 ## Development and license
 

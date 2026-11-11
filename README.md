@@ -1,6 +1,6 @@
 # Ferry Drive
 
-Ferry Drive 是开源的百度网盘和夸克网盘桌面客户端，可在同一个原生窗口中管理文件、上传下载和处理分享链接。使用 Go 和 MyGo 构建，适用于 Apple Silicon Mac，并提供 Windows x64 预览版。
+Ferry Drive 是开源的百度网盘和夸克网盘桌面客户端，可在同一个原生窗口中管理文件、上传下载和处理分享链接。使用 Go 和 MyGo 构建，支持 Apple Silicon Mac 和 Windows 10／11 x64。
 
 [下载 5.0.0](https://github.com/yjcdon/ferry-drive/releases/tag/v5.0.0) · [English](README.en.md) · [更新记录](CHANGELOG.md)
 
@@ -16,7 +16,7 @@ Ferry Drive 是开源的百度网盘和夸克网盘桌面客户端，可在同�
 | 平台 | 下载和安装 |
 | --- | --- |
 | macOS 14+，Apple Silicon | 下载 `ferry-drive-5.0.0-darwin-arm64.tar.gz`，解压后将 **Ferry Drive.app** 拖入「应用程序」。本版使用 Apple Development 签名，尚未经过 Apple 公证。 |
-| Windows 10／11 x64，预览 | 运行 `ferry-drive-setup-5.0.0-amd64.exe`，或解压 `ferry-drive-5.0.0-windows-amd64-portable.zip` 后运行 **Ferry Drive.exe**。网页登录需要 Microsoft Edge WebView2 Runtime。Windows 实机验收仍待完成。 |
+| Windows 10／11 x64 | 运行 `ferry-drive-setup-5.0.0-amd64.exe`，或解压 `ferry-drive-5.0.0-windows-amd64-portable.zip` 后运行 **Ferry Drive.exe**。网页登录需要 Microsoft Edge WebView2 Runtime。 |
 
 打开「账号与设置」，通过网盘网页登录。选择网盘后即可上传、下载或在传输列表中查看任务。
 
@@ -29,7 +29,7 @@ brew install --cask yjcdon/ferry-drive/ferry-drive
 
 如果已经通过旧 Tap 安装 `ferry-plus`，运行 `brew update` 和 `brew migrate --cask yjcdon/ferry-plus/ferry-plus`，再运行 `brew upgrade --cask --greedy yjcdon/ferry-plus/ferry-drive`。
 
-在「Ferry Drive → 检查更新」手动检查新版，或在「设置 → 更新」开关自动检查。应用会校验更新包签名，活动传输结束后可重启。Ferry Plus 4.2 用户可单独安装 Ferry Drive，5.0 使用独立的账号和任务数据。
+新版可从 GitHub Releases 下载并手动安装。Ferry Plus 4.2 用户可单独安装 Ferry Drive，5.0 使用独立的账号和任务数据。
 
 ## 开发与许可
 
