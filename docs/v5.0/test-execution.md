@@ -186,10 +186,12 @@ C60 最新 Mac 安装包的单实例子场景通过。同一隔离配置下，�
 
 用户指定直接交付 Mac 应用。当前脚本生成 Apple Silicon `Ferry Drive.app` 和 Windows x64 NSIS 安装包。App 通过深度签名校验，Windows 安装包通过 SHA-256 校验。
 
+按用户反馈对齐左右底栏。账号入口与目录选择摘要、传输统计统一为 44 点高，上方分隔线对齐。MyGo 渲染探针在 960×640 与 720×480 两种窗口下测得文字中心及分隔线分别对齐。界面测试通过，双端产物以 `6b156c2` 重新构建。
+
 | 最新本地产物 | 校验 |
 | --- | --- |
-| `Ferry Drive.app` | CDHash `aafe95b1e373f98b2e98c948a29d331e5d929fa0` |
-| `ferry-drive-setup-5.0.0-amd64.exe` | SHA-256 `574674f419ef452ebcf1e1bfb29475f56d8f2e3ff0adc90c8380b6911353aa3d` |
+| `Ferry Drive.app` | CDHash `6316ccafbf3d7395c5fa6ff1a61e1cae0abb2fa5` |
+| `ferry-drive-setup-5.0.0-amd64.exe` | SHA-256 `b32123a6140e5ec206e8e50f6ad101c6e22dff210cb2057314665013f9991ef5` |
 
 需求、实现一致性和系统行为的首轮 Review 已完成。已修正会话失效、应用前台通知、目录身份、整行投放、任务搜索和批量动作、完成下载定位、网络空闲等待、未完成文件清理、分享重试及 Windows 发布路径。修复后 `go test -race ./...`、MyGo vet、Windows x64 vet 和双端打包均通过，复审发现自动清理还需处理账号失效，补上原会话失效处理后通过对应竞态回归。
 
