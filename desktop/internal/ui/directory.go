@@ -166,15 +166,18 @@ func (w *Workspace) directoryToolbar(c *ui.Context, f *directoryView, width floa
 				}
 			}
 		}
-		ui.Spacer(c)
-		if w.accounts.Session(d.Provider()).State == app.LoggedIn {
-			w.directoryActions(c, f, width)
-		}
 	})
 }
 
-func (w *Workspace) directorySearch(c *ui.Context, f *directoryView) {
-	search := ui.TextInput(c, &f.query).Label("搜索当前目录").Placeholder("搜索当前目录").Width(160)
+func (w *Workspace) directorySearch(c *ui.Context, f *directoryView, width float32) {
+	searchWidth := float32(202)
+	if width < 500 {
+		searchWidth = 152
+	}
+	theme := c.Theme()
+	search := ui.SearchField(c, &f.query).Label("搜索当前目录").Placeholder("搜索当前目录").
+		Size(searchWidth, 32).Radius(16).Padding(0, 12).Margin(0, 0, 0, 8).
+		Background(theme.Background).Border(1, theme.Border)
 	if w.focusSearch {
 		search.Focus()
 		w.focusSearch = false

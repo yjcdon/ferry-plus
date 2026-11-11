@@ -18,7 +18,8 @@ const (
 	quarkPage = string(app.Quark)
 	all       = "transfers.all"
 
-	workspaceFooterHeight = 44
+	workspaceFooterHeight        = 44
+	directoryControlsInlineWidth = 440
 )
 
 //go:embed assets/BaiduNetdisk.png
@@ -354,8 +355,9 @@ func (w *Workspace) content(c *ui.Context, width float32, jobs []app.TransferJob
 			}
 			ui.Text(c, title).Bold().SingleLine()
 			ui.Spacer(c)
-			if f := w.files[app.Provider(w.preferences.Page)]; f != nil && w.accounts.Session(f.directory.Provider()).State == app.LoggedIn {
-				w.directorySearch(c, f)
+			if f := w.files[app.Provider(w.preferences.Page)]; width >= directoryControlsInlineWidth && f != nil && w.accounts.Session(f.directory.Provider()).State == app.LoggedIn {
+				w.directoryActions(c, f)
+				w.directorySearch(c, f, width)
 			}
 			if index >= 0 {
 				if w.jobs != nil {
@@ -408,6 +410,13 @@ func (w *Workspace) fileLanding(c *ui.Context, title string, width float32) {
 	f := w.files[provider]
 	if f != nil {
 		w.refreshUploadDirectory(f)
+		if width < directoryControlsInlineWidth && w.accounts.Session(provider).State == app.LoggedIn {
+			ui.Toolbar(c, func() {
+				ui.Spacer(c)
+				w.directoryActions(c, f)
+				w.directorySearch(c, f, width)
+			})
+		}
 		w.directoryToolbar(c, f, width)
 		w.uploadDraftBar(c, f)
 	} else {

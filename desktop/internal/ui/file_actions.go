@@ -22,42 +22,48 @@ type directoryDelete struct {
 	selection app.DirectorySelection
 }
 
-func (w *Workspace) directoryActions(c *ui.Context, f *directoryView, width float32) {
+var (
+	uploadIcon   = workspaceIcon("M7 18H6a4 4 0 0 1-1-7.9 7 7 0 0 1 13.7-1.5A4.7 4.7 0 0 1 18 18h-1 M12 21V11m-4 4 4-4 4 4")
+	downloadIcon = workspaceIcon("M12 3v17m-6-6 6 6 6-6")
+	trashIcon    = workspaceIcon("M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 9v9m4-9v9")
+	refreshIcon  = workspaceIcon("M20 12a8 8 0 1 1-4-6.9L19 7m-5 0h5V2")
+)
+
+func (w *Workspace) directoryActions(c *ui.Context, f *directoryView) {
 	d := f.directory
 	_, targetReady := d.Target(d.Root())
 	canUpload := w.jobs != nil && targetReady && !f.busy
-	canDownload := canUpload && len(d.Selection()) > 0
-	canTrash := targetReady && !f.busy && len(d.Selection()) > 0
-	canRefresh := !f.busy && !d.Loading(d.Root())
-	if width >= 520 && w.jobs != nil && ui.Button(c, "上传").Disabled(!canUpload).Clicked() {
-		w.chooseUpload(f, d.Root())
+	selection := d.Selection()
+	theme := c.Theme()
+	ui.Row(c).AlignItems(ui.Center).Height(32).Padding(0, 5).Radius(16).Border(1, theme.Border).Shrink(0).Children(func() {
+		if directoryActionButton(c, "上传", uploadIcon, !canUpload).Clicked() {
+			w.chooseUpload(f, d.Root())
+		}
+		if directoryActionButton(c, "下载", downloadIcon, !canUpload || len(selection) == 0).Clicked() {
+			w.beginDownload(f, selection)
+		}
+		if directoryActionButton(c, "移到回收站", trashIcon, !targetReady || f.busy || len(selection) == 0).Clicked() {
+			w.prepareDirectoryDelete(f, selection)
+		}
+		if directoryActionButton(c, "刷新", refreshIcon, f.busy || d.Loading(d.Root())).Clicked() {
+			w.refreshDirectory(f)
+		}
+	})
+}
+
+func directoryActionButton(c *ui.Context, label string, icon *ui.SVG, disabled bool) ui.Element {
+	theme := c.Theme()
+	button := ui.ButtonBase(c).Role(ui.RoleButton).Label(label).Tooltip(label).Size(26, 26).Radius(13).Disabled(disabled)
+	if button.Hovered() && !disabled {
+		button.Background(theme.SurfaceHover)
 	}
-	if width >= 520 && w.jobs != nil && ui.Button(c, "下载").Disabled(!canDownload).Clicked() {
-		w.beginDownload(f, d.Selection())
+	color := theme.Text
+	if disabled {
+		color = theme.TextMuted
 	}
-	if width < 700 {
-		ui.MenuButton(c, "操作", func(m *ui.Menu) {
-			if width < 520 && w.jobs != nil && m.Item("上传").Disabled(!canUpload).Chosen() {
-				w.chooseUpload(f, d.Root())
-			}
-			if width < 520 && w.jobs != nil && m.Item("下载").Disabled(!canDownload).Chosen() {
-				w.beginDownload(f, d.Selection())
-			}
-			if m.Item("移到回收站").Disabled(!canTrash).Chosen() {
-				w.prepareDirectoryDelete(f, d.Selection())
-			}
-			if m.Item("刷新").Disabled(!canRefresh).Chosen() {
-				w.refreshDirectory(f)
-			}
-		}).Label("文件操作")
-		return
-	}
-	if ui.Button(c, "移到回收站").Disabled(!canTrash).Clicked() {
-		w.prepareDirectoryDelete(f, d.Selection())
-	}
-	if ui.Button(c, "刷新").Disabled(!canRefresh).Clicked() {
-		w.refreshDirectory(f)
-	}
+	return button.Children(func() {
+		ui.Icon(c, icon).FontSize(16).TextColor(color).AccessHidden(true)
+	})
 }
 
 func (w *Workspace) refreshDirectory(f *directoryView) {
