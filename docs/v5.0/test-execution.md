@@ -196,6 +196,8 @@ C60 最新 Mac 安装包的单实例子场景通过。同一隔离配置下，�
 
 将最新 `.app` 直接复制到隔离验收目录，逐文件比对一致，复制后仍通过深度签名校验。应用声明 macOS 14.0，主程序为 arm64。Windows 安装器识别为 NSIS 自解压包，独立构建的应用为 x64 PE32+，GUI 子系统版本为 10.0。Windows 10 1809、22H2 与 Windows 11 的实际安装、启动和 WebView2 流程进入第二阶段。
 
+复核当前产物的系统版本声明。Mac 应用包的 `LSMinimumSystemVersion` 为 14.0，arm64 主程序的 Mach-O 链接目标为 13.0。Windows 安装器的外层 NSIS 启动程序为 x86，实际 Ferry Drive 应用为 x64。上述结果来自产物检查，macOS 14 与 Windows 各版本的启动结果以对应实机验收为准。
+
 | 最新本地产物 | 校验 |
 | --- | --- |
 | `Ferry Drive.app` | CDHash `349871894ddfd650ddd0b5c476c0215e3682a216` |
