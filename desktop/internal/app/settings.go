@@ -41,6 +41,7 @@ type SettingsValues struct {
 	DownloadBytesPerSecond       int64                   `json:"downloadBytesPerSecond"`
 	DetectsCopiedLinks           bool                    `json:"detectsCopiedLinks"`
 	DisableAutomaticUpdateChecks bool                    `json:"disableAutomaticUpdateChecks,omitempty"`
+	LastUpdateCheckUnix          int64                   `json:"lastUpdateCheckUnix,omitempty"`
 	Baidu                        DiskSettings            `json:"baidu"`
 	Quark                        DiskSettings            `json:"quark"`
 	SelectedTab                  int                     `json:"selectedTab"`

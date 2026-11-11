@@ -2,6 +2,7 @@ package main
 
 import (
 	"runtime"
+	"sync"
 
 	"github.com/egoist/mygo"
 
@@ -9,7 +10,7 @@ import (
 	ferryui "github.com/yjcdon/ferry-drive/desktop/internal/ui"
 )
 
-func bindDesktop(window *mygo.Window, workspace *ferryui.Workspace, transfers *app.Transfers, cancel, beforeRestart func()) (restart func()) {
+func bindDesktop(window *mygo.Window, workspace *ferryui.Workspace, transfers *app.Transfers, updateInstall *sync.Mutex, cancel, beforeRestart func()) (restart func()) {
 	quitting, ready := false, false
 	show := func() {
 		if !quitting {
@@ -57,6 +58,9 @@ func bindDesktop(window *mygo.Window, workspace *ferryui.Workspace, transfers *a
 			cancel()
 			go func() {
 				transfers.Close()
+				// Cancellation stops the download. A file swap already underway must finish.
+				updateInstall.Lock()
+				updateInstall.Unlock()
 				window.Update(func() {
 					if tray != nil {
 						tray.Destroy()

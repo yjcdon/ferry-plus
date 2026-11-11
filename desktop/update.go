@@ -3,16 +3,20 @@ package main
 import (
 	"context"
 	"errors"
-	"sync/atomic"
+	"log"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/egoist/mygo"
 	"github.com/egoist/mygo/ui"
+	"github.com/yjcdon/ferry-drive/desktop/internal/app"
 )
 
 // updateCommand shares one check/install session between the menu and scheduled checks.
-func updateCommand(ctx context.Context, window *mygo.Window, restart func(), hasActiveWork, automatic func() bool) func() {
-	var busy atomic.Bool
+func updateCommand(ctx context.Context, window *mygo.Window, updateInstall *sync.Mutex, restart func(), closeTransfersIfIdle func() bool, settings *app.SettingsModel) func() {
+	var state sync.Mutex
+	var busy, checkingFeed, showResult bool
 	prepared := false
 	message := func(title, detail string) {
 		if ctx.Err() == nil {
@@ -27,7 +31,7 @@ func updateCommand(ctx context.Context, window *mygo.Window, restart func(), has
 			if ctx.Err() != nil {
 				return
 			}
-			waiting = hasActiveWork()
+			waiting = !closeTransfersIfIdle()
 			if !waiting {
 				restart()
 			}
@@ -37,10 +41,21 @@ func updateCommand(ctx context.Context, window *mygo.Window, restart func(), has
 		}
 	}
 	check := func(manual bool) {
-		if !busy.CompareAndSwap(false, true) {
+		state.Lock()
+		if busy {
+			if manual && checkingFeed {
+				showResult = true
+			}
+			state.Unlock()
 			return
 		}
-		defer busy.Store(false)
+		busy, checkingFeed, showResult = true, !prepared, manual
+		state.Unlock()
+		defer func() {
+			state.Lock()
+			busy, checkingFeed = false, false
+			state.Unlock()
+		}()
 		if prepared {
 			if manual {
 				restartWhenIdle()
@@ -55,6 +70,14 @@ func updateCommand(ctx context.Context, window *mygo.Window, restart func(), has
 			checking = showUpdateProgress("正在检查更新")
 		}
 		update, err := mygo.Updater.Check(checkCtx)
+		if err == nil && ctx.Err() == nil {
+			if saveErr := settings.Update(func(v *app.SettingsValues) { v.LastUpdateCheckUnix = time.Now().Unix() }); saveErr != nil {
+				log.Printf("保存更新检查时间: %v", saveErr)
+			}
+		}
+		state.Lock()
+		manual, checkingFeed = showResult, false
+		state.Unlock()
 		if checking != nil {
 			checking.Close()
 		}
@@ -75,21 +98,33 @@ func updateCommand(ctx context.Context, window *mygo.Window, restart func(), has
 			}
 			return
 		}
-		if ctx.Err() != nil {
+		if ctx.Err() != nil || !manual && settings.Values().DisableAutomaticUpdateChecks {
 			return
+		}
+		detail := "下载并验证后，应用将在没有活动传输时重新启动。"
+		if notes := []rune(strings.TrimSpace(update.Notes)); len(notes) != 0 {
+			const maxNotes = 600
+			if len(notes) > maxNotes {
+				notes = append(notes[:maxNotes], '…')
+			}
+			detail = string(notes) + "\n\n" + detail
 		}
 		choice, err := mygo.Dialog.Message(mygo.MessageOptions{
 			Parent: mygo.FocusedWindow(), Title: "Ferry Drive", Message: "发现新版本 " + update.Version,
-			Detail:  "下载并验证后，应用将在没有活动传输时重新启动。",
+			Detail:  detail,
 			Buttons: []string{"安装更新", "稍后"}, CancelButton: 1,
 		})
 		if err != nil || choice.Button != 0 || ctx.Err() != nil {
 			return
 		}
 		progress := showUpdateProgress("正在下载和验证更新")
-		err = update.Install(ctx, nil)
+		err = installUpdate(ctx, updateInstall, func(ctx context.Context) error { return update.Install(ctx, nil) })
 		if progress != nil {
 			progress.Close()
+		}
+		if errors.Is(err, context.DeadlineExceeded) {
+			message("下载更新超时", "请检查网络连接后重试。")
+			return
 		}
 		if err != nil {
 			message("安装更新失败", err.Error())
@@ -100,6 +135,7 @@ func updateCommand(ctx context.Context, window *mygo.Window, restart func(), has
 	}
 
 	go func() {
+		const interval = 24 * time.Hour
 		timer := time.NewTimer(10 * time.Second)
 		defer timer.Stop()
 		for {
@@ -107,10 +143,15 @@ func updateCommand(ctx context.Context, window *mygo.Window, restart func(), has
 			case <-ctx.Done():
 				return
 			case <-timer.C:
-				if automatic() {
+				values := settings.Values()
+				if values.DisableAutomaticUpdateChecks {
+					timer.Reset(interval)
+				} else if wait := time.Until(time.Unix(values.LastUpdateCheckUnix, 0).Add(interval)); wait > 0 {
+					timer.Reset(wait)
+				} else {
 					check(false)
+					timer.Reset(interval)
 				}
-				timer.Reset(24 * time.Hour)
 			}
 		}
 	}()
@@ -120,6 +161,17 @@ func updateCommand(ctx context.Context, window *mygo.Window, restart func(), has
 		}
 		go check(true)
 	}
+}
+
+func installUpdate(ctx context.Context, barrier *sync.Mutex, apply func(context.Context) error) error {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	defer cancel()
+	barrier.Lock()
+	defer barrier.Unlock()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	return apply(ctx)
 }
 
 func showUpdateProgress(title string) *mygo.Window {

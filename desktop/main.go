@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"runtime"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -65,6 +66,7 @@ func run() (err error) {
 	}
 	defer transfers.Close()
 	var restartSaveErr error
+	var updateInstall sync.Mutex
 	savedForRestart := false
 	mygo.App.WhenReady(func() {
 		opts := mygo.WindowOptions{
@@ -89,13 +91,11 @@ func run() (err error) {
 		})
 		go accounts.Restore(ctx, app.Baidu, func() { workspace.AccountChanged(app.Baidu) })
 		go accounts.Restore(ctx, app.Quark, func() { workspace.AccountChanged(app.Quark) })
-		restart := bindDesktop(window, workspace, transfers, cancel, func() {
+		restart := bindDesktop(window, workspace, transfers, &updateInstall, cancel, func() {
 			restartSaveErr = errors.Join(data.Write("workspace", workspace.Preferences()), data.Close())
 			savedForRestart = true
 		})
-		mygo.App.SetMenu(workspace.Menu(window, updateCommand(ctx, window, restart, transfers.HasActiveWork, func() bool {
-			return !settings.Values().DisableAutomaticUpdateChecks
-		})))
+		mygo.App.SetMenu(workspace.Menu(window, updateCommand(ctx, window, &updateInstall, restart, transfers.CloseIfIdle, settings)))
 	})
 	if err := mygo.App.Run(); err != nil || savedForRestart {
 		return errors.Join(err, restartSaveErr)
