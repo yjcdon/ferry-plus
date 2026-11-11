@@ -145,13 +145,13 @@ func (w *Workspace) transferRow(c *ui.Context, job app.TransferJob, visible []ap
 		ui.Icon(c, icon).Size(22, 26).FontSize(20).TextColor(theme.TextMuted).Shrink(0).AccessHidden(true)
 		ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(4).Children(func() {
-				ui.Text(c, job.Title).FontWeight(600).SingleLine().Tooltip(job.Title).Grow(1).MinWidth(0)
+				ui.Text(c, job.Title).FontWeight(600).SingleLine().Grow(1).MinWidth(0)
 				label, command := w.primaryTransferAction(job)
 				if command != nil && compactIconButton(c, label, transferPrimaryIcon(job), job.Stopping).Clicked() {
 					w.transferCommand(command, job.ID)
 				}
 				compactIconButton(c, job.Title+" 的操作", transferMoreIcon, false).
-					Menu(func(m *ui.Menu) { w.taskMenu(m, job) }).Tooltip("更多操作")
+					Menu(func(m *ui.Menu) { w.taskMenu(m, job) })
 			})
 			if job.Total > 0 && matchesTransferPage(job, 1) {
 				ui.Progress(c, min(1, float64(job.Done)/float64(job.Total))).
@@ -165,7 +165,7 @@ func (w *Workspace) transferRow(c *ui.Context, job app.TransferJob, visible []ap
 				if w.allProviders {
 					for _, provider := range providers {
 						if provider.id == string(job.Provider) {
-							ui.Image(c, provider.logo).Size(14, 14).Shrink(0).Label(provider.title).Tooltip(provider.title)
+							ui.Image(c, provider.logo).Size(14, 14).Shrink(0).Label(provider.title)
 							break
 						}
 					}
@@ -173,7 +173,7 @@ func (w *Workspace) transferRow(c *ui.Context, job app.TransferJob, visible []ap
 				ui.Text(c, summary).FontSize(theme.FontSize - 1).TextColor(theme.TextMuted).SingleLine()
 			})
 			if job.Error != "" {
-				ui.Text(c, job.Error).FontSize(theme.FontSize - 1).TextColor(theme.Danger).SingleLine().Tooltip(job.Error)
+				ui.Text(c, job.Error).FontSize(theme.FontSize - 1).TextColor(theme.Danger).SingleLine()
 			}
 			if job.DuplicateOf != "" {
 				ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
