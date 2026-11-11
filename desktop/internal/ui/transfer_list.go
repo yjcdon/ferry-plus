@@ -155,8 +155,19 @@ func (w *Workspace) transferRow(c *ui.Context, job app.TransferJob, visible []ap
 					Menu(func(m *ui.Menu) { w.taskMenu(m, job) })
 			})
 			if job.Total > 0 && matchesTransferPage(job, 1) {
-				ui.Progress(c, min(1, float64(job.Done)/float64(job.Total))).
-					Label("传输进度").Height(4).FillWidth()
+				progress := func() {
+					ui.Progress(c, min(1, float64(job.Done)/float64(job.Total))).
+						Label("传输进度").Height(4).FillWidth()
+				}
+				if selected {
+					progressTheme := *theme
+					progressTheme.Accent = theme.AccentText
+					progressTheme.InactiveAccent = theme.AccentText
+					progressTheme.Border = theme.AccentText.Alpha(0.35)
+					ui.Themed(c, &progressTheme).Background(ui.Transparent).FillWidth().Children(progress)
+				} else {
+					progress()
+				}
 			}
 			summary := job.StatusText()
 			if job.BytesPerSecond > 0 {
