@@ -2,7 +2,7 @@
 
 Ferry Drive 是开源的百度网盘和夸克网盘桌面客户端，可在同一个原生窗口中管理文件、上传下载和处理分享链接。使用 Go 和 MyGo 构建，适用于 Apple Silicon Mac，并提供 Windows x64 预览版。
 
-[下载 5.0.0](https://github.com/yjcdon/ferry-plus/releases/tag/v5.0.0) · [English](README.en.md) · [更新记录](CHANGELOG.md)
+[下载 5.0.0](https://github.com/yjcdon/ferry-drive/releases/tag/v5.0.0) · [English](README.en.md) · [更新记录](CHANGELOG.md)
 
 ## 功能
 
@@ -24,8 +24,8 @@ Ferry Drive 是开源的百度网盘和夸克网盘桌面客户端，可在同�
 
 ## 开发与许可
 
-[5.0 技术方案与发布说明](docs/v5.0/architecture.md) · [设计文档](docs/README.md) · [问题反馈](https://github.com/yjcdon/ferry-plus/issues)
+[5.0 技术方案与发布说明](docs/v5.0/architecture.md) · [设计文档](docs/README.md) · [问题反馈](https://github.com/yjcdon/ferry-drive/issues)
 
 项目基于 [Ferry / BaiduPCS-Swift](https://github.com/yiquncode/BaiduPCS-Swift)，百度接口用法参考 [BaiduPCS-Go](https://github.com/qjfoidnh/BaiduPCS-Go)。采用 [Apache License 2.0](LICENSE)。
 
-旧版 macOS 应用及 Homebrew 安装包见 [Ferry Plus 4.2.0](https://github.com/yjcdon/ferry-plus/releases/tag/v4.2.0)。
+旧版 macOS 应用及 Homebrew 安装包见 [Ferry Plus 4.2.0](https://github.com/yjcdon/ferry-drive/releases/tag/v4.2.0)。

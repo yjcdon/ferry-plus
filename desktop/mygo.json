@@ -12,7 +12,7 @@
     "installerInclude": "installer/webview2.nsh"
   },
   "updates": {
-    "github": "yjcdon/ferry-plus",
+    "github": "yjcdon/ferry-drive",
     "publicKey": "qOcWEpLfUzwm6ULtc9WnkWuRHrsoTAL2mlgomM2c9p4=",
     "changelog": "../CHANGELOG.md",
     "deltas": 0

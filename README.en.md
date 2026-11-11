@@ -2,7 +2,7 @@
 
 Ferry Drive is an open-source desktop client for Baidu Netdisk and Quark Drive. Browse and manage files, transfer folders, and download shared links in one native app. Built with Go and MyGo, it runs on Apple Silicon Macs and offers a Windows x64 preview. The app interface is in Chinese.
 
-[Download 5.0.0](https://github.com/yjcdon/ferry-plus/releases/tag/v5.0.0) · [简体中文](README.md) · [Changelog](CHANGELOG.md)
+[Download 5.0.0](https://github.com/yjcdon/ferry-drive/releases/tag/v5.0.0) · [简体中文](README.md) · [Changelog](CHANGELOG.md)
 
 ## Features
 
@@ -24,8 +24,8 @@ Use the Ferry Drive menu to check for updates, or set automatic checks on the Up
 
 ## Development and license
 
-[Technical design and release notes (Chinese)](docs/v5.0/architecture.md) · [Documentation (Chinese)](docs/README.md) · [Issues](https://github.com/yjcdon/ferry-plus/issues)
+[Technical design and release notes (Chinese)](docs/v5.0/architecture.md) · [Documentation (Chinese)](docs/README.md) · [Issues](https://github.com/yjcdon/ferry-drive/issues)
 
 Based on [Ferry / BaiduPCS-Swift](https://github.com/yiquncode/BaiduPCS-Swift), with Baidu API usage informed by [BaiduPCS-Go](https://github.com/qjfoidnh/BaiduPCS-Go). Licensed under the [Apache License 2.0](LICENSE).
 
-For the earlier macOS app and Homebrew installation, see [Ferry Plus 4.2.0](https://github.com/yjcdon/ferry-plus/releases/tag/v4.2.0).
+For the earlier macOS app and Homebrew installation, see [Ferry Plus 4.2.0](https://github.com/yjcdon/ferry-drive/releases/tag/v4.2.0).
