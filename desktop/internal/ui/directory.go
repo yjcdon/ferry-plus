@@ -15,16 +15,17 @@ type directoryRow struct {
 }
 
 type directoryView struct {
-	directory  *app.Directory
-	outline    ui.OutlineState[directoryRow]
-	selection  ui.Selection[directoryRow]
-	focus      int
-	cloudFocus app.RemoteRef
-	sort       ui.SortOrder
-	query      string
-	busy       bool
-	problem    string
-	edit       *directoryEdit
+	directory      *app.Directory
+	outline        ui.OutlineState[directoryRow]
+	selection      ui.Selection[directoryRow]
+	focus          int
+	cloudFocus     app.RemoteRef
+	sort           ui.SortOrder
+	query          string
+	busy           bool
+	problem        string
+	edit           *directoryEdit
+	refreshPending bool
 }
 
 var fileColumns = []ui.TableColumn{
@@ -45,6 +46,7 @@ func (f *directoryView) resetTree() {
 	f.focus = -1
 	f.cloudFocus = app.RemoteRef{}
 	f.edit = nil
+	f.refreshPending = false
 	f.selection.Clear()
 	f.outline = ui.OutlineState[directoryRow]{Indent: 18}
 	f.outline.List.Selected = &f.focus
@@ -87,6 +89,11 @@ func (w *Workspace) AccountChanged(provider app.Provider) {
 
 func (w *Workspace) ensureDirectory(f *directoryView) {
 	d := f.directory
+	if f.refreshPending && !f.busy && f.edit == nil && !d.Loading(d.Root()) {
+		f.refreshPending = false
+		w.fetchDirectory(f, d.Refresh())
+		return
+	}
 	if !d.Loaded(d.Root()) && !d.Loading(d.Root()) && d.LoadError(d.Root()) == nil {
 		w.fetchDirectory(f, d.Refresh())
 	}

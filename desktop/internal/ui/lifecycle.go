@@ -87,9 +87,14 @@ func (w *Workspace) readShareClipboard(done func(app.ShareLink, bool)) {
 // without making system notification permission part of a job's result.
 func (w *Workspace) TransfersChanged() {
 	jobs := w.jobs.Snapshot()
+	w.invalidateUploadDirectories(jobs)
 	states := make(map[string]app.TransferState, len(jobs))
 	for _, job := range jobs {
-		states[job.ID] = job.State
+		// A stopping worker can still publish files before its final snapshot.
+		states[job.ID] = w.notifiedStates[job.ID]
+		if !job.Stopping {
+			states[job.ID] = job.State
+		}
 		if w.quitting || job.Stopping || w.notifiedStates[job.ID] == job.State ||
 			w.notifiedStates == nil || mygo.App.IsActive() {
 			continue
@@ -111,6 +116,26 @@ func (w *Workspace) TransfersChanged() {
 		}
 	}
 	w.notifiedStates = states
+}
+
+// invalidateUploadDirectories refreshes cached listings after an upload ends,
+// including partial results. Active edits finish before their listing reloads.
+func (w *Workspace) invalidateUploadDirectories(jobs []app.TransferJob) {
+	if w.quitting || w.notifiedStates == nil {
+		return
+	}
+	for _, job := range jobs {
+		if job.Direction != app.TransferUpload || job.Stopping || w.notifiedStates[job.ID] == job.State {
+			continue
+		}
+		switch job.State {
+		case app.TransferCompleted, app.TransferFailed, app.TransferCanceled, app.TransferNeedsCheck:
+			f := w.files[job.Provider]
+			if f != nil && f.directory.Location().AccountID == job.AccountID {
+				f.refreshPending = true
+			}
+		}
+	}
 }
 
 // ShowTransfer brings the exact notification task into the visible list.
