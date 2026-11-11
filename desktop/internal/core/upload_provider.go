@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/url"
 	"path"
 	"slices"
 	"strconv"
@@ -14,6 +13,7 @@ import (
 	"time"
 
 	"github.com/yjcdon/ferry-drive/desktop/internal/baidu"
+	"github.com/yjcdon/ferry-drive/desktop/internal/download"
 	"github.com/yjcdon/ferry-drive/desktop/internal/platform"
 	"github.com/yjcdon/ferry-drive/desktop/internal/quark"
 )
@@ -554,60 +554,36 @@ func (u *uploadRun) verify(ctx context.Context, entry uploadLocalItem, state upl
 	if state.Fingerprint.SHA256 == "" || state.Remote.Size != entry.Size {
 		return ErrUploadReadback
 	}
-	var address *url.URL
-	var headers http.Header
-	if u.req.Target.Provider == "baidu" {
-		remote := state.Remote
-		list, err := u.providers.Baidu.ListDirectory(ctx, path.Dir(remote.Path))
-		if err != nil {
-			return err
+	var preference int
+	resolve := func(ctx context.Context) (download.Link, error) {
+		if u.req.Target.Provider == "baidu" {
+			remote := state.Remote
+			list, err := u.providers.Baidu.ListDirectory(ctx, path.Dir(remote.Path))
+			if err != nil {
+				return download.Link{}, err
+			}
+			if !slices.ContainsFunc(list, func(item baidu.Entry) bool {
+				return item.FSID == remote.FSID && item.Path == remote.Path && !item.IsDirectory && item.Size == entry.Size
+			}) {
+				return download.Link{}, ErrUploadUnconfirmed
+			}
+			link, err := u.providers.Baidu.DownloadLink(ctx, remote.Path, preference)
+			if err != nil {
+				return download.Link{}, err
+			}
+			preference++
+			return download.Link{URL: link.URL.String(), Headers: link.Headers}, nil
 		}
-		if !slices.ContainsFunc(list, func(item baidu.Entry) bool {
-			return item.FSID == remote.FSID && item.Path == remote.Path && !item.IsDirectory && item.Size == entry.Size
-		}) {
-			return ErrUploadUnconfirmed
-		}
-		link, err := u.providers.Baidu.DownloadLink(ctx, remote.Path, 0)
-		if err != nil {
-			return err
-		}
-		address, headers = link.URL, link.Headers
-	} else {
 		link, err := u.providers.Quark.Download(ctx, state.Remote.FID)
 		if err != nil {
-			return err
+			return download.Link{}, err
 		}
 		if link.Size != nil && *link.Size != entry.Size {
-			return ErrUploadReadback
+			return download.Link{}, ErrUploadReadback
 		}
-		address, headers = link.URL, link.Headers
+		return download.Link{URL: link.URL.String(), Headers: link.Headers}, nil
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, address.String(), nil)
-	if err != nil {
-		return errors.New("上传回读地址格式无效")
-	}
-	req.Header = headers.Clone()
-	if req.Header == nil {
-		req.Header = make(http.Header)
-	}
-	req.Header.Set("Accept-Encoding", "identity")
-	req.Header.Del("Range")
-	response, err := u.client.Do(req)
-	if err != nil {
-		var requestErr *url.Error
-		if errors.As(err, &requestErr) {
-			err = requestErr.Err
-		}
-		return err
-	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("上传回读请求失败，HTTP %d", response.StatusCode)
-	}
-	if response.ContentLength >= 0 && response.ContentLength != entry.Size {
-		return ErrUploadReadback
-	}
-	digest, err := hashUploadReadback(ctx, response.Body, entry.Size, &u.readback,
+	digest, err := download.ReadbackSHA256(ctx, u.client, resolve, entry.Size, u.readback.wait,
 		func(done int64) { u.report(entry, "verifying", done) })
 	if err != nil {
 		return err

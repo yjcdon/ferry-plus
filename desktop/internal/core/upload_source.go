@@ -6,7 +6,6 @@ import (
 	"crypto/sha1"
 	"crypto/sha256"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path"
@@ -359,32 +358,4 @@ func readUploadBytes(ctx context.Context, source *uploadSource, fingerprint uplo
 		return nil, ErrUploadSourceChanged
 	}
 	return body, nil
-}
-
-func hashUploadReadback(ctx context.Context, body io.Reader, size int64, pacer *uploadPacer, progress func(int64)) (string, error) {
-	digest := sha256.New()
-	buffer := make([]byte, 128<<10)
-	var done int64
-	for done < size {
-		if err := ctx.Err(); err != nil {
-			return "", err
-		}
-		length := int(min(size-done, int64(len(buffer))))
-		if err := pacer.wait(ctx, length); err != nil {
-			return "", err
-		}
-		if _, err := io.ReadFull(body, buffer[:length]); err != nil {
-			return "", err
-		}
-		digest.Write(buffer[:length])
-		done += int64(length)
-		progress(done)
-	}
-	if _, err := io.ReadFull(body, buffer[:1]); err != io.EOF {
-		if err != nil {
-			return "", err
-		}
-		return "", ErrUploadReadback
-	}
-	return fmt.Sprintf("%x", digest.Sum(nil)), nil
 }

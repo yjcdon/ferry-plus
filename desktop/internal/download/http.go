@@ -100,7 +100,7 @@ func (s *linkSource) get(ctx context.Context, start, end, size int64, previous e
 			return nil, err
 		}
 		switch failure.status {
-		case 403, 404, 410, 416:
+		case 401, 403, 404, 410, 416:
 			s.invalidate(link)
 		case 429, 500, 502, 503, 504, 509:
 			delay := time.Duration(attempt+1) * time.Second
@@ -181,15 +181,11 @@ func rangeData(response *http.Response, start, end, size int64) ([]byte, entity,
 		}
 		return nil, entity{}, errors.New("分片下载响应忽略请求范围")
 	}
+	if err := validateRange(response, start, end, size); err != nil {
+		return nil, entity{}, err
+	}
 	info := responseEntity(response)
-	if response.StatusCode != http.StatusPartialContent || start >= end ||
-		!matchesContentRange(response.Header.Get("Content-Range"), start, end-1, size) {
-		return nil, entity{}, errors.New("下载 Content-Range 与请求范围或文件大小不一致")
-	}
 	length := end - start
-	if response.ContentLength != -1 && response.ContentLength != length {
-		return nil, entity{}, errors.New("下载 Content-Length 与请求范围不一致")
-	}
 	data := make([]byte, length)
 	if _, err := io.ReadFull(response.Body, data); err != nil {
 		return nil, entity{}, fmt.Errorf("下载分片响应体长度不足: %w", err)
@@ -198,6 +194,18 @@ func rangeData(response *http.Response, start, end, size int64) ([]byte, entity,
 		return nil, entity{}, err
 	}
 	return data, info, nil
+}
+
+func validateRange(response *http.Response, start, end, size int64) error {
+	if response.StatusCode != http.StatusPartialContent || start >= end ||
+		!matchesContentRange(response.Header.Get("Content-Range"), start, end-1, size) {
+		return errors.New("下载 Content-Range 与请求范围或文件大小不一致")
+	}
+	length := end - start
+	if response.ContentLength != -1 && response.ContentLength != length {
+		return errors.New("下载 Content-Length 与请求范围不一致")
+	}
+	return nil
 }
 
 func identityEncoding(value string) bool {
