@@ -16,7 +16,7 @@ import (
 // updateCommand shares one check/install session between the menu and scheduled checks.
 func updateCommand(ctx context.Context, window *mygo.Window, updateInstall *sync.Mutex, restart func(), closeTransfersIfIdle func() bool, settings *app.SettingsModel) func() {
 	var state sync.Mutex
-	var busy, checkingFeed, showResult bool
+	var busy, showResult bool
 	prepared := false
 	message := func(title, detail string) {
 		if ctx.Err() == nil {
@@ -43,17 +43,15 @@ func updateCommand(ctx context.Context, window *mygo.Window, updateInstall *sync
 	check := func(manual bool) {
 		state.Lock()
 		if busy {
-			if manual && checkingFeed {
-				showResult = true
-			}
+			showResult = showResult || manual
 			state.Unlock()
 			return
 		}
-		busy, checkingFeed, showResult = true, !prepared, manual
+		busy, showResult = true, manual
 		state.Unlock()
 		defer func() {
 			state.Lock()
-			busy, checkingFeed = false, false
+			busy = false
 			state.Unlock()
 		}()
 		if prepared {
@@ -63,37 +61,34 @@ func updateCommand(ctx context.Context, window *mygo.Window, updateInstall *sync
 			return
 		}
 
-		checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
 		var checking *mygo.Window
 		if manual {
 			checking = showUpdateProgress("正在检查更新")
 		}
+		checkCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 		update, err := mygo.Updater.Check(checkCtx)
+		cancel()
+		if checking != nil {
+			checking.Close()
+		}
 		if err == nil && ctx.Err() == nil {
 			if saveErr := settings.Update(func(v *app.SettingsValues) { v.LastUpdateCheckUnix = time.Now().Unix() }); saveErr != nil {
 				log.Printf("保存更新检查时间: %v", saveErr)
 			}
 		}
 		state.Lock()
-		manual, checkingFeed = showResult, false
+		manual = showResult
 		state.Unlock()
-		if checking != nil {
-			checking.Close()
-		}
-		switch {
-		case errors.Is(err, mygo.ErrUpdatesDisabled):
-			if manual {
+		if err != nil || update == nil {
+			if !manual {
+				return
+			}
+			switch {
+			case errors.Is(err, mygo.ErrUpdatesDisabled):
 				message("此安装无法应用内更新", "请将 Ferry Drive 安装到可写入的位置，或从发布页获取新版。")
-			}
-			return
-		case err != nil:
-			if manual {
+			case err != nil:
 				message("检查更新失败", err.Error())
-			}
-			return
-		case update == nil:
-			if manual {
+			default:
 				message("已是最新版", "当前版本为 "+mygo.App.Version()+"。")
 			}
 			return
@@ -143,15 +138,16 @@ func updateCommand(ctx context.Context, window *mygo.Window, updateInstall *sync
 			case <-ctx.Done():
 				return
 			case <-timer.C:
+				delay := interval
 				values := settings.Values()
-				if values.DisableAutomaticUpdateChecks {
-					timer.Reset(interval)
-				} else if wait := time.Until(time.Unix(values.LastUpdateCheckUnix, 0).Add(interval)); wait > 0 {
-					timer.Reset(wait)
-				} else {
-					check(false)
-					timer.Reset(interval)
+				if !values.DisableAutomaticUpdateChecks {
+					if wait := time.Until(time.Unix(values.LastUpdateCheckUnix, 0).Add(interval)); wait > 0 {
+						delay = wait
+					} else {
+						check(false)
+					}
 				}
+				timer.Reset(delay)
 			}
 		}
 	}()
