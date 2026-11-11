@@ -196,8 +196,8 @@ C60 最新 Mac 安装包的单实例子场景通过。同一隔离配置下，�
 
 | 最新本地产物 | 校验 |
 | --- | --- |
-| `Ferry Drive.app` | CDHash `38ba36d48e5fce3f1fe9c2dd9dfe6b4f109e1b89` |
-| `ferry-drive-setup-5.0.0-amd64.exe` | SHA-256 `4b5695e4180cec21a705f443f86eea0fcad1e3f17a028a88b9953dc6909236fd` |
+| `Ferry Drive.app` | CDHash `530db7626549b0bfae37a98ef1052d6d7006c152` |
+| `ferry-drive-setup-5.0.0-amd64.exe` | SHA-256 `40cd44f09914b0cc845143a81d9a0b3966b6edff2af934f423b83137ebdd7ebd` |
 
 需求、实现一致性和系统行为的首轮 Review 已完成。已修正会话失效、应用前台通知、目录身份、整行投放、任务搜索和批量动作、完成下载定位、网络空闲等待、未完成文件清理、分享重试及 Windows 发布路径。修复后 `go test -race ./...`、MyGo vet、Windows x64 vet 和双端打包均通过，复审发现自动清理还需处理账号失效，补上原会话失效处理后通过对应竞态回归。
 
