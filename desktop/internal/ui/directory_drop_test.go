@@ -1,11 +1,50 @@
 package ui
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/egoist/mygo/transfer"
 	"github.com/egoist/mygo/ui"
 	"github.com/yjcdon/ferry-drive/desktop/internal/app"
+	"github.com/yjcdon/ferry-drive/desktop/internal/platform"
 )
+
+func TestDirectoryDropOpensMixedLocalItems(t *testing.T) {
+	dir := t.TempDir()
+	file := filepath.Join(dir, "中文 文件.txt")
+	folder := filepath.Join(dir, "中文 文件夹")
+	if err := os.WriteFile(file, []byte("upload sample"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(folder, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data, err := transfer.FileData(file, folder)
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := referencesFromDrop(transfer.Drop{Data: data})
+	if err != nil || len(items) != 2 {
+		t.Fatalf("drop produced %d references, error: %v", len(items), err)
+	}
+	for i, path := range []string{file, folder} {
+		access, err := platform.OpenLocalItem(items[i])
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer access.Close()
+		want, err := os.Stat(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, err := os.Stat(access.Reference.Path)
+		if err != nil || !os.SameFile(got, want) {
+			t.Fatalf("reference %d resolved to %q, want %q (error: %v)", i, access.Reference.Path, path, err)
+		}
+	}
+}
 
 func TestDirectoryDropUsesWholeFolderRow(t *testing.T) {
 	root := app.Quark.RootRef()
