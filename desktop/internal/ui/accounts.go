@@ -20,7 +20,7 @@ func (w *Workspace) accountMenu(menu *ui.Menu) {
 		menu.Item(entry.title + " · " + name).Disabled(true)
 		switch session.State {
 		case app.LoggedOut:
-			if menu.Item("登录").Chosen() {
+			if menu.Item("登录").ID(entry.id + ":login").Chosen() {
 				w.showLogin(provider)
 			}
 		case app.Checking:
@@ -29,20 +29,20 @@ func (w *Workspace) accountMenu(menu *ui.Menu) {
 			if session.Problem != "" {
 				menu.Item(session.Problem).Disabled(true)
 			}
-			if menu.Item("重新登录").Chosen() {
+			if menu.Item("重新登录").ID(entry.id + ":login").Chosen() {
 				w.showLogin(provider)
 			}
-			if session.State == app.AccountProblem && menu.Item("重试").Chosen() {
+			if session.State == app.AccountProblem && menu.Item("重试").ID(entry.id+":retry").Chosen() {
 				w.restoreAccount(provider)
 			}
 		}
-		if session.ID != "" && menu.Item("退出登录").Disabled(w.loginWindows[provider] != nil).Chosen() {
+		if session.ID != "" && menu.Item("退出登录").ID(entry.id+":logout:"+session.ID).Disabled(w.loginWindows[provider] != nil).Chosen() {
 			w.logoutProvider, w.confirmLogout = provider, true
 		}
 	}
 	if w.settings != nil {
 		menu.Separator()
-		if menu.Item("设置").Chosen() {
+		if menu.Item("设置").ID("settings").Chosen() {
 			w.showSettings()
 		}
 	}
