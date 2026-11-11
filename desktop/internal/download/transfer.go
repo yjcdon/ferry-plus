@@ -61,7 +61,8 @@ func (t *transfer) transfer(ctx context.Context, source *linkSource, connections
 	if response.StatusCode == http.StatusOK {
 		return t.transferWhole(ctx, response)
 	}
-	data, responseEntity, err := rangeData(response, start, end, size)
+	data := make([]byte, end-start)
+	responseEntity, err := rangeData(response, start, end, size, data)
 	if err != nil {
 		return err
 	}
@@ -141,11 +142,14 @@ func (t *transfer) transferRanges(ctx context.Context, source *linkSource, conne
 	size, knownEntity := t.record.Size, t.record.Entity
 	for range connections {
 		workers.Go(func() {
+			buffer := make([]byte, chunkSize)
 			for index := range jobs {
 				start, end := segmentBounds(index, size, chunkSize)
-				data, info, err := source.fetchRange(ctx, start, end, size, knownEntity)
+				data := buffer[:end-start]
+				info, err := source.fetchRange(ctx, start, end, size, knownEntity, data)
 				select {
 				case results <- segmentResult{index, data, info, err}:
+					// The coordinator writes data before it can send the next job.
 				case <-ctx.Done():
 					return
 				}

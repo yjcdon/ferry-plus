@@ -165,35 +165,33 @@ func (s *linkSource) request(ctx context.Context, link *Link, start, end, size i
 	return response, nil
 }
 
-func (s *linkSource) fetchRange(ctx context.Context, start, end, size int64, previous entity) ([]byte, entity, error) {
+func (s *linkSource) fetchRange(ctx context.Context, start, end, size int64, previous entity, data []byte) (entity, error) {
 	response, err := s.get(ctx, start, end, size, previous)
 	if err != nil {
-		return nil, entity{}, err
+		return entity{}, err
 	}
-	return rangeData(response, start, end, size)
+	return rangeData(response, start, end, size, data)
 }
 
-func rangeData(response *http.Response, start, end, size int64) ([]byte, entity, error) {
+// rangeData validates the response before reading it into the requested range's buffer.
+func rangeData(response *http.Response, start, end, size int64, data []byte) (entity, error) {
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusOK {
 		if response.ContentLength == size {
-			return nil, entity{}, errRangeUnsupported
+			return entity{}, errRangeUnsupported
 		}
-		return nil, entity{}, errors.New("分片下载响应忽略请求范围")
+		return entity{}, errors.New("分片下载响应忽略请求范围")
 	}
 	if err := validateRange(response, start, end, size); err != nil {
-		return nil, entity{}, err
+		return entity{}, err
 	}
-	info := responseEntity(response)
-	length := end - start
-	data := make([]byte, length)
 	if _, err := io.ReadFull(response.Body, data); err != nil {
-		return nil, entity{}, fmt.Errorf("下载分片响应体长度不足: %w", err)
+		return entity{}, fmt.Errorf("下载分片响应体长度不足: %w", err)
 	}
 	if err := expectEOF(response.Body); err != nil {
-		return nil, entity{}, err
+		return entity{}, err
 	}
-	return data, info, nil
+	return responseEntity(response), nil
 }
 
 func validateRange(response *http.Response, start, end, size int64) error {
