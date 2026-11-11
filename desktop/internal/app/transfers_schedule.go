@@ -277,6 +277,11 @@ func (t *Transfers) scheduleLocked() {
 		if len(t.active) > 0 {
 			return
 		}
+		for _, check := range t.uploadChecks {
+			if check.relativePath == "" { // Remote reconciliation uses the current proxy.
+				return
+			}
+		}
 		t.applyProxy()
 		t.applyProxy = nil
 	}

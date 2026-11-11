@@ -29,8 +29,9 @@ func TestCanceledUploadReconcilesBeforeRemovalWithoutResumingWorker(t *testing.T
 	records := &transferTestRecords{}
 	const id = "upload-to-cancel"
 	started := make(chan string, 1)
+	checking, releaseCheck := make(chan struct{}), make(chan struct{})
 	var runs, checks atomic.Int32
-	var pending atomic.Bool
+	var pending, proxyApplied atomic.Bool
 	runner := reconcileTestRunner{
 		uploadTestWorker: func(ctx context.Context, req core.UploadRequest, _ core.UploadProviders, progress func(core.UploadProgress)) (core.UploadResult, error) {
 			runs.Add(1)
@@ -43,11 +44,17 @@ func TestCanceledUploadReconcilesBeforeRemovalWithoutResumingWorker(t *testing.T
 			return core.UploadResult{}, ctx.Err()
 		},
 		pending: func(id string) (bool, error) { return pending.Load(), nil },
-		reconcile: func(_ context.Context, req core.UploadRequest, providers core.UploadProviders) ([]core.CanceledUploadItem, error) {
+		reconcile: func(ctx context.Context, req core.UploadRequest, providers core.UploadProviders) ([]core.CanceledUploadItem, error) {
 			if req.ID != id || req.Target.AccountID != owner.ID || providers.AccountID != owner.ID {
 				return nil, errors.New("wrong frozen account or task")
 			}
 			if checks.Add(1) == 1 {
+				close(checking)
+				select {
+				case <-releaseCheck:
+				case <-ctx.Done():
+					return nil, ctx.Err()
+				}
 				return nil, core.ErrUploadUnconfirmed
 			}
 			pending.Store(false)
@@ -86,8 +93,17 @@ func TestCanceledUploadReconcilesBeforeRemovalWithoutResumingWorker(t *testing.T
 	if err := restored.Resume(id); err == nil {
 		t.Fatal("resumed a canceled upload")
 	}
-	if err := restored.ReconcileCanceledUpload(t.Context(), id); !errors.Is(err, core.ErrUploadUnconfirmed) {
+	checked := make(chan error, 1)
+	go func() { checked <- restored.ReconcileCanceledUpload(t.Context(), id) }()
+	<-checking
+	restored.ChangeProxy(func() { proxyApplied.Store(true) })
+	appliedDuringCheck := proxyApplied.Load()
+	close(releaseCheck)
+	if err := <-checked; !errors.Is(err, core.ErrUploadUnconfirmed) {
 		t.Fatalf("first check = %v", err)
+	}
+	if appliedDuringCheck || !proxyApplied.Load() {
+		t.Fatal("the proxy should switch only after reconciliation returns")
 	}
 	waitTransferState(t, restored, id, TransferNeedsCheck)
 	if err := restored.ReconcileCanceledUpload(t.Context(), id); err != nil {

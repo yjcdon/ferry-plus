@@ -52,9 +52,13 @@ func (t *Transfers) ReconcileCanceledUpload(ctx context.Context, id string) erro
 	t.changed()
 	providers := core.UploadProviders{Baidu: check.session.Baidu, Quark: check.session.Quark, AccountID: check.session.ID}
 	items, err := inspector.ReconcileCanceledUpload(ctx, request, providers)
+	expired := ctx.Err() == nil && t.accounts.ExpireSession(check.provider, check.session, err)
 
 	t.mu.Lock()
 	defer t.finishUploadCheckLocked(id)
+	if expired {
+		return err
+	}
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
@@ -105,7 +109,7 @@ func (t *Transfers) beginCanceledUploadCheck(id string, cancel context.CancelFun
 		return core.UploadRequest{}, uploadCheck{}, errTransferMissing
 	}
 	job := t.jobs[index]
-	if t.suspended || t.active[id] != nil || t.uploadChecks[id].cancel != nil {
+	if t.suspended || t.applyProxy != nil || t.active[id] != nil || t.uploadChecks[id].cancel != nil {
 		return core.UploadRequest{}, uploadCheck{}, errors.New("请等待当前传输停止后再核对云端结果。")
 	}
 	if !job.CancellationRequested || job.State != TransferNeedsCheck || job.Upload == nil {
