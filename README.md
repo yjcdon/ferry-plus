@@ -15,7 +15,7 @@ Ferry Drive 是开源的百度网盘和夸克网盘桌面客户端，可在同�
 
 | 平台 | 下载和安装 |
 | --- | --- |
-| macOS 14+，Apple Silicon | 下载 `ferry-drive-5.0.0-darwin-arm64.tar.gz`，解压后将 **Ferry Drive.app** 拖入「应用程序」。本版使用 Apple Development 签名，尚未经过 Apple 公证。 |
+| macOS 14+，Apple Silicon | 下载 `ferry-drive-5.0.0-darwin-arm64.zip`，解压后将 **Ferry Drive.app** 拖入「应用程序」。本版使用 Apple Development 签名，尚未经过 Apple 公证。 |
 | Windows 10／11 x64 | 运行 `ferry-drive-setup-5.0.0-amd64.exe`，或解压 `ferry-drive-5.0.0-windows-amd64-portable.zip` 后运行 **Ferry Drive.exe**。网页登录需要 Microsoft Edge WebView2 Runtime。 |
 
 打开「账号与设置」，通过网盘网页登录。选择网盘后即可上传、下载或在传输列表中查看任务。
