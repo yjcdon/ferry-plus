@@ -92,7 +92,7 @@ func TestInlineRenameWaitsForCompositionBeforeSubmit(t *testing.T) {
 	}
 }
 
-func TestDirectoryF2OpensInlineRenameAndEscapeCancels(t *testing.T) {
+func TestDirectoryRenameFromF2AndRowMenu(t *testing.T) {
 	folder := app.RemoteEntry{
 		Ref:  app.RemoteRef{Provider: app.Baidu, ID: "11", Path: "/项目资料"},
 		Name: "项目资料", IsDirectory: true,
@@ -124,5 +124,14 @@ func TestDirectoryF2OpensInlineRenameAndEscapeCancels(t *testing.T) {
 	window.Key(0, ui.KeyEscape)
 	if f.edit != nil || f.busy || f.directory.Roots()[0].Name != "子文件.txt" {
 		t.Fatal("Escape 应取消重命名并保留原文件名")
+	}
+	if err := window.RightClick("子文件.txt"); err != nil {
+		t.Fatal(err)
+	}
+	if err := window.ChooseMenuItem("重命名"); err != nil {
+		t.Fatal(err)
+	}
+	if f.edit == nil || f.edit.text != "子文件.txt" {
+		t.Fatalf("行菜单未打开目标文件的重命名: %+v", f.edit)
 	}
 }
