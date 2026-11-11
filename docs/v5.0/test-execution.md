@@ -176,10 +176,12 @@ C60 最新 Mac 安装包的单实例子场景通过。同一隔离配置下，�
 
 以 `b45790a` 修正账号入口居中。原生渲染探针测得侧栏宽度为 180、200、300 点时，图标和文字整体的中心分别为 90、100、150 点。两端安装包重新生成并通过 SHA-256 校验。
 
+账号菜单操作标识修正后以 `850ad29` 生成两端安装包。界面竞态测试、MyGo vet、Windows x64 vet 与安装包校验通过。
+
 | 最新本地产物 | SHA-256 |
 | --- | --- |
-| `ferry-drive-5.0.0-arm64.dmg` | `3261eca92571d1aa64e4ceee0542370443acffdcdc3270b5c624bc04f9596a40` |
-| `ferry-drive-setup-5.0.0-amd64.exe` | `6bb6f1cb04b635600e41fc5e146593a5bd09b68c38aab5072f77fdfcfdd871c4` |
+| `ferry-drive-5.0.0-arm64.dmg` | `90d89e584dfa1cb46e3f8ef3ea19e8ec59bf3cc79f555f62dfb7509a6c56e9ba` |
+| `ferry-drive-setup-5.0.0-amd64.exe` | `72440e13a89e549f58fdfaf53d0ca0441bddf87e0d4632df01309560a889143e` |
 
 需求、实现一致性和系统行为的首轮 Review 已完成。已修正会话失效、应用前台通知、目录身份、整行投放、任务搜索和批量动作、完成下载定位、网络空闲等待、未完成文件清理、分享重试及 Windows 发布路径。修复后 `go test -race ./...`、MyGo vet、Windows x64 vet 和双端打包均通过，复审发现自动清理还需处理账号失效，补上原会话失效处理后通过对应竞态回归。
 
