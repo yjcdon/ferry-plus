@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8" standalone="yes"?><!-- sparkle-sign-warning:
+IMPORTANT: This file was signed by Sparkle. Any modifications to this file requires re-signing this file with generate_appcast or sign_update! The signed signature will be embedded at the end of this file.
+--><rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0"><channel><title>Ferry Plus</title><item><title>Ferry Plus 4.2.0</title><sparkle:version>4200</sparkle:version><sparkle:shortVersionString>4.2.0</sparkle:shortVersionString><sparkle:minimumSystemVersion>14.0.0</sparkle:minimumSystemVersion><sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements><pubDate>Sat, 07 Nov 2026 13:52:46 GMT</pubDate><description sparkle:format="markdown">- 支持在应用内检查、下载和安装更新，更新内容来自 GitHub。
+- 可在设置中开关自动检查更新。
+- 传输进行中保留已下载的更新，完成后可安装并重新启动。
+- 「设置 → 更新」显示本机的发布版本号。
+
+本版使用 Apple Development 签名，尚未经过 Apple 公证。首次启动下载的应用时，macOS 可能拦截，Homebrew 安装也会受到相同检查。
+</description><enclosure url="https://github.com/yjcdon/ferry-plus/releases/download/v4.2.0/Ferry-Plus-4.2.0-arm64.zip" length="4927930" type="application/octet-stream" sparkle:edSignature="N39tw4gAzWxelESmz9Q5PbRu6Alq09tKn2wOouQx0ztdckh+Gsyx0o9dEXB65Jh8VpdL3OkeWIE5XM9ZdPhlAg=="></enclosure></item></channel></rss><!-- sparkle-signatures:
+edSignature: 315UWUArY2cIQU2TTiXZIIETaRRxW0jrRe4ZgYgRPeeCE4JCrtRcTMIkDYh1FAdcagKMUoR/DdISVPrpNY4pAw==
+length: 1518
+-->
