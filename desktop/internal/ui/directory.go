@@ -30,7 +30,7 @@ type directoryView struct {
 
 var fileColumns = []ui.TableColumn{
 	{ID: "name", Title: "名称", Width: 320, MinWidth: 180, Sortable: true},
-	{ID: "modified", Title: "修改日期", Width: 200, MinWidth: 100, Sortable: true},
+	{ID: "modified", Title: "修改日期", Width: 200, MinWidth: 170, Sortable: true},
 	{ID: "size", Title: "大小", Width: 90, MinWidth: 60, Sortable: true, Align: ui.End},
 }
 
@@ -287,9 +287,9 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 		case 1:
 			text := "—"
 			if entry.ModifiedAt != nil {
-				text = entry.ModifiedAt.Local().Format("2006-01-02 15:04")
+				text = entry.ModifiedAt.Local().Format("2006-01-02 15:04:05")
 			}
-			ui.Text(c, text).SingleLine()
+			ui.Text(c, text).SingleLine().FontFeatures("tnum")
 		case 2:
 			text := "—"
 			if !entry.IsDirectory {
