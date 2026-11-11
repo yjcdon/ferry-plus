@@ -29,10 +29,13 @@ func (w *Workspace) directoryActions(c *ui.Context, f *directoryView, width floa
 	canDownload := canUpload && len(d.Selection()) > 0
 	canTrash := targetReady && !f.busy && len(d.Selection()) > 0
 	canRefresh := !f.busy && !d.Loading(d.Root())
-	if width >= 520 && w.jobs != nil && ui.Button(c, "上传").Disabled(!canUpload).Clicked() {
+	if width >= 520 && w.jobs != nil && ui.Button(c, "").Label("上传").Tooltip("上传文件或文件夹").Disabled(!canUpload).Children(func() {
+		ui.Icon(c, uploadIcon).FontSize(16).AccessHidden(true)
+		ui.Text(c, "上传").FontSize(12)
+	}).Clicked() {
 		w.chooseUpload(f, d.Root())
 	}
-	if width >= 520 && w.jobs != nil && ui.Button(c, "下载").Disabled(!canDownload).Clicked() {
+	if width >= 520 && w.jobs != nil && workspaceToolbarButton(c, "下载", downloadIcon).Disabled(!canDownload).Clicked() {
 		w.beginDownload(f, d.Selection())
 	}
 	if width < 700 {
@@ -52,10 +55,10 @@ func (w *Workspace) directoryActions(c *ui.Context, f *directoryView, width floa
 		}).Label("文件操作")
 		return
 	}
-	if ui.Button(c, "移到回收站").Disabled(!canTrash).Clicked() {
+	if workspaceToolbarButton(c, "移到回收站", trashIcon).Disabled(!canTrash).Clicked() {
 		w.prepareDirectoryDelete(f, d.Selection())
 	}
-	if ui.Button(c, "刷新").Disabled(!canRefresh).Clicked() {
+	if workspaceToolbarButton(c, "刷新", refreshIcon).Disabled(!canRefresh).Clicked() {
 		w.refreshDirectory(f)
 	}
 }

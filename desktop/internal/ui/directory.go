@@ -126,7 +126,7 @@ func (w *Workspace) directoryToolbar(c *ui.Context, f *directoryView, width floa
 			w.navigateDirectory(f, d.Up())
 		}
 		if len(trail) == 0 {
-			ui.Text(c, "根目录")
+			ui.Text(c, "根目录").FontSize(12).TextColor(c.Theme().TextMuted)
 		} else {
 			if ui.Button(c, "根目录").Clicked() {
 				w.navigateDirectory(f, d.Navigate(-1))
@@ -155,7 +155,8 @@ func (w *Workspace) directoryToolbar(c *ui.Context, f *directoryView, width floa
 		if w.accounts.Session(d.Provider()).State == app.LoggedIn {
 			w.directoryActions(c, f, width)
 		}
-	})
+	}).Height(36).Padding(0, 12).Background(c.Theme().Surface)
+	ui.Divider(c)
 }
 
 func (w *Workspace) directorySearch(c *ui.Context, f *directoryView) {
@@ -255,6 +256,14 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 		case 0:
 			content := ui.Row(c).Gap(6).AlignItems(ui.Center).Children(func() {
 				f.selectionCheckbox(c, row, entry.Name)
+				icon := documentIcon
+				if entry.IsDirectory {
+					icon = folderIcon
+				}
+				image := ui.Icon(c, icon).FontSize(16).AccessHidden(true).Shrink(0)
+				if !f.selection.Has(row) {
+					image.TextColor(c.Theme().TextMuted)
+				}
 				w.directoryNameCell(c, f, entry)
 			})
 			if entry.IsDirectory {
@@ -265,13 +274,19 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 			if entry.ModifiedAt != nil {
 				text = entry.ModifiedAt.Local().Format("2006-01-02 15:04")
 			}
-			ui.Text(c, text).SingleLine()
+			label := ui.Text(c, text).FontSize(12).SingleLine()
+			if !f.selection.Has(row) {
+				label.TextColor(c.Theme().TextMuted)
+			}
 		case 2:
 			text := "—"
 			if !entry.IsDirectory {
 				text = fileSize(entry.Size)
 			}
-			ui.Text(c, text).SingleLine().TextAlign(ui.End)
+			label := ui.Text(c, text).FontSize(12).SingleLine().TextAlign(ui.End)
+			if !f.selection.Has(row) {
+				label.TextColor(c.Theme().TextMuted)
+			}
 		}
 	}).Grow(1).MinHeight(0).Dividers(1, c.Theme().Border).
 		ContextMenu(func(m *ui.Menu) { w.directoryBackgroundMenu(f, m) })
