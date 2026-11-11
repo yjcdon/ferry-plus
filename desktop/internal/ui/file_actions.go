@@ -36,30 +36,33 @@ func (w *Workspace) directoryActions(c *ui.Context, f *directoryView) {
 	selection := d.Selection()
 	theme := c.Theme()
 	ui.Row(c).AlignItems(ui.Center).Height(32).Padding(0, 5).Radius(16).Border(1, theme.Border).Shrink(0).Children(func() {
-		if compactIconButton(c, "上传", uploadIcon, !canUpload).Tooltip("上传").Clicked() {
+		if compactIconButton(c, "上传", uploadIcon, !canUpload, false).Tooltip("上传").Clicked() {
 			w.chooseUpload(f, d.Root())
 		}
-		if compactIconButton(c, "下载", downloadIcon, !canUpload || len(selection) == 0).Tooltip("下载").Clicked() {
+		if compactIconButton(c, "下载", downloadIcon, !canUpload || len(selection) == 0, false).Tooltip("下载").Clicked() {
 			w.beginDownload(f, selection)
 		}
-		if compactIconButton(c, "移到回收站", trashIcon, !targetReady || f.busy || len(selection) == 0).Tooltip("移到回收站").Clicked() {
+		if compactIconButton(c, "移到回收站", trashIcon, !targetReady || f.busy || len(selection) == 0, false).Tooltip("移到回收站").Clicked() {
 			w.prepareDirectoryDelete(f, selection)
 		}
-		if compactIconButton(c, "刷新", refreshIcon, f.busy || d.Loading(d.Root())).Tooltip("刷新").Clicked() {
+		if compactIconButton(c, "刷新", refreshIcon, f.busy || d.Loading(d.Root()), false).Tooltip("刷新").Clicked() {
 			w.refreshDirectory(f)
 		}
 	})
 }
 
-func compactIconButton(c *ui.Context, label string, icon *ui.SVG, disabled bool) ui.Element {
+func compactIconButton(c *ui.Context, label string, icon *ui.SVG, disabled, selected bool) ui.Element {
 	theme := c.Theme()
 	button := ui.ButtonBase(c).Role(ui.RoleButton).Label(label).Size(26, 26).Radius(13).Disabled(disabled)
-	if button.Hovered() && !disabled {
-		button.Background(theme.SurfaceHover)
-	}
-	color := theme.Text
+	color, hover := theme.Text, theme.SurfaceHover
 	if disabled {
 		color = theme.TextMuted
+	}
+	if selected {
+		color, hover = theme.AccentText, theme.AccentText.Alpha(0.1)
+	}
+	if button.Hovered() && !disabled {
+		button.Background(hover)
 	}
 	return button.Children(func() {
 		ui.Icon(c, icon).FontSize(16).TextColor(color).AccessHidden(true)

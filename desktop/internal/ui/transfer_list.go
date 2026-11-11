@@ -136,21 +136,26 @@ var (
 
 func (w *Workspace) transferRow(c *ui.Context, job app.TransferJob, visible []app.TransferJob) {
 	theme := c.Theme()
+	selected := w.transfer.selection.Has(job.ID)
+	secondaryColor, errorColor := theme.TextMuted, theme.Danger
+	if selected {
+		secondaryColor, errorColor = theme.AccentText, theme.AccentText
+	}
 	icon := transferDownloadIcon
 	if job.Direction == app.TransferUpload {
 		icon = transferUploadIcon
 	}
 	ui.Row(c).Padding(6, 12).Gap(10).AlignItems(ui.Start).
 		ContextMenu(func(m *ui.Menu) { w.taskSelectionMenu(m, job, visible) }).Children(func() {
-		ui.Icon(c, icon).Size(22, 26).FontSize(20).TextColor(theme.TextMuted).Shrink(0).AccessHidden(true)
+		ui.Icon(c, icon).Size(22, 26).FontSize(20).TextColor(secondaryColor).Shrink(0).AccessHidden(true)
 		ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
 			ui.Row(c).AlignItems(ui.Center).Gap(4).Children(func() {
 				ui.Text(c, job.Title).FontWeight(600).SingleLine().Grow(1).MinWidth(0)
 				label, command := w.primaryTransferAction(job)
-				if command != nil && compactIconButton(c, label, transferPrimaryIcon(job), job.Stopping).Clicked() {
+				if command != nil && compactIconButton(c, label, transferPrimaryIcon(job), job.Stopping, selected).Clicked() {
 					w.transferCommand(command, job.ID)
 				}
-				compactIconButton(c, job.Title+" 的操作", transferMoreIcon, false).
+				compactIconButton(c, job.Title+" 的操作", transferMoreIcon, false, selected).
 					Menu(func(m *ui.Menu) { w.taskMenu(m, job) })
 			})
 			if job.Total > 0 && matchesTransferPage(job, 1) {
@@ -170,14 +175,14 @@ func (w *Workspace) transferRow(c *ui.Context, job app.TransferJob, visible []ap
 						}
 					}
 				}
-				ui.Text(c, summary).FontSize(theme.FontSize - 1).TextColor(theme.TextMuted).SingleLine()
+				ui.Text(c, summary).FontSize(theme.FontSize - 1).TextColor(secondaryColor).SingleLine()
 			})
 			if job.Error != "" {
-				ui.Text(c, job.Error).FontSize(theme.FontSize - 1).TextColor(theme.Danger).SingleLine()
+				ui.Text(c, job.Error).FontSize(theme.FontSize - 1).TextColor(errorColor).SingleLine()
 			}
 			if job.DuplicateOf != "" {
 				ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
-					ui.Text(c, "已有相同内容的上传").FontSize(theme.FontSize - 1).TextColor(theme.TextMuted)
+					ui.Text(c, "已有相同内容的上传").FontSize(theme.FontSize - 1).TextColor(secondaryColor)
 					if ui.Button(c, "查看原任务").Clicked() {
 						w.locateDuplicate(job.DuplicateOf)
 					}
