@@ -1,4 +1,4 @@
-cask "ferry-plus" do
+cask "ferry-drive" do
   version "5.0.0"
   sha256 "0b649f6ec84f509da321b0a97b2526d4be25798bf99007f3c6ca3c4473434a4a"
 

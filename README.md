@@ -20,12 +20,14 @@ Ferry Drive 是开源的百度网盘和夸克网盘桌面客户端，可在同�
 
 打开「账号与设置」，通过网盘网页登录。选择网盘后即可上传、下载或在传输列表中查看任务。
 
-macOS 也可以用 Homebrew 安装。已有 Tap 的用户运行 `brew update`，再运行 `brew upgrade --cask --greedy yjcdon/ferry-plus/ferry-plus`。
+macOS 也可以用 Homebrew 安装。
 
 ```sh
-brew tap yjcdon/ferry-plus https://github.com/yjcdon/ferry-drive
-brew install --cask yjcdon/ferry-plus/ferry-plus
+brew tap yjcdon/ferry-drive https://github.com/yjcdon/ferry-drive
+brew install --cask yjcdon/ferry-drive/ferry-drive
 ```
+
+如果已经通过旧 Tap 安装 `ferry-plus`，运行 `brew update` 和 `brew migrate --cask yjcdon/ferry-plus/ferry-plus`，再运行 `brew upgrade --cask --greedy yjcdon/ferry-plus/ferry-drive`。
 
 在「Ferry Drive → 检查更新」手动检查新版，或在「设置 → 更新」开关自动检查。应用会校验更新包签名，活动传输结束后可重启。Ferry Plus 4.2 用户可单独安装 Ferry Drive，5.0 使用独立的账号和任务数据。
 

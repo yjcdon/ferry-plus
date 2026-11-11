@@ -20,12 +20,14 @@ Ferry Drive is an open-source desktop client for Baidu Netdisk and Quark Drive. 
 
 Open the account menu and sign in on the provider’s web page. Select a drive to transfer files, and open Transfers to track progress.
 
-On macOS, you can also install with Homebrew. If you already use this tap, run `brew update`, then `brew upgrade --cask --greedy yjcdon/ferry-plus/ferry-plus`.
+On macOS, you can also install with Homebrew.
 
 ```sh
-brew tap yjcdon/ferry-plus https://github.com/yjcdon/ferry-drive
-brew install --cask yjcdon/ferry-plus/ferry-plus
+brew tap yjcdon/ferry-drive https://github.com/yjcdon/ferry-drive
+brew install --cask yjcdon/ferry-drive/ferry-drive
 ```
+
+If you installed `ferry-plus` from the old tap, run `brew update` and `brew migrate --cask yjcdon/ferry-plus/ferry-plus`, then run `brew upgrade --cask --greedy yjcdon/ferry-plus/ferry-drive`.
 
 Use the Ferry Drive menu to check for updates, or set automatic checks on the Update tab in Settings. The app verifies the update package signature before installation. Ferry Drive uses its own account and task data, so it can be installed alongside Ferry Plus 4.2.
 

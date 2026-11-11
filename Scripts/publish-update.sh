@@ -67,7 +67,9 @@ else:
 PY
 )"
     if [ "$status" = already-published ]; then
-        cmp Casks/ferry-plus.rb "$prepared/ferry-plus.rb"
+        if [ ! -f Casks/ferry-drive.rb ]; then
+            cmp Casks/ferry-plus.rb "$prepared/ferry-plus.rb"
+        fi
         cp updates/appcast.xml "$prepared/appcast.xml"
     fi
 fi
@@ -93,11 +95,16 @@ fi
 cd "$work/repository"
 mkdir -p updates
 cp "$prepared/appcast.xml" updates/appcast.xml
-cp "$prepared/ferry-plus.rb" Casks/ferry-plus.rb
-git add -- updates/appcast.xml Casks/ferry-plus.rb
+git add -- updates/appcast.xml
+if [ ! -f Casks/ferry-drive.rb ]; then
+    cp "$prepared/ferry-plus.rb" Casks/ferry-plus.rb
+    git add -- Casks/ferry-plus.rb
+fi
 if ! git diff --cached --quiet; then
     git commit -m "chore(release): 发布 $version 更新目录" -m 'AI: codex'
     git push origin HEAD:main
 fi
 
-gh release edit "$tag" --repo "$repo" --latest
+if [ ! -f Casks/ferry-drive.rb ]; then
+    gh release edit "$tag" --repo "$repo" --latest
+fi
