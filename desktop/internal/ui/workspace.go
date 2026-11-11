@@ -299,9 +299,10 @@ func (w *Workspace) sidebar(c *ui.Context, jobs []app.TransferJob) {
 		if w.accounts != nil {
 			ui.Divider(c)
 			ui.ButtonBase(c).Menu(w.accountMenu).Label("账号与设置").
-				FillWidth().Padding(6, 8).Gap(6).Children(func() {
-				ui.Text(c, "账号与设置")
-				ui.Text(c, "⌄").AccessHidden(true)
+				FillWidth().Height(44).Padding(0, 12).Gap(8).Tooltip("百度与夸克账号").Children(func() {
+				ui.Icon(c, accountIcon).FontSize(20).AccessHidden(true)
+				ui.Text(c, "账号与设置").SingleLine()
+				ui.Spacer(c)
 			})
 		}
 		if previous != w.preferences.Page {

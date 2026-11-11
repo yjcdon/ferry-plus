@@ -7,38 +7,44 @@ import (
 )
 
 func (w *Workspace) accountMenu(menu *ui.Menu) {
-	if w.settings != nil {
-		if menu.Item("设置…").Chosen() {
-			w.showSettings()
+	for index, entry := range providers {
+		if index > 0 {
+			menu.Separator()
 		}
-		menu.Separator()
-	}
-	for _, entry := range providers {
 		provider := app.Provider(entry.id)
 		session := w.accounts.Session(provider)
-		menu.Submenu(entry.title, func(m *ui.Menu) {
-			if session.Name != "" {
-				m.Item(session.Name).Disabled(true)
+		name := session.Name
+		if name == "" {
+			name = "待登录"
+		}
+		menu.Item(entry.title + " · " + name).Disabled(true)
+		switch session.State {
+		case app.LoggedOut:
+			if menu.Item("登录").Chosen() {
+				w.showLogin(provider)
 			}
-			switch session.State {
-			case app.LoggedOut:
-				if m.Item("登录").Chosen() {
-					w.showLogin(provider)
-				}
-			case app.Checking:
-				m.Item("正在校验").Disabled(true)
-			case app.Expired, app.AccountProblem:
-				if m.Item("重新登录").Chosen() {
-					w.showLogin(provider)
-				}
-				if session.State == app.AccountProblem && m.Item("重试").Chosen() {
-					w.restoreAccount(provider)
-				}
+		case app.Checking:
+			menu.Item("正在校验").Disabled(true)
+		case app.Expired, app.AccountProblem:
+			if session.Problem != "" {
+				menu.Item(session.Problem).Disabled(true)
 			}
-			if session.ID != "" && m.Item("退出登录").Disabled(w.loginWindows[provider] != nil).Chosen() {
-				w.logoutProvider, w.confirmLogout = provider, true
+			if menu.Item("重新登录").Chosen() {
+				w.showLogin(provider)
 			}
-		})
+			if session.State == app.AccountProblem && menu.Item("重试").Chosen() {
+				w.restoreAccount(provider)
+			}
+		}
+		if session.ID != "" && menu.Item("退出登录").Disabled(w.loginWindows[provider] != nil).Chosen() {
+			w.logoutProvider, w.confirmLogout = provider, true
+		}
+	}
+	if w.settings != nil {
+		menu.Separator()
+		if menu.Item("设置").Chosen() {
+			w.showSettings()
+		}
 	}
 }
 
