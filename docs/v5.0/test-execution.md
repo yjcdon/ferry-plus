@@ -20,7 +20,7 @@
 | T13 | 队列和任务界面已验证 | 持久化队列、范围筛选、任务状态、暂停继续、详情分页。源文件重选已接入，系统选择器联调与真实远端核对待验收。 |
 | T14 | 设置窗口已验证 | Mac 实际打开四类设置；存储测试覆盖范围、恢复、失败和代理凭据。业务代理已接入，活动任务配置随传输集成复测。 |
 | T15 | 桌面生命周期已接入 | Mac 验证隐藏后由第二次启动唤起、退出保存屏障、原生防休眠和剪贴板探针。系统通知许可和 Windows 实机待验证。 |
-| T16 | 两端已打包，Mac 已启动 | DMG 和 NSIS 安装包校验通过。当前 macOS 用拷贝安装探针启动并重启，Finder 安装交互和 macOS 14 待实测。 |
+| T16 | 两端已打包，Mac 已启动 | Mac App 签名和 NSIS 安装包校验通过。当前 macOS 用拷贝安装探针启动并重启，Finder 安装交互和 macOS 14 待实测。 |
 | T17 | 代表界面部分通过 | 原生侧栏、主窗、设置和传输详情已验证；完整状态对照、系统输入法和 VoiceOver 待实测。 |
 | T18 | 第一阶段验收进行中 | 三个视角已完成首轮审查并提交修复。锁屏期间完成隔离回归和重打包，真实双网盘闭环待桌面验收。 |
 
@@ -110,7 +110,7 @@ Mac 验证构建关闭主窗后继续运行，再次启动只唤起原窗口。�
 
 ## T16 安装包验证
 
-在 Mac 运行 `Scripts/build-v5.sh` 生成 Apple Silicon DMG 与 Windows x64 NSIS 安装包，并写入和校验 SHA-256。DMG 完整性与应用签名通过，Windows 应用二进制确认为 x86-64。NSIS 检测 WebView2 Runtime，缺失时可打开微软下载页。在 Mac 只读挂载 DMG，核对 Applications 链接，将应用拷到隔离目录后再次核对签名、版本和最低系统声明。以隔离配置直接启动拷出的程序，确认进程持续运行并锁定预期数据目录。签名为临时签名，Finder 安装交互、macOS 14 与 Windows 安装运行仍待对应实机验收。
+前期构建使用 Apple Silicon DMG 与 Windows x64 NSIS 安装包，并写入和校验 SHA-256。DMG 完整性与应用签名通过，Windows 应用二进制确认为 x86-64。NSIS 检测 WebView2 Runtime，缺失时可打开微软下载页。在 Mac 只读挂载 DMG，核对 Applications 链接，将应用拷到隔离目录后再次核对签名、版本和最低系统声明。以隔离配置直接启动拷出的程序，确认进程持续运行并锁定预期数据目录。签名为临时签名，Finder 安装交互、macOS 14 与 Windows 安装运行仍待对应实机验收。
 
 ## T17 侧栏传输分类对照
 
@@ -178,10 +178,12 @@ C60 最新 Mac 安装包的单实例子场景通过。同一隔离配置下，�
 
 账号菜单操作标识修正后以 `850ad29` 生成两端安装包。界面竞态测试、MyGo vet、Windows x64 vet 与安装包校验通过。
 
-| 最新本地产物 | SHA-256 |
+用户指定直接交付 Mac 应用。当前脚本生成 Apple Silicon `Ferry Drive.app` 和 Windows x64 NSIS 安装包。App 通过深度签名校验，Windows 安装包通过 SHA-256 校验。
+
+| 最新本地产物 | 校验 |
 | --- | --- |
-| `ferry-drive-5.0.0-arm64.dmg` | `90d89e584dfa1cb46e3f8ef3ea19e8ec59bf3cc79f555f62dfb7509a6c56e9ba` |
-| `ferry-drive-setup-5.0.0-amd64.exe` | `72440e13a89e549f58fdfaf53d0ca0441bddf87e0d4632df01309560a889143e` |
+| `Ferry Drive.app` | CDHash `aafe95b1e373f98b2e98c948a29d331e5d929fa0` |
+| `ferry-drive-setup-5.0.0-amd64.exe` | SHA-256 `574674f419ef452ebcf1e1bfb29475f56d8f2e3ff0adc90c8380b6911353aa3d` |
 
 需求、实现一致性和系统行为的首轮 Review 已完成。已修正会话失效、应用前台通知、目录身份、整行投放、任务搜索和批量动作、完成下载定位、网络空闲等待、未完成文件清理、分享重试及 Windows 发布路径。修复后 `go test -race ./...`、MyGo vet、Windows x64 vet 和双端打包均通过，复审发现自动清理还需处理账号失效，补上原会话失效处理后通过对应竞态回归。
 

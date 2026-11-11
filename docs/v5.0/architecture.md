@@ -179,7 +179,7 @@ Windows 本地下载遇到设备保留名、禁止字符或尾随点／空格等
 
 `go.mod` 和 `go.sum` 固定 MyGo 0.8.3 及实际依赖，使用已安装的 Go 1.27.3。项目内用固定版本 CLI 构建。构建目标为 `darwin/arm64` 与 `windows/amd64`，应用身份和 5.0 数据目录在配置中固定。
 
-macOS 生成 `.app` 与 `.dmg`，Windows 生成 `.exe` 与 NSIS 安装包，发布到对应 GitHub Release 并提供 SHA-256。安装过程检查 Windows 登录所需 WebView2 Runtime，缺失时引导安装官方运行时。代码签名按已有可用身份处理，并记录实际签名和公证状态。[MyGo 分发](https://mygo.egoist.dev/docs/distribution)
+macOS 交付签名的 `.app`，Windows 交付 NSIS 安装包和 SHA-256 校验文件。安装过程检查 Windows 登录所需 WebView2 Runtime，缺失时引导安装官方运行时。代码签名按已有可用身份处理，并记录实际签名和公证状态。[MyGo 分发](https://mygo.egoist.dev/docs/distribution)
 
 在装有 Go 和 NSIS（`makensis`）的 Mac 上，从仓库根目录运行：
 
@@ -187,9 +187,9 @@ macOS 生成 `.app` 与 `.dmg`，Windows 生成 `.exe` 与 NSIS 安装包，发�
 Scripts/build-v5.sh
 ```
 
-脚本在 `.build/ferry-drive/darwin-arm64/` 生成 DMG，在 `.build/ferry-drive/windows-amd64/` 生成 x64 安装包，并在各自目录生成 SHA-256 校验文件。默认使用 macOS 临时签名供本机验收。设置 `FERRY_CODESIGN_IDENTITY` 可选用本机已有的签名身份。公证状态单独记录。
+脚本在 `.build/ferry-drive/darwin-arm64/` 生成并校验 `Ferry Drive.app` 的签名，在 `.build/ferry-drive/windows-amd64/` 生成 x64 安装包及 SHA-256 校验文件。默认使用 macOS 临时签名供本机验收。设置 `FERRY_CODESIGN_IDENTITY` 可选用本机已有的签名身份。公证状态单独记录。
 
-Mac 安装时打开 DMG，把 Ferry Drive 拖到 Applications，再从 Applications 启动。Windows 运行 `ferry-drive-setup-5.0.0-amd64.exe` 安装，登录前按应用提示安装 x64 WebView2 Evergreen Runtime。离线环境使用微软提供的 x64 独立安装程序。首次启动使用独立的 5.0 配置目录。
+Mac 安装时将 `Ferry Drive.app` 拷贝到 Applications，再从 Applications 启动。Windows 运行 `ferry-drive-setup-5.0.0-amd64.exe` 安装，登录前按应用提示安装 x64 WebView2 Evergreen Runtime。离线环境使用微软提供的 x64 独立安装程序。首次启动使用独立的 5.0 配置目录。
 
 Windows 10 与 Windows 11 使用同一 x64 构建。系统 API 使用前核对最低版本，较新窗口样式等可选能力做可用性检测，核心路径在 Windows 10 实际运行。Go 官方最低要求包含 Windows 10，MyGo 文档列出 Windows 10/11 的原生渲染支持，兼容性还须核对所选依赖和实际 API。[Go 系统要求](https://go.dev/wiki/MinimumRequirements) · [MyGo 平台要求](https://github.com/egoist/mygo/blob/v0.8.3/docs/README.md)
 
