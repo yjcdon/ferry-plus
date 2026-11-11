@@ -40,6 +40,8 @@ type Result struct {
 	Path     string
 	Verified bool
 	Folder   platform.LocalReference
+	// CheckpointBytes is set on interruption when the partial state was saved.
+	CheckpointBytes *int64
 }
 
 type Link struct {
@@ -93,6 +95,7 @@ type transfer struct {
 	record   checkpoint
 	records  checkpointStore
 	file     *os.File
+	opened   bool
 	saved    time.Time
 	dirty    bool
 	done     int64
@@ -145,6 +148,10 @@ func (e *Engine) Run(ctx context.Context, req Request, resolve Resolve, progress
 	t := transfer{name: name, dir: dir, records: e.records, progress: progress}
 	file, err := t.run(ctx, req, rel, &linkSource{resolve: resolve, client: e.client})
 	if err != nil {
+		if t.opened && !t.dirty {
+			saved := max(t.done, t.record.WholeBytes)
+			return Result{CheckpointBytes: &saved}, err
+		}
 		return Result{}, err
 	}
 	return Result{
@@ -204,6 +211,7 @@ func (t *transfer) run(ctx context.Context, req Request, rel string, source *lin
 	if err := t.openPartial(); err != nil {
 		return "", err
 	}
+	t.opened = true
 	defer func() {
 		if t.file == nil {
 			return
@@ -221,6 +229,7 @@ func (t *transfer) run(ctx context.Context, req Request, rel string, source *lin
 			t.record.Chunks = nil
 			t.record.Full = false
 			t.record.WholeBytes = 0
+			t.done = 0
 			t.record.Entity = entity{}
 			t.dirty = true
 		}

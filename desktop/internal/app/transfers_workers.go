@@ -86,11 +86,13 @@ func mergeTransferItems(previous, updates []TransferItem) []TransferItem {
 	return items
 }
 
-func completedTotals(items []TransferItem) (done, total int64) {
+func transferTotals(items []TransferItem) (done, total int64) {
 	for _, item := range items {
 		total += item.Size
 		if item.Complete {
 			done += item.Size
+		} else {
+			done += item.CheckpointBytes
 		}
 	}
 	return done, total
@@ -156,7 +158,7 @@ func (t *Transfers) runDownload(ctx context.Context, worker *transferWorker) (st
 		if !allDownloadItemsVerified(req.Plan, items) {
 			return "没有删除网盘中的转存文件：没有全部文件的可信内容校验结果，已保留转存文件", nil
 		}
-		done, total := completedTotals(items)
+		done, total := transferTotals(items)
 		t.report(worker, "cleanup", done, total)
 		if err := t.checkAccount(worker); err != nil {
 			return "", err
@@ -197,7 +199,7 @@ func (t *Transfers) saveDownload(worker *transferWorker, req savedDownload, item
 	job := t.jobs[index]
 	job.Download = &req
 	job.Items = slices.Clone(items)
-	job.Done, job.Total = completedTotals(items)
+	job.Done, job.Total = transferTotals(items)
 	return t.replaceLocked(index, job)
 }
 
@@ -290,6 +292,9 @@ func (t *Transfers) downloadOne(ctx context.Context, worker *transferWorker, fol
 		Connections: connections, ExpectedMD5: expected, ExpectedSHA256: file.ExpectedSHA256,
 	}, resolve, progress)
 	if err != nil {
+		if result.CheckpointBytes != nil {
+			item.CheckpointBytes = *result.CheckpointBytes
+		}
 		return err
 	}
 	item.LocalPath, item.Verified = result.Path, result.Verified

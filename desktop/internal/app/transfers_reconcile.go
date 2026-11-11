@@ -75,7 +75,7 @@ func (t *Transfers) ReconcileCanceledUpload(ctx context.Context, id string) erro
 		})
 	}
 	job.Items = mergeTransferItems(job.Items, confirmedItems)
-	job.Done, job.Total = completedTotals(job.Items)
+	job.Done, job.Total = transferTotals(job.Items)
 	if err == nil {
 		job.State, job.Error = TransferCanceled, ""
 		clearCanceledUploadErrors(&job)

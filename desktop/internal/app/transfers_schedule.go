@@ -398,7 +398,7 @@ func (t *Transfers) run(ctx context.Context, worker *transferWorker) {
 	next := t.jobs[index]
 	if items != nil {
 		next.Items = mergeTransferItems(next.Items, items)
-		next.Done, next.Total = completedTotals(next.Items)
+		next.Done, next.Total = transferTotals(next.Items)
 	}
 	if warning != "" {
 		next.Warning = warning

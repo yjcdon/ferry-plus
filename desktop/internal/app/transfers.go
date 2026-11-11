@@ -71,18 +71,19 @@ type TransferJob struct {
 }
 
 type TransferItem struct {
-	RelativePath string
-	LocalPath    string
-	Remote       RemoteRef
-	Size         int64
-	Directory    bool
-	Complete     bool
-	Skipped      bool
-	Verified     bool
-	LocalReceipt downloadLocalReceipt `json:",omitzero"`
-	Trashed      bool                 `json:",omitempty"`
-	CanRebind    bool                 `json:",omitempty"`
-	Error        string
+	RelativePath    string
+	LocalPath       string
+	Remote          RemoteRef
+	Size            int64
+	CheckpointBytes int64 `json:",omitempty"`
+	Directory       bool
+	Complete        bool
+	Skipped         bool
+	Verified        bool
+	LocalReceipt    downloadLocalReceipt `json:",omitzero"`
+	Trashed         bool                 `json:",omitempty"`
+	CanRebind       bool                 `json:",omitempty"`
+	Error           string
 }
 
 func (j TransferJob) StatusText() string {

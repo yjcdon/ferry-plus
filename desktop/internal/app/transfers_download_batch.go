@@ -23,7 +23,7 @@ func downloadItemID(jobID string, index int) string {
 func (t *Transfers) runDownloadFiles(parent context.Context, worker *transferWorker, req savedDownload, items []TransferItem) error {
 	pending := make([]int, 0, len(items))
 	progress := make([]int64, len(items))
-	live, total := completedTotals(items)
+	live, total := transferTotals(items)
 	for i, item := range items {
 		if err := parent.Err(); err != nil {
 			return err
@@ -34,6 +34,7 @@ func (t *Transfers) runDownloadFiles(parent context.Context, worker *transferWor
 		}
 		if !item.Complete {
 			pending = append(pending, i)
+			progress[i] = item.CheckpointBytes
 		} else {
 			progress[i] = item.Size
 			if !item.Directory {
@@ -87,7 +88,7 @@ func (t *Transfers) runDownloadFiles(parent context.Context, worker *transferWor
 		close(results)
 	}()
 
-	var firstErr, barrierErr error
+	var firstErr, accountErr, barrierErr error
 	firstFailed := len(items)
 	for result := range results {
 		if barrierErr != nil {
@@ -97,15 +98,22 @@ func (t *Transfers) runDownloadFiles(parent context.Context, worker *transferWor
 		switch {
 		case err == nil:
 			item.Complete = true
+			item.CheckpointBytes = 0
 			report(i, item.Size)
 		case ctx.Err() != nil:
-			continue
+			if item.CheckpointBytes == items[i].CheckpointBytes {
+				continue
+			}
+			report(i, item.CheckpointBytes)
 		case errors.Is(err, ErrDirectorySessionChanged) || isLoginExpired(worker.job.Provider, err):
-			barrierErr = err
+			accountErr = err
 			cancel()
-			continue
+			if item.CheckpointBytes == items[i].CheckpointBytes {
+				continue
+			}
+			report(i, item.CheckpointBytes)
 		default:
-			report(i, 0)
+			report(i, item.CheckpointBytes)
 			item.Error = err.Error()
 			if i < firstFailed {
 				firstFailed = i
@@ -125,7 +133,7 @@ func (t *Transfers) runDownloadFiles(parent context.Context, worker *transferWor
 			}
 		}
 	}
-	return errors.Join(barrierErr, parent.Err(), firstErr)
+	return errors.Join(barrierErr, accountErr, parent.Err(), firstErr)
 }
 
 func (t *Transfers) runDownloadFile(ctx context.Context, worker *transferWorker, req savedDownload, index int,

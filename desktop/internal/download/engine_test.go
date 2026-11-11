@@ -25,6 +25,7 @@ type testRecords struct {
 	mu          sync.Mutex
 	values      map[string][]byte
 	failPublish bool
+	onSave      func(checkpoint)
 }
 
 func (r *testRecords) Read(key string, value any) error {
@@ -47,6 +48,9 @@ func (r *testRecords) Write(key string, value any) error {
 	data, err := json.Marshal(value)
 	if err == nil {
 		r.values[key] = data
+		if r.onSave != nil {
+			r.onSave(value.(checkpoint))
+		}
 	}
 	return err
 }
@@ -121,13 +125,13 @@ func TestResumeAfterCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
-	_, err := newEngine(records, server.Client()).Run(ctx, req, resolver(server.URL), func(done, _ int64) {
+	paused, err := newEngine(records, server.Client()).Run(ctx, req, resolver(server.URL), func(done, _ int64) {
 		if done == segmentSize(req.Size) {
 			cancel()
 		}
 	})
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("暂停结果 = %v", err)
+	if !errors.Is(err, context.Canceled) || paused.CheckpointBytes == nil || *paused.CheckpointBytes != segmentSize(req.Size) {
+		t.Fatalf("暂停结果 = %+v, %v", paused, err)
 	}
 
 	ignoreRange.Store(true)
@@ -142,6 +146,28 @@ func TestResumeAfterCancellation(t *testing.T) {
 		t.Fatalf("恢复结果 = %+v, %v", result, err)
 	}
 	requireFile(t, result.Path, data)
+}
+
+func TestPauseAfterFinalCheckpointBeforePublication(t *testing.T) {
+	data := []byte("完整下载内容")
+	req := testRequest(t, data)
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	records := newTestRecords()
+	records.onSave = func(saved checkpoint) {
+		if saved.Full {
+			cancel()
+		}
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(data)
+	}))
+	defer server.Close()
+
+	result, err := newEngine(records, server.Client()).Run(ctx, req, resolver(server.URL), nil)
+	if !errors.Is(err, context.Canceled) || result.Path != "" || result.CheckpointBytes == nil || *result.CheckpointBytes != req.Size {
+		t.Fatalf("发布前暂停结果 = %+v, %v", result, err)
+	}
 }
 
 func TestMalformedRangeDoesNotPublish(t *testing.T) {
