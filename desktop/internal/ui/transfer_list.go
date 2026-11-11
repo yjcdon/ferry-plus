@@ -128,33 +128,79 @@ func (w *Workspace) transferRows(c *ui.Context, jobs []app.TransferJob, index in
 	w.transferSummary(c, visible)
 }
 
+var (
+	transferUploadIcon   = workspaceIcon("M14 2H5v20h14V7l-5-5v5h5 M12 18v-7m-3 3 3-3 3 3")
+	transferDownloadIcon = workspaceIcon("M14 2H5v20h14V7l-5-5v5h5 M12 11v7m-3-3 3 3 3-3")
+	transferMoreIcon     = workspaceIcon("M5 12h.1m6.9 0h.1m6.9 0h.1")
+)
+
 func (w *Workspace) transferRow(c *ui.Context, job app.TransferJob, visible []app.TransferJob) {
-	ui.Row(c).Padding(10, 12).Gap(12).AlignItems(ui.Center).
+	theme := c.Theme()
+	icon := transferDownloadIcon
+	if job.Direction == app.TransferUpload {
+		icon = transferUploadIcon
+	}
+	ui.Row(c).Padding(6, 12).Gap(10).AlignItems(ui.Start).
 		ContextMenu(func(m *ui.Menu) { w.taskSelectionMenu(m, job, visible) }).Children(func() {
-		ui.Column(c).Grow(1).MinWidth(0).Gap(5).Children(func() {
-			ui.Text(c, job.Title).Bold().SingleLine().Tooltip(job.Title)
-			ui.Text(c, providerTitle(string(job.Provider))+" · "+job.StatusText()).
-				TextColor(c.Theme().TextMuted).SingleLine()
-			if job.DuplicateOf != "" {
-				ui.Text(c, "已有相同内容的上传").TextColor(c.Theme().TextMuted)
-			}
-			if job.Total > 0 {
+		ui.Icon(c, icon).Size(22, 26).FontSize(20).TextColor(theme.TextMuted).Shrink(0).AccessHidden(true)
+		ui.Column(c).Grow(1).MinWidth(0).Gap(3).Children(func() {
+			ui.Row(c).AlignItems(ui.Center).Gap(4).Children(func() {
+				ui.Text(c, job.Title).FontWeight(600).SingleLine().Tooltip(job.Title).Grow(1).MinWidth(0)
+				label, command := w.primaryTransferAction(job)
+				if command != nil && compactIconButton(c, label, transferPrimaryIcon(job), job.Stopping).Clicked() {
+					w.transferCommand(command, job.ID)
+				}
+				compactIconButton(c, job.Title+" 的操作", transferMoreIcon, false).
+					Menu(func(m *ui.Menu) { w.taskMenu(m, job) }).Tooltip("更多操作")
+			})
+			if job.Total > 0 && matchesTransferPage(job, 1) {
 				ui.Progress(c, min(1, float64(job.Done)/float64(job.Total))).
-					Label("传输进度").FillWidth()
+					Label("传输进度").Height(4).FillWidth()
+			}
+			summary := job.StatusText()
+			if job.BytesPerSecond > 0 {
+				summary += " · " + fileSize(job.BytesPerSecond) + "/s"
+			}
+			ui.Row(c).AlignItems(ui.Center).Gap(6).Children(func() {
+				if w.allProviders {
+					for _, provider := range providers {
+						if provider.id == string(job.Provider) {
+							ui.Image(c, provider.logo).Size(14, 14).Shrink(0).Label(provider.title).Tooltip(provider.title)
+							break
+						}
+					}
+				}
+				ui.Text(c, summary).FontSize(theme.FontSize - 1).TextColor(theme.TextMuted).SingleLine()
+			})
+			if job.Error != "" {
+				ui.Text(c, job.Error).FontSize(theme.FontSize - 1).TextColor(theme.Danger).SingleLine().Tooltip(job.Error)
+			}
+			if job.DuplicateOf != "" {
+				ui.Row(c).AlignItems(ui.Center).Gap(8).Children(func() {
+					ui.Text(c, "已有相同内容的上传").FontSize(theme.FontSize - 1).TextColor(theme.TextMuted)
+					if ui.Button(c, "查看原任务").Clicked() {
+						w.locateDuplicate(job.DuplicateOf)
+					}
+				})
 			}
 		})
-		if job.BytesPerSecond > 0 {
-			ui.Text(c, fileSize(job.BytesPerSecond)+"/s").SingleLine()
-		}
-		if job.DuplicateOf != "" && ui.Button(c, "查看原任务").Clicked() {
-			w.locateDuplicate(job.DuplicateOf)
-		}
-		label, command := w.primaryTransferAction(job)
-		if command != nil && ui.Button(c, label).Disabled(job.Stopping).Clicked() {
-			w.transferCommand(command, job.ID)
-		}
-		ui.MenuButton(c, "更多", func(m *ui.Menu) { w.taskMenu(m, job) }).Label(job.Title + " 的操作")
 	})
+}
+
+func transferPrimaryIcon(job app.TransferJob) *ui.SVG {
+	switch job.State {
+	case app.TransferCompleted:
+		return folderIcon
+	case app.TransferRunning, app.TransferQueued, app.TransferWaitingAccount:
+		return pauseIcon
+	case app.TransferPaused:
+		return resumeIcon
+	case app.TransferNeedsCheck:
+		if job.CancellationRequested {
+			return searchIcon
+		}
+	}
+	return refreshIcon
 }
 
 func (w *Workspace) primaryTransferAction(job app.TransferJob) (string, func(string) error) {

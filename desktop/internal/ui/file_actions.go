@@ -36,22 +36,22 @@ func (w *Workspace) directoryActions(c *ui.Context, f *directoryView) {
 	selection := d.Selection()
 	theme := c.Theme()
 	ui.Row(c).AlignItems(ui.Center).Height(32).Padding(0, 5).Radius(16).Border(1, theme.Border).Shrink(0).Children(func() {
-		if directoryActionButton(c, "上传", uploadIcon, !canUpload).Clicked() {
+		if compactIconButton(c, "上传", uploadIcon, !canUpload).Clicked() {
 			w.chooseUpload(f, d.Root())
 		}
-		if directoryActionButton(c, "下载", downloadIcon, !canUpload || len(selection) == 0).Clicked() {
+		if compactIconButton(c, "下载", downloadIcon, !canUpload || len(selection) == 0).Clicked() {
 			w.beginDownload(f, selection)
 		}
-		if directoryActionButton(c, "移到回收站", trashIcon, !targetReady || f.busy || len(selection) == 0).Clicked() {
+		if compactIconButton(c, "移到回收站", trashIcon, !targetReady || f.busy || len(selection) == 0).Clicked() {
 			w.prepareDirectoryDelete(f, selection)
 		}
-		if directoryActionButton(c, "刷新", refreshIcon, f.busy || d.Loading(d.Root())).Clicked() {
+		if compactIconButton(c, "刷新", refreshIcon, f.busy || d.Loading(d.Root())).Clicked() {
 			w.refreshDirectory(f)
 		}
 	})
 }
 
-func directoryActionButton(c *ui.Context, label string, icon *ui.SVG, disabled bool) ui.Element {
+func compactIconButton(c *ui.Context, label string, icon *ui.SVG, disabled bool) ui.Element {
 	theme := c.Theme()
 	button := ui.ButtonBase(c).Role(ui.RoleButton).Label(label).Tooltip(label).Size(26, 26).Radius(13).Disabled(disabled)
 	if button.Hovered() && !disabled {
