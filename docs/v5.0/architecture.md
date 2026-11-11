@@ -238,4 +238,4 @@ Go 应用通过 MyGo 的更新模块按平台读取 GitHub Release 清单，使�
 bash Scripts/build-v5.sh
 ```
 
-将两端 `update-*.json`、对应签名归档、Windows `.exe` 安装器和 macOS `install.sh` 上传到 Release 草稿，再用 `gh release edit drive-v<版本> --draft=false --latest=false` 发布。GitHub Latest 继续用于旧版 Sparkle 渠道。macOS 初次安装可解压归档取得 `.app`。
+将两端 `update-*.json`、对应签名归档、Windows `.exe` 安装器、Windows 免安装版 ZIP 和 macOS `install.sh` 上传到 Release 草稿，再用 `gh release edit drive-v<版本> --draft=false --latest=false` 发布。Windows 的 `.tar.gz` 归档由应用内更新使用。GitHub Latest 继续用于旧版 Sparkle 渠道。macOS 初次安装可解压归档取得 `.app`。

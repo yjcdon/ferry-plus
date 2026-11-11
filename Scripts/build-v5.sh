@@ -23,7 +23,9 @@ codesign --verify --deep --strict "$mac_app"
 printf '%s\n' "$mac_app"
 
 installer="ferry-drive-setup-$version-amd64.exe"
+portable="ferry-drive-$version-windows-amd64-portable.zip"
 cd "$output_dir/windows-amd64"
+zip -q -X "$portable" 'Ferry Drive.exe' .mygo-files
 shasum -a 256 "$installer" > "$installer.sha256"
 shasum -a 256 -c "$installer.sha256"
-printf '%s\n' "$PWD/$installer" "$PWD/$installer.sha256"
+printf '%s\n' "$PWD/$installer" "$PWD/$portable" "$PWD/$installer.sha256"

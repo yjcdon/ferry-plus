@@ -16,7 +16,7 @@ Ferry Drive is an open-source desktop client for Baidu Netdisk and Quark Drive. 
 | Platform | Download and install |
 | --- | --- |
 | macOS 14 or later, Apple Silicon | Extract `ferry-drive-5.0.0-darwin-arm64.tar.gz` and move **Ferry Drive.app** to Applications. This release uses an Apple Development signature and is awaiting Apple notarization. |
-| Windows 10 or 11 x64, preview | Run `ferry-drive-setup-5.0.0-amd64.exe`. Web sign-in requires the Microsoft Edge WebView2 Runtime. Testing on Windows hardware is pending. |
+| Windows 10 or 11 x64, preview | Run `ferry-drive-setup-5.0.0-amd64.exe`, or extract `ferry-drive-5.0.0-windows-amd64-portable.zip` and run **Ferry Drive.exe**. Web sign-in requires the Microsoft Edge WebView2 Runtime. Testing on Windows hardware is pending. |
 
 Open the account menu and sign in on the provider’s web page. Select a drive to transfer files, and open Transfers to track progress.
 
