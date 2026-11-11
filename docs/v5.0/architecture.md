@@ -232,10 +232,10 @@ Windows 10 与 Windows 11 使用同一 x64 构建。系统 API 使用前核对�
 
 Go 应用通过 MyGo 的更新模块按平台读取 GitHub Release 清单，使用内置 Ed25519 公钥验证更新归档。macOS 和 Windows 都使用原生更新界面。自动检查可在设置关闭，安装须经确认。正在传输时保留下载好的更新，完成后从「检查更新」重启。重启前复用传输保存屏障并释放 5.0 数据目录锁。
 
-发布版本以 `desktop/mygo.json` 为准，并在 `CHANGELOG.md` 写入对应版本。发布机提供与 `updates.publicKey` 配对的 `MYGO_UPDATER_PRIVATE_KEY`，私钥保存在受保护的发布环境中。发布前从干净的工作区构建，创建并推送指向该构建提交的 `drive-v<版本>` 标签。在仓库根目录运行签名构建。
+发布版本以 `desktop/mygo.json` 为准，并在 `CHANGELOG.md` 写入对应版本。发布机提供与 `updates.publicKey` 配对的 `MYGO_UPDATER_PRIVATE_KEY`，私钥保存在受保护的发布环境中。发布前从干净的工作区构建，创建并推送指向该构建提交的 `v<版本>` 标签。在仓库根目录运行签名构建。
 
 ```sh
 bash Scripts/build-v5.sh
 ```
 
-将两端 `update-*.json`、对应签名归档、Windows `.exe` 安装器、Windows 免安装版 ZIP 和 macOS `install.sh` 上传到 Release 草稿，再用 `gh release edit drive-v<版本> --draft=false --latest=false` 发布。Windows 的 `.tar.gz` 归档由应用内更新使用。GitHub Latest 继续用于旧版 Sparkle 渠道。macOS 初次安装可解压归档取得 `.app`。
+将两端 `update-*.json`、对应签名归档、Windows `.exe` 安装器、Windows 免安装版 ZIP 和 macOS `install.sh` 上传到 Release 草稿，再用 `gh release edit v<版本> --draft=false --latest` 发布。Windows 的 `.tar.gz` 归档由应用内更新使用。Ferry Drive 从 GitHub Latest 获取更新清单。Ferry Plus 4.x 继续使用独立的 Sparkle appcast。macOS 初次安装可解压归档取得 `.app`。

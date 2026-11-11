@@ -9,7 +9,8 @@ cask "ferry-plus" do
 
   livecheck do
     url :url
-    strategy :github_latest
+    regex(/^v(4\.\d+(?:\.\d+)*)$/i)
+    strategy :git
   end
 
   depends_on arch: :arm64

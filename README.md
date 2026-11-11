@@ -2,7 +2,7 @@
 
 Ferry Drive 是开源的百度网盘和夸克网盘桌面客户端，可在同一个原生窗口中管理文件、上传下载和处理分享链接。使用 Go 和 MyGo 构建，适用于 Apple Silicon Mac，并提供 Windows x64 预览版。
 
-[下载 5.0.0](https://github.com/yjcdon/ferry-plus/releases/tag/drive-v5.0.0) · [English](README.en.md) · [更新记录](CHANGELOG.md)
+[下载 5.0.0](https://github.com/yjcdon/ferry-plus/releases/tag/v5.0.0) · [English](README.en.md) · [更新记录](CHANGELOG.md)
 
 ## 功能
 
