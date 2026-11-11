@@ -97,13 +97,13 @@ func (w *Workspace) enqueueUpload(f *directoryView, target app.DirectoryTarget, 
 	}()
 }
 
-func (w *Workspace) directoryDrop(element ui.Element, f *directoryView, ref app.RemoteRef) {
+func (w *Workspace) directoryDrop(element ui.Element, f *directoryView, ref app.RemoteRef) bool {
 	if w.jobs == nil || f.busy {
-		return
+		return false
 	}
 	target, ready := f.directory.Target(ref)
 	if !ready {
-		return
+		return false
 	}
 	if drop, ok := ui.DropData(element, uploadDropOptions); ok {
 		f.busy = true
@@ -118,7 +118,10 @@ func (w *Workspace) directoryDrop(element ui.Element, f *directoryView, ref app.
 				}
 			})
 		}()
+		return false
 	}
+	_, over := ui.DataDragOver(element, uploadDropOptions)
+	return over
 }
 
 func (w *Workspace) draftDrop(element ui.Element) {

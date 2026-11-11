@@ -220,10 +220,14 @@ func (w *Workspace) directoryBody(c *ui.Context, f *directoryView) {
 	switch {
 	case len(roots) == 0 && strings.TrimSpace(f.query) != "":
 		empty := w.directoryEmpty(c, "试试其他关键词", searchIcon).ContextMenu(func(m *ui.Menu) { w.directoryBackgroundMenu(f, m) })
-		w.directoryDrop(empty, f, root)
+		if w.directoryDrop(empty, f, root) {
+			empty.Border(2, c.Theme().Accent)
+		}
 	case len(roots) == 0:
 		empty := w.directoryEmpty(c, "此目录为空", folderIcon).ContextMenu(func(m *ui.Menu) { w.directoryBackgroundMenu(f, m) })
-		w.directoryDrop(empty, f, root)
+		if w.directoryDrop(empty, f, root) {
+			empty.Border(2, c.Theme().Accent)
+		}
 	default:
 		w.directoryTable(c, f, roots)
 	}
@@ -258,6 +262,7 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 	beforeOpen := captureExpanded(f)
 	rows := makeDirectoryRows(entries)
 	var dropRows []directoryDropRow
+	dropContents := make(map[app.RemoteRef]ui.Element)
 	table := ui.OutlineTable(c, &f.outline, fileColumns, rows, f.children, func(row directoryRow, column int) {
 		if row.status {
 			if column == 0 {
@@ -277,6 +282,7 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 			})
 			if entry.IsDirectory {
 				dropRows = append(dropRows, directoryDropRow{row.ref, directoryDropRowBounds(c, content)})
+				dropContents[row.ref] = content
 			}
 		case 1:
 			text := "—"
@@ -293,7 +299,14 @@ func (w *Workspace) directoryTable(c *ui.Context, f *directoryView, entries []ap
 		}
 	}).Grow(1).MinHeight(0).Dividers(1, c.Theme().Border).
 		ContextMenu(func(m *ui.Menu) { w.directoryBackgroundMenu(f, m) })
-	w.directoryDrop(table, f, directoryTableDropTarget(c, table, dropRows, d.Root()))
+	dropTarget := directoryTableDropTarget(c, table, dropRows, d.Root())
+	if w.directoryDrop(table, f, dropTarget) {
+		if dropTarget == d.Root() {
+			table.Border(2, c.Theme().Accent)
+		} else {
+			dropContents[dropTarget].Background(c.Theme().Accent.Alpha(0.18)).Radius(4)
+		}
+	}
 
 	w.preferences.ColumnWidths = f.outline.List.Columns.Widths
 	if f.sort != beforeSort {
