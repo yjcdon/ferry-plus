@@ -328,7 +328,7 @@ func (w *Workspace) sidebar(c *ui.Context, jobs []app.TransferJob) {
 // workspaceStatusBar aligns the content footer with the account button.
 func workspaceStatusBar(c *ui.Context, content func()) {
 	ui.Divider(c)
-	ui.Toolbar(c, content).Height(workspaceFooterHeight)
+	ui.Toolbar(c, content).Height(workspaceFooterHeight).Padding(0, 12)
 }
 
 func (w *Workspace) content(c *ui.Context, width float32, jobs []app.TransferJob) {
