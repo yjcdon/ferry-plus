@@ -188,7 +188,7 @@ func (s *settingsWindow) updateSettings(c *ui.Context) {
 			return s.model.Update(func(v *app.SettingsValues) { v.DisableAutomaticUpdateChecks = !automatic })
 		}, nil, false)
 	}
-	if s.opts.CheckForUpdates != nil && ui.Button(c, "检查更新…").Clicked() {
+	if s.opts.CheckForUpdates != nil && ui.Button(c, "检查更新").Clicked() {
 		s.opts.CheckForUpdates()
 	}
 }

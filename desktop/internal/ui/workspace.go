@@ -181,7 +181,7 @@ func (w *Workspace) Menu(window *mygo.Window, checkForUpdates func()) *mygo.Menu
 	}
 	appMenu := &mygo.MenuItem{Label: "Ferry Drive", Submenu: []*mygo.MenuItem{
 		command("关于 Ferry Drive", "", w.showAbout),
-		command("检查更新…", "", checkForUpdates),
+		command("检查更新", "", checkForUpdates),
 	}}
 	if w.settings != nil {
 		appMenu.Submenu = append(appMenu.Submenu, command("设置…", "CmdOrCtrl+,", w.showSettings))

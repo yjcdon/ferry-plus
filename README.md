@@ -44,7 +44,7 @@ brew upgrade --cask yjcdon/ferry-plus/ferry-plus
 
 ## 应用内更新
 
-Ferry Drive 5.0 可从「Ferry Drive → 检查更新…」手动检查，也可在「设置 → 更新」开关自动检查。确认安装后会校验下载包签名。已有活动传输时，可在传输完成后再次点击「检查更新…」重启。5.0 发布使用独立的 `drive-v` 标签，详见[发布说明](docs/v5.0/architecture.md#ferry-drive-更新发布)。
+Ferry Drive 5.0 可从「Ferry Drive → 检查更新」手动检查，也可在「设置 → 更新」开关自动检查。确认安装后会校验下载包签名。已有活动传输时，可在传输完成后再次点击「检查更新」重启。5.0 发布使用独立的 `drive-v` 标签，详见[发布说明](docs/v5.0/architecture.md#ferry-drive-更新发布)。
 
 首次通过原渠道升级至 4.2.0 后，可在 Ferry Plus 菜单中检查更新，下载完成后安装并重新启动。设置中可开关自动检查更新。传输进行时，可在完成后安装已下载的更新。
 

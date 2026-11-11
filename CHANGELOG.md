@@ -3,7 +3,7 @@
 ## 5.0.0
 
 - Ferry Drive 使用 Go 和 MyGo 原生界面，支持 macOS Apple Silicon 和 Windows x64。
-- 从「Ferry Drive → 检查更新…」安装经过签名校验的新版，保存传输进度后重新启动。
+- 从「Ferry Drive → 检查更新」安装经过签名校验的新版，保存传输进度后重新启动。
 
 ## 4.2.0
 

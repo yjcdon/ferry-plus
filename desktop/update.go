@@ -18,14 +18,14 @@ func updateCommand(ctx context.Context, window *mygo.Window, updateInstall *sync
 	var state sync.Mutex
 	var busy, showResult bool
 	prepared := false
-	message := func(title, detail string) {
+	message := func(parent *mygo.Window, title, detail string) {
 		if ctx.Err() == nil {
 			_, _ = mygo.Dialog.Message(mygo.MessageOptions{
-				Parent: mygo.FocusedWindow(), Title: "Ferry Drive", Message: title, Detail: detail, Buttons: []string{"好"},
+				Parent: parent, Title: "Ferry Drive", Message: title, Detail: detail, Buttons: []string{"好"},
 			})
 		}
 	}
-	restartWhenIdle := func() {
+	restartWhenIdle := func(parent *mygo.Window) {
 		var waiting bool
 		mygo.RunOnMain(func() {
 			if ctx.Err() != nil {
@@ -37,7 +37,7 @@ func updateCommand(ctx context.Context, window *mygo.Window, updateInstall *sync
 			}
 		})
 		if waiting {
-			message("更新已下载", "传输完成后，再点一次「检查更新…」即可重新启动。")
+			message(parent, "更新已下载", "传输完成后，再点一次「检查更新」即可重新启动。")
 		}
 	}
 	check := func(manual bool) {
@@ -54,9 +54,10 @@ func updateCommand(ctx context.Context, window *mygo.Window, updateInstall *sync
 			busy = false
 			state.Unlock()
 		}()
+		parent := mygo.FocusedWindow()
 		if prepared {
 			if manual {
-				restartWhenIdle()
+				restartWhenIdle(parent)
 			}
 			return
 		}
@@ -85,11 +86,12 @@ func updateCommand(ctx context.Context, window *mygo.Window, updateInstall *sync
 			}
 			switch {
 			case errors.Is(err, mygo.ErrUpdatesDisabled):
-				message("此安装无法应用内更新", "请将 Ferry Drive 安装到可写入的位置，或从发布页获取新版。")
+				message(parent, "此安装无法应用内更新", "请将 Ferry Drive 安装到可写入的位置，或从发布页获取新版。")
 			case err != nil:
-				message("检查更新失败", err.Error())
+				log.Printf("检查更新: %v", err)
+				message(parent, "暂时无法检查更新", "更新服务当前不可用，请稍后再试。")
 			default:
-				message("已是最新版", "当前版本为 "+mygo.App.Version()+"。")
+				message(parent, "已是最新版", "当前版本为 "+mygo.App.Version()+"。")
 			}
 			return
 		}
@@ -105,7 +107,7 @@ func updateCommand(ctx context.Context, window *mygo.Window, updateInstall *sync
 			detail = string(notes) + "\n\n" + detail
 		}
 		choice, err := mygo.Dialog.Message(mygo.MessageOptions{
-			Parent: mygo.FocusedWindow(), Title: "Ferry Drive", Message: "发现新版本 " + update.Version,
+			Parent: parent, Title: "Ferry Drive", Message: "发现新版本 " + update.Version,
 			Detail:  detail,
 			Buttons: []string{"安装更新", "稍后"}, CancelButton: 1,
 		})
@@ -118,15 +120,16 @@ func updateCommand(ctx context.Context, window *mygo.Window, updateInstall *sync
 			progress.Close()
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
-			message("下载更新超时", "请检查网络连接后重试。")
+			message(parent, "下载更新超时", "请检查网络连接后重试。")
 			return
 		}
 		if err != nil {
-			message("安装更新失败", err.Error())
+			log.Printf("安装更新: %v", err)
+			message(parent, "安装更新失败", "请稍后重试，或从发布页下载安装。")
 			return
 		}
 		prepared = true
-		restartWhenIdle()
+		restartWhenIdle(parent)
 	}
 
 	go func() {
