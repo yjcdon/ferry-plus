@@ -54,20 +54,15 @@ var transferPages = []struct {
 }
 
 var (
-	sidebarIcon  = workspaceIcon("M3 5h18v14H3z M9 5v14 M5 8h2 M5 11h2")
-	detailsIcon  = workspaceIcon("M3 5h18v14H3z M15 5v14 M17 8h2 M17 11h2")
-	uploadIcon   = workspaceIcon("M12 16V3 M7 8l5-5 5 5 M4 15v6h16v-6")
-	downloadIcon = workspaceIcon("M12 3v13 M7 11l5 5 5-5 M4 15v6h16v-6")
-	trashIcon    = workspaceIcon("M3 6h18 M9 6V3h6v3 M6 6l1 15h10l1-15 M10 10v7 M14 10v7")
-	refreshIcon  = workspaceIcon("M20 7v5h-5 M20 12a8 8 0 1 0-2 6 M20 7v5")
-	documentIcon = workspaceIcon("M5 3h9l5 5v13H5z M14 3v6h5 M8 13h8 M8 17h6")
-	pauseIcon    = workspaceIcon("M9 5v14 M15 5v14")
-	resumeIcon   = workspaceIcon("M8 5l11 7-11 7z")
-	backIcon     = workspaceIcon("M14 6l-6 6 6 6")
-	warningIcon  = workspaceIcon("M12 3l10 17H2z M12 9v4 M12 16v.3")
-	folderIcon   = workspaceIcon("M3 6h7l2 2h9v11H3z")
-	searchIcon   = workspaceIcon("M16 10a6 6 0 1 1-12 0 6 6 0 1 1 12 0z M14.5 14.5l5 5")
-	accountIcon  = ui.MustParseSVG([]byte(`<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="9" r="3.5" fill="currentColor"/><path d="M5 19c1-3 3.5-4.5 7-4.5s6 1.5 7 4.5a10 10 0 0 1-14 0z" fill="currentColor"/></svg>`))
+	sidebarIcon = workspaceIcon("M3 5h18v14H3z M9 5v14 M5 8h2 M5 11h2")
+	detailsIcon = workspaceIcon("M3 5h18v14H3z M15 5v14 M17 8h2 M17 11h2")
+	pauseIcon   = workspaceIcon("M9 5v14 M15 5v14")
+	resumeIcon  = workspaceIcon("M8 5l11 7-11 7z")
+	backIcon    = workspaceIcon("M14 6l-6 6 6 6")
+	warningIcon = workspaceIcon("M12 3l10 17H2z M12 9v4 M12 16v.3")
+	folderIcon  = workspaceIcon("M3 6h7l2 2h9v11H3z")
+	searchIcon  = workspaceIcon("M16 10a6 6 0 1 1-12 0 6 6 0 1 1 12 0z M14.5 14.5l5 5")
+	accountIcon = ui.MustParseSVG([]byte(`<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="9" r="3.5" fill="currentColor"/><path d="M5 19c1-3 3.5-4.5 7-4.5s6 1.5 7 4.5a10 10 0 0 1-14 0z" fill="currentColor"/></svg>`))
 )
 
 func workspaceIcon(path string) *ui.SVG {
@@ -242,7 +237,7 @@ func (w *Workspace) View(c *ui.Context) {
 
 func workspaceToolbarButton(c *ui.Context, label string, icon *ui.SVG) ui.Element {
 	return ui.Button(c, "").Label(label).Tooltip(label).Children(func() {
-		ui.Icon(c, icon).FontSize(16).AccessHidden(true)
+		ui.Icon(c, icon).FontSize(18).AccessHidden(true)
 	})
 }
 
@@ -251,7 +246,7 @@ func (w *Workspace) sidebar(c *ui.Context, jobs []app.TransferJob) {
 	if c.TitleBar().Height > 0 {
 		top = 44
 	}
-	ui.Column(c).Fill().Background(c.Theme().Surface).Padding(top, 8, 8).Children(func() {
+	ui.Column(c).Fill().Padding(top, 8, 8).Children(func() {
 		previous := w.preferences.Page
 		ui.Sidebar(c, &w.preferences.Page, func() {
 			ui.SidebarSection(c, "网盘", nil, func() {
@@ -300,16 +295,10 @@ func (w *Workspace) sidebar(c *ui.Context, jobs []app.TransferJob) {
 					}
 				}
 			})
-		}).Grow(1).Background(c.Theme().Surface).Padding(8, 0)
+		}).Grow(1).Background(c.Theme().Background)
 		if w.accounts != nil {
 			ui.Divider(c)
-			ui.Button(c, "").Menu(w.accountMenu).Label("账号与设置").Tooltip("账号与设置").
-				FillWidth().Height(32).BorderWidth(0).Children(func() {
-				ui.Icon(c, accountIcon).FontSize(16).TextColor(c.Theme().TextMuted).AccessHidden(true)
-				ui.Text(c, "账号与设置").FontSize(12)
-				ui.Spacer(c)
-				ui.Text(c, "⌄").TextColor(c.Theme().TextMuted).AccessHidden(true)
-			})
+			ui.MenuButton(c, "账号与设置", w.accountMenu)
 		}
 		if previous != w.preferences.Page {
 			if f := w.files[app.Provider(previous)]; f != nil {
@@ -351,7 +340,7 @@ func (w *Workspace) content(c *ui.Context, width float32, jobs []app.TransferJob
 			if workspaceToolbarButton(c, sidebar, sidebarIcon).Clicked() {
 				w.toggleSidebar()
 			}
-			ui.Text(c, title).FontSize(13).FontWeight(600).SingleLine()
+			ui.Text(c, title).Bold().SingleLine()
 			ui.Spacer(c)
 			if f := w.files[app.Provider(w.preferences.Page)]; f != nil && w.accounts.Session(f.directory.Provider()).State == app.LoggedIn {
 				w.directorySearch(c, f)
@@ -382,7 +371,7 @@ func (w *Workspace) content(c *ui.Context, width float32, jobs []app.TransferJob
 					w.toggleDetails(windowWidth)
 				}
 			}
-		}).Height(44).Padding(0, 12, 0, titlePadding).Background(c.Theme().Surface).DragWindow()
+		}).Height(48).Padding(0, 8, 0, titlePadding).DragWindow()
 		if index < 0 {
 			w.fileLanding(c, title, width)
 			return
