@@ -207,13 +207,21 @@ func TestUploadFolderRebindAndResumeOnlyReadback(t *testing.T) {
 	if err := os.WriteFile(wrong, []byte("HELLO"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := uploader.RebindSource(t.Context(), req.ID, relative, platform.LocalReference{Path: wrong}); !errors.Is(err, ErrUploadSourceChanged) {
+	wrongSource, err := platform.RememberLocalItem(wrong)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := uploader.RebindSource(t.Context(), req.ID, relative, wrongSource); !errors.Is(err, ErrUploadSourceChanged) {
 		t.Fatalf("same-size incorrect source accepted: %v", err)
 	}
 	if string(records.data[key]) != originalManifest || string(records.data[receiptKey]) != originalReceipt {
 		t.Fatal("failed reselection modified a checkpoint")
 	}
-	if err := uploader.RebindSource(t.Context(), req.ID, relative, platform.LocalReference{Path: moved}); err != nil {
+	replacement, err := platform.RememberLocalItem(moved)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := uploader.RebindSource(t.Context(), req.ID, relative, replacement); err != nil {
 		t.Fatal(err)
 	}
 	if string(records.data[key]) == originalManifest || string(records.data[receiptKey]) != originalReceipt {
