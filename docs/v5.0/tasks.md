@@ -1,6 +1,6 @@
 # Ferry Drive 5.0 任务清单
 
-日期为 2026-11-10。依据 [产品方案](product-proposal.md) 和 [技术方案](architecture.md)，对应 [测试用例](test-cases.md)。以下任务均待实施，已完成的临时示例构建仅作为工具链证据。
+日期为 2026-11-10。依据 [产品方案](product-proposal.md) 和 [技术方案](architecture.md)，对应 [测试用例](test-cases.md)。实施和验收状态见[测试执行记录](test-execution.md)。
 
 ## 1. 执行与完成规则
 
