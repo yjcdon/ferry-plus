@@ -298,7 +298,11 @@ func (w *Workspace) sidebar(c *ui.Context, jobs []app.TransferJob) {
 		}).Grow(1).Background(c.Theme().Background)
 		if w.accounts != nil {
 			ui.Divider(c)
-			ui.MenuButton(c, "账号与设置", w.accountMenu)
+			ui.ButtonBase(c).Menu(w.accountMenu).Label("账号与设置").
+				FillWidth().Padding(6, 8).Gap(6).Children(func() {
+				ui.Text(c, "账号与设置")
+				ui.Text(c, "⌄").AccessHidden(true)
+			})
 		}
 		if previous != w.preferences.Page {
 			if f := w.files[app.Provider(previous)]; f != nil {
