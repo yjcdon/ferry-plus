@@ -1,16 +1,15 @@
 cask "ferry-plus" do
-  version "4.2.0"
-  sha256 "109ffc7296e0a809971a2009d64ad1839505ba04e5149baabe73458e44d3ce17"
+  version "5.0.0"
+  sha256 "0b649f6ec84f509da321b0a97b2526d4be25798bf99007f3c6ca3c4473434a4a"
 
-  url "https://github.com/yjcdon/ferry-plus/releases/download/v#{version}/Ferry-Plus-#{version}-arm64.zip"
-  name "Ferry Plus"
+  url "https://github.com/yjcdon/ferry-drive/releases/download/v#{version}/ferry-drive-#{version}-darwin-arm64.tar.gz"
+  name "Ferry Drive"
   desc "File transfer client for Baidu Netdisk and Quark Drive"
-  homepage "https://github.com/yjcdon/ferry-plus"
+  homepage "https://github.com/yjcdon/ferry-drive"
 
   livecheck do
     url :url
-    regex(/^v(4\.\d+(?:\.\d+)*)$/i)
-    strategy :git
+    strategy :github_latest
   end
 
   depends_on arch: :arm64
@@ -18,5 +17,5 @@ cask "ferry-plus" do
 
   auto_updates true
 
-  app "Ferry Plus.app"
+  app "Ferry Drive.app"
 end

@@ -20,6 +20,13 @@ Ferry Drive is an open-source desktop client for Baidu Netdisk and Quark Drive. 
 
 Open the account menu and sign in on the provider’s web page. Select a drive to transfer files, and open Transfers to track progress.
 
+On macOS, you can also install with Homebrew. If you already use this tap, run `brew update`, then `brew upgrade --cask --greedy yjcdon/ferry-plus/ferry-plus`.
+
+```sh
+brew tap yjcdon/ferry-plus https://github.com/yjcdon/ferry-drive
+brew install --cask yjcdon/ferry-plus/ferry-plus
+```
+
 Use the Ferry Drive menu to check for updates, or set automatic checks on the Update tab in Settings. The app verifies the update package signature before installation. Ferry Drive uses its own account and task data, so it can be installed alongside Ferry Plus 4.2.
 
 ## Development and license
@@ -28,4 +35,4 @@ Use the Ferry Drive menu to check for updates, or set automatic checks on the Up
 
 Based on [Ferry / BaiduPCS-Swift](https://github.com/yiquncode/BaiduPCS-Swift), with Baidu API usage informed by [BaiduPCS-Go](https://github.com/qjfoidnh/BaiduPCS-Go). Licensed under the [Apache License 2.0](LICENSE).
 
-For the earlier macOS app and Homebrew installation, see [Ferry Plus 4.2.0](https://github.com/yjcdon/ferry-drive/releases/tag/v4.2.0).
+For the earlier macOS app, see [Ferry Plus 4.2.0](https://github.com/yjcdon/ferry-drive/releases/tag/v4.2.0).
