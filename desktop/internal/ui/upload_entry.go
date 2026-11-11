@@ -93,6 +93,7 @@ func (w *Workspace) enqueueUpload(f *directoryView, target app.DirectoryTarget, 
 			} else if draft {
 				w.uploadDraft = nil
 			}
+			w.refreshUploadDirectory(f)
 		})
 	}()
 }

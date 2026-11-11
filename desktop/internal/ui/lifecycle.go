@@ -136,6 +136,9 @@ func (w *Workspace) invalidateUploadDirectories(jobs []app.TransferJob) {
 			}
 		}
 	}
+	if f := w.files[app.Provider(w.preferences.Page)]; f != nil {
+		w.refreshUploadDirectory(f)
+	}
 }
 
 // ShowTransfer brings the exact notification task into the visible list.

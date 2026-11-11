@@ -399,7 +399,7 @@ func (w *Workspace) fileLanding(c *ui.Context, title string, width float32) {
 	provider := app.Provider(w.preferences.Page)
 	f := w.files[provider]
 	if f != nil {
-		w.ensureDirectory(f)
+		w.refreshUploadDirectory(f)
 		w.directoryToolbar(c, f, width)
 		w.uploadDraftBar(c, f)
 	} else {

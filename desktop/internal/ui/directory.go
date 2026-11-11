@@ -89,14 +89,21 @@ func (w *Workspace) AccountChanged(provider app.Provider) {
 
 func (w *Workspace) ensureDirectory(f *directoryView) {
 	d := f.directory
-	if f.refreshPending && !f.busy && f.edit == nil && !d.Loading(d.Root()) {
-		f.refreshPending = false
-		w.fetchDirectory(f, d.Refresh())
-		return
-	}
 	if !d.Loaded(d.Root()) && !d.Loading(d.Root()) && d.LoadError(d.Root()) == nil {
 		w.fetchDirectory(f, d.Refresh())
 	}
+}
+
+// refreshUploadDirectory starts a pending refresh as soon as the visible
+// directory is ready. A hidden page keeps the flag until it is opened.
+func (w *Workspace) refreshUploadDirectory(f *directoryView) {
+	d := f.directory
+	if !f.refreshPending || f.busy || f.edit != nil || d.Loading(d.Root()) ||
+		w.preferences.Page != string(d.Provider()) {
+		return
+	}
+	f.refreshPending = false
+	w.fetchDirectory(f, d.Refresh())
 }
 
 func (w *Workspace) fetchDirectory(f *directoryView, request *app.DirectoryRequest) {
@@ -109,6 +116,7 @@ func (w *Workspace) fetchDirectory(f *directoryView, request *app.DirectoryReque
 		w.window.Update(func() {
 			if f.directory.Apply(request, result) {
 				f.syncSelection()
+				w.refreshUploadDirectory(f)
 			}
 		})
 	}()
